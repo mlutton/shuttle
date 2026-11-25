@@ -5,16 +5,17 @@ linked into place, which fails if the name exists. So a record is whole or absen
 is written once, and the request record's claim is first one wins.
 """
 
+import contextlib
 import json
 import os
 
 
 def request_path(records_location, request_id):
-    return os.path.join(records_location, "%s.request.json" % request_id)
+    return os.path.join(records_location, f"{request_id}.request.json")
 
 
 def outcome_path(records_location, request_id):
-    return os.path.join(records_location, "%s.outcome.json" % request_id)
+    return os.path.join(records_location, f"{request_id}.outcome.json")
 
 
 class RecordNotBuilt(Exception):
@@ -34,7 +35,7 @@ def _put_whole(final, record, fault):
         text = json.dumps(record, indent=2) + "\n"
     except Exception as error:
         raise RecordNotBuilt(type(error).__name__) from error
-    temporary = "%s.tmp-%d" % (final, os.getpid())
+    temporary = f"{final}.tmp-{os.getpid()}"
     try:
         with open(temporary, "x", encoding="utf-8") as f:
             fault("write_temporary")
@@ -45,10 +46,8 @@ def _put_whole(final, record, fault):
         fault("put_in_place")
         os.link(temporary, final)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
     return final
 
 

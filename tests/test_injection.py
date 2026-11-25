@@ -106,7 +106,7 @@ class InjectionTables(unittest.TestCase):
     def outcome(self):
         path = os.path.join(self.records, "inj-1.outcome.json")
         self.assertTrue(
-            os.path.exists(path), "no outcome record; files: %s" % os.listdir(self.records)
+            os.path.exists(path), f"no outcome record; files: {os.listdir(self.records)}"
         )
         with open(path) as f:
             return json.load(f)

@@ -65,7 +65,7 @@ class RecordsFolder(unittest.TestCase):
                     else fixed.NONE
                 )
                 decision = {"ending": ending, "reason": reason, "failed_step": step}
-                receipt, back = self.write_and_read(decision, "e%d" % i)
+                receipt, back = self.write_and_read(decision, f"e{i}")
                 self.assertEqual(back["receipt"], receipt)
                 self.assertEqual(back["receipt"]["the_ending"]["ending"], ending)
                 self.assertEqual(core.check_receipt(back["receipt"]), [])
@@ -83,7 +83,7 @@ class RecordsFolder(unittest.TestCase):
                     )
                     decision = {"ending": ending, "reason": reason, "failed_step": step}
                     _, back = self.write_and_read(
-                        decision, "r-%s-%s" % (ending, reason.replace("_", "-"))
+                        decision, "r-{}-{}".format(ending, reason.replace("_", "-"))
                     )
                     self.assertEqual(back["receipt"]["the_ending"]["reason"], reason)
                     self.assertEqual(core.check_receipt(back["receipt"]), [])
@@ -98,7 +98,7 @@ class RecordsFolder(unittest.TestCase):
                         if step in fixed.STEPS_FOR_REASON[r]
                     )
                     decision = {"ending": ending, "reason": reason, "failed_step": step}
-                    _, back = self.write_and_read(decision, "s-%s" % step.replace("_", "-"))
+                    _, back = self.write_and_read(decision, "s-{}".format(step.replace("_", "-")))
                     self.assertEqual(back["receipt"]["the_ending"]["failed_step"], step)
                     self.assertEqual(core.check_receipt(back["receipt"]), [])
 
@@ -167,7 +167,7 @@ CASES = [
 def fail_at(point):
     def fault(reached):
         if reached == point:
-            raise OSError("injected at %s" % point)
+            raise OSError(f"injected at {point}")
 
     return fault
 
@@ -186,7 +186,7 @@ class WholeOrAbsent(unittest.TestCase):
         self,
     ):
         root = self.fresh_root()
-        for name, (filename, write) in WRITERS.items():
+        for name, (_filename, write) in WRITERS.items():
             with self.subTest(name):
                 self.assertRaises(
                     OSError, write, root, fail_at("flush")
@@ -196,7 +196,7 @@ class WholeOrAbsent(unittest.TestCase):
     def test_after_a_failure_at_each_point_nothing_is_under_a_real_name_and_no_temporary_file_is_left(
         self,
     ):
-        for name, filename, write, point, raises in CASES:
+        for name, _filename, write, point, raises in CASES:
             with self.subTest(writer=name, point=point):
                 root = self.fresh_root()
                 self.assertRaises(raises, write, root, fail_at(point))

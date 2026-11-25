@@ -165,7 +165,7 @@ class DecideEndingTable(unittest.TestCase):
                 self.assertEqual(core.decide_ending(given), expected)
 
     def test_every_row_is_consistent_with_the_fixed_list(self):
-        for name, given, expected in TABLE:
+        for name, _given, expected in TABLE:
             with self.subTest(name):
                 self.assertEqual(core.check_decision(expected), [])
 
@@ -236,10 +236,10 @@ class DecideEndingTable(unittest.TestCase):
         names = list(domain)
         count = 0
         for values in itertools.product(*(domain[n] for n in names)):
-            given = {n: v for n, v in zip(names, values) if v is not missing}
+            given = {n: v for n, v in zip(names, values, strict=True) if v is not missing}
             got = core.decide_ending(given)
             if core.check_decision(got):
-                self.fail("%r gave %r, which the list does not allow" % (given, got))
+                self.fail(f"{given!r} gave {got!r}, which the list does not allow")
             count += 1
         self.assertGreater(count, 100000)
 

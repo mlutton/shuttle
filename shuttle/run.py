@@ -11,6 +11,7 @@ The ending is decided by a total function, the receipt falls back to a minimal
 one, and a record that cannot be written is printed instead.
 """
 
+import contextlib
 import datetime
 import hashlib
 import json
@@ -27,7 +28,19 @@ _POLL_SECONDS = 0.05
 
 
 def _now():
-    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
+    return datetime.datetime.now(datetime.UTC).isoformat(timespec="milliseconds")
+
+
+def exit_facts(returncode):
+    """From a child's return code: (exit code, signal name). A kill by signal has no exit code."""
+    if returncode is None:
+        return None, None
+    if returncode < 0:
+        try:
+            return None, signal.Signals(-returncode).name
+        except ValueError:
+            return None, f"signal {-returncode}"
+    return returncode, None
 
 
 class Clock:
@@ -59,15 +72,11 @@ def end_child(process, grace=END_GRACE_SECONDS, clock=REAL_CLOCK):
     is a stand-in (step 9); only the direct child is ended here.
     """
     if process.poll() is None:
-        try:
+        with contextlib.suppress(OSError):
             process.terminate()
-        except OSError:
-            pass
         if not _exited_within(process, grace, clock):
-            try:
+            with contextlib.suppress(OSError):
                 process.kill()
-            except OSError:
-                pass
             if not _exited_within(process, grace, clock):
                 return "not_confirmed"
     return "ended"
@@ -92,8 +101,7 @@ def step_read_and_validate_document(state):
     except (OSError, ValueError) as error:
         facts["unreadable"] = True
         state["problem"] = (
-            "cannot read the input document as JSON (%s); nothing was done; give a readable JSON file"
-            % type(error).__name__
+            f"cannot read the input document as JSON ({type(error).__name__}); nothing was done; give a readable JSON file"
         )
         return
     state["raw"] = raw
@@ -101,8 +109,8 @@ def step_read_and_validate_document(state):
     checked = core.validate_document(raw)
     if checked["header_source"] is None:
         facts["unreadable"] = True
-        state["problem"] = (
-            "%s; nothing was done; fix the input document and run again" % checked["problem"]
+        state["problem"] = "{}; nothing was done; fix the input document and run again".format(
+            checked["problem"]
         )
         return
     facts["header_source"] = checked["header_source"]
@@ -175,7 +183,7 @@ def step_launch_executor(state):
     spec = command_driver.launch(state["raw"]["executor"]["settings"])
     environment = core.build_environment(state["raw"].get("environment", []), os.environ)
     state["started_at"] = _now()
-    state["clock_start"] = datetime.datetime.now(datetime.timezone.utc)
+    state["clock_start"] = datetime.datetime.now(datetime.UTC)
     state["stand_ins"]["boundary"] = stand_ins.start_in_boundary(spec, environment)
     state["facts"]["launch"] = "ok"
 
@@ -194,9 +202,9 @@ def step_wait_for_the_end(state):
     finally:
         if process.poll() is None:  # the wait itself broke: still end the child
             end_child(process, state["grace"], clock)
-    facts["exit_code"], facts["child_signal"] = core.exit_facts(process.returncode)
+    facts["exit_code"], facts["child_signal"] = exit_facts(process.returncode)
     state["executor_duration"] = (
-        datetime.datetime.now(datetime.timezone.utc) - state["clock_start"]
+        datetime.datetime.now(datetime.UTC) - state["clock_start"]
     ).total_seconds()
     state["ended_at"] = _now()
 
@@ -325,14 +333,13 @@ def guarded(name, step, state):
         facts.update(core.facts_after_error(name))
         failed = core.failed_step_after_error(name)
         if failed:
-            state["problems"][failed] = "the step %s failed (%s); nothing more can be said" % (
+            state["problems"][failed] = "the step {} failed ({}); nothing more can be said".format(
                 name.replace("_", " "),
                 type(error).__name__,
             )
         elif name == "read_and_validate_document":
             state["problem"] = (
-                "the input document could not be checked (%s); nothing was done"
-                % type(error).__name__
+                f"the input document could not be checked ({type(error).__name__}); nothing was done"
             )
 
 

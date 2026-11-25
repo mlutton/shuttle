@@ -4,7 +4,6 @@ Nothing here touches a file, the clock, the environment or a process.
 """
 
 import math
-import signal as signal_module
 
 from shuttle import fixed
 
@@ -58,6 +57,21 @@ def decide_ending(facts):
 
 
 def _decide(f):
+    before = _decide_before_launch(f)
+    if before is not None:
+        return before
+    launch = f.get("launch")
+    if launch == "failed":
+        return _decision(_CNS, "launch_failed", "launch")
+    if launch == "stopped_before":
+        return _decision(_CNS, "stopped")
+    if launch != "ok":
+        return _before_launch_error("launch")
+    return _decide_after_launch(f)
+
+
+def _decide_before_launch(f):
+    """The decision when a step before the launch refused or failed, else None."""
     claim = f.get("id_claim", "ok")
     if claim == "used":
         return _decision(_CNS, "request_id_used", "id_claim")
@@ -87,30 +101,25 @@ def _decide(f):
         if value in bad:
             return _decision(_CNS, bad[value], step)
         return _before_launch_error(step)
-    launch = f.get("launch")
-    if launch == "failed":
-        return _decision(_CNS, "launch_failed", "launch")
-    if launch == "stopped_before":
-        return _decision(_CNS, "stopped")
-    if launch != "ok":
-        return _before_launch_error("launch")
+    return None
+
+
+def _decide_after_launch(f):
     wait = f.get("wait")
     if wait not in _WAIT:
         return _after_launch_error()
-    if wait == "error":
-        return _decision(_EF, "stop_not_confirmed", "stop_not_confirmed")
-    if f.get("stop") == "not_confirmed":
+    if wait == "error" or f.get("stop") == "not_confirmed":
         return _decision(_EF, "stop_not_confirmed", "stop_not_confirmed")
     if f.get("stop") != "confirmed":
         return _after_launch_error()
-    if f.get("closing_freeze") == "failed":
-        return _decision(_EF, "closing_freeze_failed", "closing_freeze")
-    if f.get("closing_freeze") != "ok":
-        return _after_launch_error()
-    if f.get("delivery") == "failed":
-        return _decision(_EF, "delivery_failed", "delivery")
-    if f.get("delivery") != "ok":
-        return _after_launch_error()
+    for step, failed_reason in (
+        ("closing_freeze", "closing_freeze_failed"),
+        ("delivery", "delivery_failed"),
+    ):
+        if f.get(step) == "failed":
+            return _decision(_EF, failed_reason, step)
+        if f.get(step) != "ok":
+            return _after_launch_error()
     if wait == "time_limit":
         return _decision("time_limit", "time_limit")
     if wait == "stop_record":
@@ -129,24 +138,24 @@ def check_decision(decision):
     reason = decision.get("reason")
     step = decision.get("failed_step")
     if ending not in fixed.ENDINGS:
-        return ["ending %r is not on the list" % (ending,)]
+        return [f"ending {ending!r} is not on the list"]
     reasons = fixed.REASONS_BY_ENDING[ending]
     if reason == fixed.NONE:
-        problems = ["ending %s needs a reason" % ending] if reasons else []
+        problems = [f"ending {ending} needs a reason"] if reasons else []
         if step != fixed.NONE:
-            problems.append("failed step %r needs a reason" % (step,))
+            problems.append(f"failed step {step!r} needs a reason")
         return problems
     if reason not in reasons:
-        return ["reason %r does not belong to ending %s" % (reason, ending)]
+        return [f"reason {reason!r} does not belong to ending {ending}"]
     if step not in fixed.STEPS_FOR_REASON[reason]:
-        return ["failed step %r does not go with reason %s" % (step, reason)]
+        return [f"failed step {step!r} does not go with reason {reason}"]
     if step not in fixed.STEPS_BY_ENDING.get(ending, ()) and step not in (
         fixed.NONE,
         fixed.CANNOT_TELL,
     ):
-        return ["failed step %r does not belong to ending %s" % (step, ending)]
+        return [f"failed step {step!r} does not belong to ending {ending}"]
     if step == fixed.CANNOT_TELL and ending == _CNS:
-        return ["ending %s always names its step" % ending]
+        return [f"ending {ending} always names its step"]
     return []
 
 
@@ -154,7 +163,7 @@ def ending_conflicts(known, receipt):
     """Problems when a receipt's ending differs from the ending already known."""
     shown = receipt.get("the_ending", {})
     return [
-        "%s is %r in the receipt but %r was known" % (key, shown.get(key), known[key])
+        f"{key} is {shown.get(key)!r} in the receipt but {known[key]!r} was known"
         for key in ("ending", "reason", "failed_step")
         if shown.get(key) != known[key]
     ]
@@ -165,18 +174,6 @@ def reason_text(decision, problems):
     if decision["reason"] == fixed.NONE:
         return fixed.NONE
     return problems.get(decision["failed_step"]) or fixed.CANNOT_TELL
-
-
-def exit_facts(returncode):
-    """From a child's return code: (exit code, signal name). A kill by signal has no exit code."""
-    if returncode is None:
-        return None, None
-    if returncode < 0:
-        try:
-            return None, signal_module.Signals(-returncode).name
-        except ValueError:
-            return None, "signal %d" % -returncode
-    return returncode, None
 
 
 # ------------------------------------------------------------ the order of a run
@@ -317,8 +314,8 @@ def conclude(outcome):
         return {
             "stdout": [outcome["receipt_text"], outcome["decision"]["ending"]],
             "stderr": [
-                "shuttle: the outcome record was not written (%s); the receipt is printed below "
-                "and the ending stands" % outcome["problem"]
+                "shuttle: the outcome record was not written ({}); the receipt is printed below "
+                "and the ending stands".format(outcome["problem"])
             ],
             "exit": 1,
         }
@@ -329,14 +326,14 @@ def conclude(outcome):
         )
         return {
             "stdout": [outcome["decision"]["ending"]],
-            "stderr": ["shuttle: %s" % problem],
+            "stderr": [f"shuttle: {problem}"],
             "exit": 1,
         }
     problem = (
         outcome.get("problem")
         or "the input document could not be read far enough to start; nothing was done; fix it and run again"
     )
-    return {"stdout": ["none"], "stderr": ["shuttle: %s" % problem], "exit": 1}
+    return {"stdout": ["none"], "stderr": [f"shuttle: {problem}"], "exit": 1}
 
 
 # ------------------------------------------------------------------ the document
@@ -400,6 +397,92 @@ def _no_header(problem):
     return {"header_source": None, "refusal": None, "problem": problem}
 
 
+def _header_problem(raw):
+    """The problem that stops a header being formed from the document, or None."""
+    if not isinstance(raw, dict):
+        return "the document is not a JSON object"
+    if not _valid_request_id(raw.get("request_id")):
+        return "request_id is missing or is not 1 to 64 letters, digits, '-' or '_'"
+    for field in ("records_location", "thread", "kind"):
+        if not _text(raw.get(field)):
+            return f"{field} is missing or is not text"
+    if not _plain_int(raw.get("round")):
+        return "round is missing or is not an integer"
+    for field in ("parent_session", "asked_by"):
+        if field in raw and not _text(raw[field]):
+            return f"{field} is not text"
+    return None
+
+
+def _header_source(raw):
+    executor = raw.get("executor")
+    named = isinstance(executor, dict) and _text(executor.get("name"))
+    return {
+        "request_id": raw["request_id"],
+        "records_location": raw["records_location"],
+        "thread": raw["thread"],
+        "round": raw["round"],
+        "kind": raw["kind"],
+        "parent_session": raw.get("parent_session", fixed.NONE),
+        "asked_by": raw.get("asked_by", fixed.NONE),
+        "executor_name": executor["name"] if named else fixed.CANNOT_TELL,
+    }
+
+
+def _unknown_names(found, allowed):
+    return ", ".join(sorted(set(found) - set(allowed)))
+
+
+def _executor_refusal(executor):
+    """(reason, problem) when the executor part of the document is refused, else None."""
+    if not isinstance(executor, dict):
+        return "missing_setting", "executor is missing"
+    unknown = _unknown_names(executor, _EXECUTOR_FIELDS)
+    if unknown:
+        return "unknown_field", f"unknown field in executor: {unknown}"
+    if executor.get("name") != "command":
+        return "unknown_executor", "executor name must be 'command' (the command driver)"
+    settings = executor.get("settings")
+    if not isinstance(settings, dict):
+        return "missing_setting", "executor settings are missing"
+    unknown = _unknown_names(settings, _COMMAND_SETTINGS)
+    if unknown:
+        return "unknown_setting", f"unknown setting: {unknown}"
+    command, arguments = settings.get("command"), settings.get("arguments")
+    if not _text(command):
+        return "missing_setting", "setting 'command' is missing"
+    if not isinstance(arguments, list) or not all(isinstance(a, str) for a in arguments):
+        return "missing_setting", "setting 'arguments' is missing or not a list of text"
+    return None
+
+
+def _document_refusal(raw):
+    """(reason, problem) when a document whose header can be formed is refused, else None."""
+    if not _plain_int(raw.get("format_version")) or raw["format_version"] != fixed.FORMAT_VERSION:
+        return (
+            "unknown_format_version",
+            f"format_version must be the integer {fixed.FORMAT_VERSION}",
+        )
+    unknown = _unknown_names(raw, _DOCUMENT_FIELDS)
+    if unknown:
+        return "unknown_field", f"unknown field: {unknown}"
+    refusal = _executor_refusal(raw.get("executor"))
+    if refusal:
+        return refusal
+    if not _usable_time_limit(raw.get("time_limit_seconds")):
+        return (
+            "no_time_limit",
+            "time_limit_seconds is required and must be a number above zero and at most "
+            f"{_LONGEST_TIME_LIMIT_SECONDS}",
+        )
+    names = raw.get("environment", [])
+    if not isinstance(names, list) or not all(
+        _text(n) and all(c in _NAME_CHARACTERS for c in n) for n in names
+    ):
+        return "missing_setting", "environment must be a list of variable names"
+    return None
+
+
 def validate_document(raw):
     """Check an input document read from JSON.
 
@@ -408,84 +491,13 @@ def validate_document(raw):
     None too, because nothing can be recorded. Otherwise refusal is None for a
     good document or {"reason", "step"} for a refusal that gets recorded.
     """
-    if not isinstance(raw, dict):
-        return _no_header("the document is not a JSON object")
-    if not _valid_request_id(raw.get("request_id")):
-        return _no_header("request_id is missing or is not 1 to 64 letters, digits, '-' or '_'")
-    for field in ("records_location", "thread", "kind"):
-        if not _text(raw.get(field)):
-            return _no_header("%s is missing or is not text" % field)
-    if not _plain_int(raw.get("round")):
-        return _no_header("round is missing or is not an integer")
-    for field in ("parent_session", "asked_by"):
-        if field in raw and not _text(raw[field]):
-            return _no_header("%s is not text" % field)
-
-    executor = raw.get("executor")
-    header_source = {
-        "request_id": raw["request_id"],
-        "records_location": raw["records_location"],
-        "thread": raw["thread"],
-        "round": raw["round"],
-        "kind": raw["kind"],
-        "parent_session": raw.get("parent_session", fixed.NONE),
-        "asked_by": raw.get("asked_by", fixed.NONE),
-        "executor_name": executor["name"]
-        if isinstance(executor, dict) and _text(executor.get("name"))
-        else fixed.CANNOT_TELL,
-    }
-
-    if not _plain_int(raw.get("format_version")) or raw["format_version"] != fixed.FORMAT_VERSION:
-        return _refusal(
-            "unknown_format_version",
-            "format_version must be the integer %d" % fixed.FORMAT_VERSION,
-            header_source,
-        )
-    unknown = sorted(set(raw) - set(_DOCUMENT_FIELDS))
-    if unknown:
-        return _refusal("unknown_field", "unknown field: %s" % ", ".join(unknown), header_source)
-    if not isinstance(executor, dict):
-        return _refusal("missing_setting", "executor is missing", header_source)
-    unknown = sorted(set(executor) - set(_EXECUTOR_FIELDS))
-    if unknown:
-        return _refusal(
-            "unknown_field", "unknown field in executor: %s" % ", ".join(unknown), header_source
-        )
-    if executor.get("name") != "command":
-        return _refusal(
-            "unknown_executor",
-            "executor name must be 'command' (the command driver)",
-            header_source,
-        )
-    settings = executor.get("settings")
-    if not isinstance(settings, dict):
-        return _refusal("missing_setting", "executor settings are missing", header_source)
-    unknown = sorted(set(settings) - set(_COMMAND_SETTINGS))
-    if unknown:
-        return _refusal(
-            "unknown_setting", "unknown setting: %s" % ", ".join(unknown), header_source
-        )
-    command, arguments = settings.get("command"), settings.get("arguments")
-    if not _text(command):
-        return _refusal("missing_setting", "setting 'command' is missing", header_source)
-    if not isinstance(arguments, list) or not all(isinstance(a, str) for a in arguments):
-        return _refusal(
-            "missing_setting", "setting 'arguments' is missing or not a list of text", header_source
-        )
-    if not _usable_time_limit(raw.get("time_limit_seconds")):
-        return _refusal(
-            "no_time_limit",
-            "time_limit_seconds is required and must be a number above zero and at most %d"
-            % _LONGEST_TIME_LIMIT_SECONDS,
-            header_source,
-        )
-    names = raw.get("environment", [])
-    if not isinstance(names, list) or not all(
-        _text(n) and all(c in _NAME_CHARACTERS for c in n) for n in names
-    ):
-        return _refusal(
-            "missing_setting", "environment must be a list of variable names", header_source
-        )
+    problem = _header_problem(raw)
+    if problem:
+        return _no_header(problem)
+    header_source = _header_source(raw)
+    refusal = _document_refusal(raw)
+    if refusal:
+        return _refusal(refusal[0], refusal[1], header_source)
     return {"header_source": header_source, "refusal": None, "problem": None}
 
 
@@ -493,8 +505,7 @@ def parse_command_line(argv):
     """Turn the arguments after the program name into a form, or a one-line refusal."""
     if argv and argv[0] in ("check", "stop", "status"):
         return {
-            "refusal": "shuttle: the %s form is not built yet; only 'run <input document>' exists"
-            % argv[0]
+            "refusal": f"shuttle: the {argv[0]} form is not built yet; only 'run <input document>' exists"
         }
     if len(argv) == 2 and argv[0] == "run":
         return {"form": "run", "document_path": argv[1]}
@@ -507,13 +518,14 @@ def executor_driver_check(command, environment_names, caller_environment, tool_f
     if missing:
         return (
             "missing_setting",
-            "environment variable(s) %s named in the document are not set; set them or remove the names"
-            % ", ".join(missing),
+            "environment variable(s) {} named in the document are not set; set them or remove the names".format(
+                ", ".join(missing)
+            ),
         )
     if not tool_found:
         return (
             "tool_not_installed",
-            "the command %r was not found; install it or name one that exists" % command,
+            f"the command {command!r} was not found; install it or name one that exists",
         )
     return None, None
 
@@ -522,17 +534,16 @@ def claim_problem(kind, request_id, records_location, error_name):
     """The one line for a request id that could not be claimed."""
     if kind == "used":
         return (
-            "request id %r was already used; nothing was done; give the run a new request id"
-            % request_id
+            f"request id {request_id!r} was already used; nothing was done; give the run a new request id"
         )
     if kind == "not_built":
         return (
-            "the request record could not be built from the document (%s); nothing was done and "
-            "request id %r is NOT spent; fix the document and run again" % (error_name, request_id)
+            f"the request record could not be built from the document ({error_name}); nothing was done and "
+            f"request id {request_id!r} is NOT spent; fix the document and run again"
         )
     return (
-        "records_location %r cannot take the request record (%s); nothing was done and the request id is NOT spent; "
-        "name a folder that exists and can be written" % (records_location, error_name)
+        f"records_location {records_location!r} cannot take the request record ({error_name}); nothing was done and the request id is NOT spent; "
+        "name a folder that exists and can be written"
     )
 
 
@@ -692,18 +703,17 @@ def check_receipt(receipt):
     """Problems with a receipt, judged against the fixed list. Empty when fine."""
     problems = []
     if set(receipt) != set(fixed.RECEIPT_GROUPS):
-        return ["the receipt's groups are %s" % sorted(receipt)]
+        return [f"the receipt's groups are {sorted(receipt)}"]
     for group, names in fixed.RECEIPT_GROUPS.items():
         held = receipt[group]
         for name in sorted(set(names) - set(held)):
-            problems.append("%s: field %s is missing" % (group, name))
+            problems.append(f"{group}: field {name} is missing")
         for name in sorted(set(held) - set(names)):
-            problems.append("%s: field %s is not on the list" % (group, name))
+            problems.append(f"{group}: field {name} is not on the list")
         for name in names:
             if name in held and (held[name] is None or held[name] in ("", [], {})):
                 problems.append(
-                    "%s: field %s holds nothing; it must be a value, 'none' or 'cannot tell'"
-                    % (group, name)
+                    f"{group}: field {name} holds nothing; it must be a value, 'none' or 'cannot tell'"
                 )
     ending = receipt["the_ending"]
     if all(k in ending for k in ("ending", "reason", "failed_step")):

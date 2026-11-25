@@ -54,7 +54,7 @@ class CommandSeam(unittest.TestCase):
                     "arguments": [
                         self.script,
                         self.witness,
-                        os.path.join(self.records, "%s.request.json" % request_id),
+                        os.path.join(self.records, f"{request_id}.request.json"),
                         str(exit_code),
                     ],
                 },
@@ -145,7 +145,7 @@ class CommandSeam(unittest.TestCase):
             self.assertEqual(sorted(receipt[group]), sorted(names), group)
             for name in names:
                 value = receipt[group][name]
-                self.assertNotIn(value, (None, "", [], {}), "%s.%s" % (group, name))
+                self.assertNotIn(value, (None, "", [], {}), f"{group}.{name}")
         ending = receipt["the_ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
@@ -230,7 +230,8 @@ class CommandSeam(unittest.TestCase):
         import resource
 
         text = json.dumps(self.document())[:-1] + ', "note": "%s"}' % ("x" * 200000)
-        limit = lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (100000, 100000))
+        def limit():
+            return resource.setrlimit(resource.RLIMIT_FSIZE, (100000, 100000))
         path = os.path.join(self.root, "big.json")
         with open(path, "w") as f:
             f.write(text.replace('"note"', '"surprise"'))
@@ -269,7 +270,7 @@ class CommandSeam(unittest.TestCase):
     ):
         if not self.this_python_cannot_write_the_nesting():
             self.skipTest("this Python writes this nesting; the next test covers what happens then")
-        text = json.dumps(self.document())[:-1] + ', "surprise": %s}' % self.deep_nesting()
+        text = json.dumps(self.document())[:-1] + f', "surprise": {self.deep_nesting()}}}'
         done, lines = self.run_command(text)
         self.assertNotEqual(done.returncode, 0)
         self.assertEqual(lines[-1], "could_not_start")
@@ -289,7 +290,7 @@ class CommandSeam(unittest.TestCase):
             self.skipTest(
                 "this Python cannot write this nesting; the previous test covers what happens then"
             )
-        text = json.dumps(self.document())[:-1] + ', "surprise": %s}' % self.deep_nesting()
+        text = json.dumps(self.document())[:-1] + f', "surprise": {self.deep_nesting()}}}'
         done, lines = self.run_command(text)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
@@ -310,7 +311,7 @@ class CommandSeam(unittest.TestCase):
         """Pins behaviour that held before the change too; a race cannot be made to fail on demand."""
         paths = []
         for n in range(2):
-            path = os.path.join(self.root, "in%d.json" % n)
+            path = os.path.join(self.root, f"in{n}.json")
             with open(path, "w") as f:
                 json.dump(self.document(exit_code=n), f)
             paths.append(path)
@@ -368,7 +369,7 @@ class CommandSeam(unittest.TestCase):
             if os.path.exists(path) and os.path.getsize(path) > 0:
                 return
             time.sleep(0.05)
-        self.fail("%s never appeared" % path)
+        self.fail(f"{path} never appeared")
 
     def assert_process_gone(self, pid):
         end = time.time() + 5
@@ -378,7 +379,7 @@ class CommandSeam(unittest.TestCase):
             except ProcessLookupError:
                 return
             time.sleep(0.05)
-        self.fail("process %d is still running" % pid)
+        self.fail(f"process {pid} is still running")
 
     def sleeper(self):
         with open(self.script, "w") as f:

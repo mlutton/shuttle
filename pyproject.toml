@@ -10,8 +10,9 @@ target-version = "py312"
 select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "C901"]
 
 [tool.ruff.lint.mccabe]
-# As of 2026-11-25. See the pull request for the most complex functions at that date.
-max-complexity = 12
+# As of 2026-11-25: the most complex functions are _decide_before_launch and
+# _decide_after_launch (10 each); _decide (24) and validate_document (19) were split to get there.
+max-complexity = 10
 
 [tool.mypy]
 python_version = "3.12"

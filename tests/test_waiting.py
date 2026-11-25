@@ -129,7 +129,7 @@ class TheWaitStepGivesTheseFacts(unittest.TestCase):
         state.update(
             clock=clock,
             stand_ins={"boundary": {"process": process}},
-            clock_start=datetime.datetime.now(datetime.timezone.utc),
+            clock_start=datetime.datetime.now(datetime.UTC),
         )
         run.step_wait_for_the_end(state)
         return state["facts"], process
@@ -157,7 +157,7 @@ class TheWaitStepGivesTheseFacts(unittest.TestCase):
         self.assertNotIn("stop", facts)
         self.assertEqual([name for name, _ in process.calls], ["terminate", "kill"])
         self.assertEqual(
-            (facts["exit_code"], facts["child_signal"]), core.exit_facts(-signal.SIGKILL)
+            (facts["exit_code"], facts["child_signal"]), run.exit_facts(-signal.SIGKILL)
         )
 
     def test_a_limit_passing_in_the_grace_after_a_signal_changes_nothing(self):
