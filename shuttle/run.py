@@ -16,6 +16,7 @@ import datetime
 import hashlib
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -26,7 +27,7 @@ from types import FrameType
 from typing import Any, TextIO
 
 from shuttle import __version__, command_driver, core, fixed, records, stand_ins
-from shuttle.shapes import Conclusion, Decision, Facts, Receipt, State
+from shuttle.shapes import Conclusion, Decision, Facts, LaunchSpec, Receipt, State, StepResult
 
 # The deadline (the time limit) and this grace are stand-ins until the boundary owns the time limit.
 END_GRACE_SECONDS = 3  # as of 2026-11-25: seconds between asking a child to end and killing it; passed in by code, never read from the world
@@ -105,6 +106,29 @@ def wait_for_the_cause(
         clock.sleep(_POLL_SECONDS)
 
 
+def locate(settings: Mapping[str, Any]) -> bool:
+    """Shell: whether the command can be found and run. Returns True or False."""
+    try:
+        return shutil.which(settings["command"]) is not None
+    except (ValueError, OSError):
+        return False
+
+
+def start_in_boundary(launch_spec: LaunchSpec, environment: Mapping[str, str]) -> StepResult:
+    """Boundary: a plain child process, no containment yet. Raises when it cannot start.
+
+    A stand-in until the boundary is built; it is the shell's, because it starts a process.
+    """
+    process = subprocess.Popen(
+        launch_spec["argv"],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return {fixed.STAND_IN_KEY: "boundary", "process": process}
+
+
 def step_read_and_validate_document(state: State) -> None:
     facts = state["facts"]
     try:
@@ -170,7 +194,7 @@ def step_run_input_checks_and_executor_driver_check(state: State) -> None:
         settings["command"],
         state["raw"].get("environment", []),
         os.environ,
-        command_driver.locate(settings),
+        locate(settings),
     )
     if reason:
         state["facts"]["executor_driver_check"] = reason
@@ -197,7 +221,7 @@ def step_launch_executor(state: State) -> None:
     environment = core.build_environment(state["raw"].get("environment", []), os.environ)
     state["started_at"] = _now()
     state["clock_start"] = datetime.datetime.now(datetime.UTC)
-    state["stand_ins"]["boundary"] = stand_ins.start_in_boundary(spec, environment)
+    state["stand_ins"]["boundary"] = start_in_boundary(spec, environment)
     state["facts"]["launch"] = "ok"
 
 

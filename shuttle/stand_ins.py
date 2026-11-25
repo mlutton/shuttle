@@ -4,30 +4,16 @@ Each has the signature the real step will have and returns a marked value, so
 a receipt field fed by it says "cannot tell" instead of an invented value.
 """
 
-import subprocess
-from collections.abc import Mapping
 from typing import Any
 
 from shuttle import fixed
-from shuttle.shapes import LaunchSpec, StepResult
+from shuttle.shapes import StepResult
 
 
 def _stand_in(name: str, **extra: Any) -> StepResult:
     result = {fixed.STAND_IN_KEY: name}
     result.update(extra)
     return result
-
-
-def start_in_boundary(launch_spec: LaunchSpec, environment: Mapping[str, str]) -> StepResult:
-    """Boundary: a plain child process, no containment yet. Raises when it cannot start."""
-    process = subprocess.Popen(
-        launch_spec["argv"],
-        env=environment,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return _stand_in("boundary", process=process)
 
 
 def run_gates(gates: object) -> StepResult:

@@ -4,7 +4,6 @@ An executor driver offers four functions (check, launch, observe, declare) and
 its declarations as data. It never names an ending. There is no base class.
 """
 
-import shutil
 from collections.abc import Mapping
 from typing import Any
 
@@ -23,14 +22,6 @@ DECLARATIONS: dict[str, list[str]] = {
 
 def declare() -> dict[str, list[str]]:
     return DECLARATIONS
-
-
-def locate(settings: Mapping[str, Any]) -> bool:
-    """Shell: whether the command can be found and run. Returns True or False."""
-    try:
-        return shutil.which(settings["command"]) is not None
-    except (ValueError, OSError):
-        return False
 
 
 def check(settings: Mapping[str, Any], tool_found: bool) -> str | None:
