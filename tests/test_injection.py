@@ -12,6 +12,13 @@ import unittest
 
 from shuttle import core, run
 
+
+class QuickClock(run.Clock):
+    """Real time, but each poll waits a thousandth of a second, so a child that exits at once is seen at once."""
+
+    def sleep(self, seconds):
+        super().sleep(0.001)
+
 AFTER_THE_CLAIM = [name for name, _ in run.STEPS][2:14]   # steps 3 to 14
 CNS, EF = "could_not_start", "execution_failed"
 
@@ -67,7 +74,7 @@ class InjectionTables(unittest.TestCase):
 
     def run_it(self, steps=None, **kwargs):
         out, err = io.StringIO(), io.StringIO()
-        code = run.run(self.doc, out, err, steps=steps, **kwargs)
+        code = run.run(self.doc, out, err, steps=steps, clock=QuickClock(), **kwargs)
         return code, out.getvalue().splitlines(), err.getvalue()
 
     def use_script(self, code):

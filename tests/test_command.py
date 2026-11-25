@@ -300,37 +300,21 @@ class CommandSeam(unittest.TestCase):
         doc["executor"]["settings"]["arguments"] = [self.script, pid_file]
         return doc, pid_file
 
-    def test_an_interrupt_terminate_or_hangup_ends_the_script_and_still_writes_the_outcome_record(self):
-        for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-            with self.subTest(signal=number.name):
-                rid = "sig-%s" % number.name.lower()
-                doc, pid_file = self.sleeping_document(request_id=rid)
-                if os.path.exists(pid_file):
-                    os.remove(pid_file)
-                proc = self.spawn(doc, name="%s.json" % rid)
-                self.wait_for_file(pid_file)
-                with open(pid_file) as f:
-                    script_pid = int(f.read())
-                proc.send_signal(number)
-                stdout, stderr = proc.communicate(timeout=30)
-                self.assertEqual(proc.returncode, 0, stderr)
-                self.assertEqual(stdout.splitlines()[-1], "stopped_from_outside")
-                ending = self.read("%s.outcome.json" % rid)["receipt"]["the_ending"]
-                self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]),
-                                 ("stopped_from_outside", "signal", "none"))
-                self.assert_process_gone(script_pid)
-
-    def test_a_script_that_runs_past_the_time_limit_is_ended_and_the_ending_is_time_limit(self):
-        doc, pid_file = self.sleeping_document(time_limit_seconds=0.5)
-        started = time.time()
-        done, lines = self.run_command(doc)
-        self.assertLess(time.time() - started, 30)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(lines[-1], "time_limit")
-        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]), ("time_limit", "time_limit", "none"))
+    def test_a_terminate_sent_to_the_real_command_ends_the_script_and_still_writes_the_outcome_record(self):
+        """The one real-process signal test; the other signals and the order of events are by value in test_waiting.py."""
+        doc, pid_file = self.sleeping_document()
+        proc = self.spawn(doc)
+        self.wait_for_file(pid_file)
         with open(pid_file) as f:
-            self.assert_process_gone(int(f.read()))
+            script_pid = int(f.read())
+        proc.send_signal(signal.SIGTERM)
+        stdout, stderr = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, stderr)
+        self.assertEqual(stdout.splitlines()[-1], "stopped_from_outside")
+        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]),
+                         ("stopped_from_outside", "signal", "none"))
+        self.assert_process_gone(script_pid)
 
     def test_a_document_without_a_time_limit_is_refused_with_no_time_limit(self):
         doc = self.document()
