@@ -21,7 +21,7 @@ import uuid
 
 from shuttle import __version__, command_driver, core, fixed, records, stand_ins
 
-_END_GRACE_SECONDS = 3
+END_GRACE_SECONDS = 3   # as of 2026-11-25: seconds between asking a child to end and killing it; passed in by code, never read from the world
 _POLL_SECONDS = 0.05
 
 
@@ -29,17 +29,30 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
 
 
-def _exited_within(process, seconds):
-    deadline = time.monotonic() + seconds
+class Clock:
+    """The waiting seam: what time it is, and waiting. Everything in this file that waits goes through one."""
+
+    def now(self):
+        return time.monotonic()
+
+    def sleep(self, seconds):
+        time.sleep(seconds)
+
+
+REAL_CLOCK = Clock()
+
+
+def _exited_within(process, seconds, clock):
+    deadline = clock.now() + seconds
     while process.poll() is None:
-        if time.monotonic() >= deadline:
+        if clock.now() >= deadline:
             return False
-        time.sleep(_POLL_SECONDS)
+        clock.sleep(_POLL_SECONDS)
     return True
 
 
-def end_child(process):
-    """End the direct child, for every cause: ask, wait a short grace, then kill.
+def end_child(process, grace=END_GRACE_SECONDS, clock=REAL_CLOCK):
+    """End the direct child, for every cause: ask, wait a short grace (seconds), then kill.
 
     Returns "ended" or "not_confirmed". Whether everything the child started is gone
     is a stand-in (step 9); only the direct child is ended here.
@@ -49,14 +62,24 @@ def end_child(process):
             process.terminate()
         except OSError:
             pass
-        if not _exited_within(process, _END_GRACE_SECONDS):
+        if not _exited_within(process, grace, clock):
             try:
                 process.kill()
             except OSError:
                 pass
-            if not _exited_within(process, _END_GRACE_SECONDS):
+            if not _exited_within(process, grace, clock):
                 return "not_confirmed"
     return "ended"
+
+
+def wait_for_the_cause(process, limit_seconds, get_signal, clock=REAL_CLOCK):
+    """Poll until the child exits, a signal is seen, or the limit passes. Returns the first cause seen."""
+    deadline = clock.now() + limit_seconds
+    while True:
+        cause = core.wait_cause(process.poll() is not None, clock.now() >= deadline, get_signal())
+        if cause:
+            return cause
+        clock.sleep(_POLL_SECONDS)
 
 
 def step_read_and_validate_document(state):
@@ -141,19 +164,15 @@ def step_launch_executor(state):
 def step_wait_for_the_end(state):
     process = state["stand_ins"]["boundary"]["process"]
     facts = state["facts"]
-    deadline = time.monotonic() + float(state["raw"]["time_limit_seconds"])
+    clock = state["clock"]
     try:
-        while True:
-            cause = core.wait_cause(process.poll() is not None, time.monotonic() >= deadline, state["signal"])
-            if cause:
-                break
-            time.sleep(_POLL_SECONDS)
+        cause = wait_for_the_cause(process, float(state["raw"]["time_limit_seconds"]), lambda: state["signal"], clock)
         facts["wait"] = cause
-        if cause != "exited" and end_child(process) == "not_confirmed":
+        if cause != "exited" and end_child(process, state["grace"], clock) == "not_confirmed":
             facts["stop"] = "not_confirmed"
     finally:
         if process.poll() is None:  # the wait itself broke: still end the child
-            end_child(process)
+            end_child(process, state["grace"], clock)
     facts["exit_code"], facts["child_signal"] = core.exit_facts(process.returncode)
     state["executor_duration"] = (datetime.datetime.now(datetime.timezone.utc) - state["clock_start"]).total_seconds()
     state["ended_at"] = _now()
@@ -279,14 +298,16 @@ def _install_handlers(state):
     return previous
 
 
-def run(document_path, out, err, steps=None, build_receipt=None, write_record=None):
+def run(document_path, out, err, steps=None, build_receipt=None, write_record=None, grace=END_GRACE_SECONDS, clock=REAL_CLOCK):
     """Run one input document end to end. Returns the exit code.
 
+    clock: the waiting seam (a Clock); a test passes a stand-in.
+    grace: seconds between asking the child to end and killing it; code passes it, a test passes a short one.
     steps: the ordered (name, function) table, the real one by default, so a test can replace any step.
     """
     state = {
         "document_path": document_path, "out": out, "err": err,
-        "facts": {}, "stand_ins": {}, "problems": {}, "signal": None,
+        "facts": {}, "stand_ins": {}, "problems": {}, "signal": None, "grace": grace, "clock": clock,
         "build_receipt": build_receipt or core.build_receipt,
         "write_record": write_record or records.write_outcome_record,
     }
@@ -299,7 +320,7 @@ def run(document_path, out, err, steps=None, build_receipt=None, write_record=No
     finally:
         boundary = state["stand_ins"].get("boundary")
         if boundary and boundary.get("process") is not None:
-            end_child(boundary["process"])  # whatever went wrong, nothing is left running
+            end_child(boundary["process"], grace, clock)  # whatever went wrong, nothing is left running
         if "conclusion" not in state:  # the last step did not run, or did not finish
             state["conclusion"] = conclude_run(state)
         for number, handler in previous.items():

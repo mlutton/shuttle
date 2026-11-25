@@ -176,17 +176,16 @@ class CommandSeam(unittest.TestCase):
         self.assertFalse(os.path.exists(self.witness), "the script must not run")
         self.assertTrue(os.path.exists(os.path.join(self.records, "req-1.request.json")))
 
-    def nesting_that_cannot_be_written(self):
-        """A list nested deep enough that this Python reads it but cannot write it back, or None."""
-        for depth in (1500, 5000, 20000, 50000):
-            nested = "[" * depth + "]" * depth
-            try:
-                json.dumps({"a": json.loads(nested)}, indent=2)
-            except RecursionError:
-                return nested
-            except ValueError:
-                return None
-        return None
+    def deep_nesting(self):
+        return "[" * 1500 + "]" * 1500
+
+    def this_python_cannot_write_the_nesting(self):
+        """One cheap probe at the depth the tests use; no search over larger depths."""
+        try:
+            json.dumps({"a": json.loads(self.deep_nesting())}, indent=2)
+        except RecursionError:
+            return True
+        return False
 
     def test_a_request_record_cut_short_by_a_file_size_limit_leaves_no_record_and_the_id_works_afterwards(self):
         import resource
@@ -210,13 +209,10 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"])
 
     def test_a_document_whose_request_record_cannot_be_built_leaves_no_record_and_the_id_works_afterwards(self):
-        deep = self.nesting_that_cannot_be_written()
-        if deep is None:
-            self.skipTest("this Python writes any nesting it can read; the size-limit test covers the same path")
-        text = json.dumps(self.document())[:-1] + ', "surprise": %s}' % deep
+        if not self.this_python_cannot_write_the_nesting():
+            self.skipTest("this Python writes this nesting; the next test covers what happens then")
+        text = json.dumps(self.document())[:-1] + ', "surprise": %s}' % self.deep_nesting()
         done, lines = self.run_command(text)
-        if lines == ["none"]:
-            self.skipTest("this Python cannot even read a document that deep")
         self.assertNotEqual(done.returncode, 0)
         self.assertEqual(lines[-1], "could_not_start")
         self.assertEqual(len(done.stderr.strip().splitlines()), 1)
@@ -227,6 +223,18 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(lines[-1], "ended_by_itself")
         self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
         self.assertEqual(self.read("req-1.outcome.json")["header"]["request_id"], "req-1")
+
+    def test_a_document_nested_deeper_than_old_pythons_could_write_gets_both_records_written_and_parseable(self):
+        if self.this_python_cannot_write_the_nesting():
+            self.skipTest("this Python cannot write this nesting; the previous test covers what happens then")
+        text = json.dumps(self.document())[:-1] + ', "surprise": %s}' % self.deep_nesting()
+        done, lines = self.run_command(text)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(lines[-1], "could_not_start")   # the unknown field "surprise" is refused, and recorded
+        request = self.read("req-1.request.json")
+        self.assertEqual(request["input"]["surprise"], json.loads(self.deep_nesting()))
+        self.assertEqual(self.read("req-1.outcome.json")["receipt"]["the_ending"]["reason"], "unknown_field")
+        self.assertEqual(sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"])
 
     def test_two_commands_started_together_with_one_request_id_exactly_one_claims_it_and_its_records_are_whole(self):
         """Pins behaviour that held before the change too; a race cannot be made to fail on demand."""
@@ -292,56 +300,20 @@ class CommandSeam(unittest.TestCase):
         doc["executor"]["settings"]["arguments"] = [self.script, pid_file]
         return doc, pid_file
 
-    def test_an_interrupt_terminate_or_hangup_ends_the_script_and_still_writes_the_outcome_record(self):
-        for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-            with self.subTest(signal=number.name):
-                rid = "sig-%s" % number.name.lower()
-                doc, pid_file = self.sleeping_document(request_id=rid)
-                if os.path.exists(pid_file):
-                    os.remove(pid_file)
-                proc = self.spawn(doc, name="%s.json" % rid)
-                self.wait_for_file(pid_file)
-                with open(pid_file) as f:
-                    script_pid = int(f.read())
-                proc.send_signal(number)
-                stdout, stderr = proc.communicate(timeout=30)
-                self.assertEqual(proc.returncode, 0, stderr)
-                self.assertEqual(stdout.splitlines()[-1], "stopped_from_outside")
-                ending = self.read("%s.outcome.json" % rid)["receipt"]["the_ending"]
-                self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]),
-                                 ("stopped_from_outside", "signal", "none"))
-                self.assert_process_gone(script_pid)
-
-    def test_a_script_that_runs_past_the_time_limit_is_ended_and_the_ending_is_time_limit(self):
-        doc, pid_file = self.sleeping_document(time_limit_seconds=0.5)
-        started = time.time()
-        done, lines = self.run_command(doc)
-        self.assertLess(time.time() - started, 30)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(lines[-1], "time_limit")
-        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]), ("time_limit", "time_limit", "none"))
-        with open(pid_file) as f:
-            self.assert_process_gone(int(f.read()))
-
-    def test_a_signal_during_the_grace_after_the_time_limit_changes_nothing_and_the_script_is_killed(self):
-        with open(self.script, "w") as f:
-            f.write("import os, signal, sys, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-                    "open(sys.argv[1], 'w').write(str(os.getpid()))\ntime.sleep(60)\n")
-        pid_file = os.path.join(self.root, "pid.txt")
-        doc = self.document(time_limit_seconds=1)
-        doc["executor"]["settings"]["arguments"] = [self.script, pid_file]
+    def test_a_terminate_sent_to_the_real_command_ends_the_script_and_still_writes_the_outcome_record(self):
+        """The one real-process signal test; the other signals and the order of events are by value in test_waiting.py."""
+        doc, pid_file = self.sleeping_document()
         proc = self.spawn(doc)
         self.wait_for_file(pid_file)
         with open(pid_file) as f:
             script_pid = int(f.read())
-        time.sleep(1.5)  # the limit has passed and the script is ignoring the first request to end
         proc.send_signal(signal.SIGTERM)
         stdout, stderr = proc.communicate(timeout=30)
         self.assertEqual(proc.returncode, 0, stderr)
-        self.assertEqual(stdout.splitlines()[-1], "time_limit")
+        self.assertEqual(stdout.splitlines()[-1], "stopped_from_outside")
         ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]), ("time_limit", "time_limit", "none"))
+        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]),
+                         ("stopped_from_outside", "signal", "none"))
         self.assert_process_gone(script_pid)
 
     def test_a_document_without_a_time_limit_is_refused_with_no_time_limit(self):

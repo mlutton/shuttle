@@ -12,6 +12,13 @@ import unittest
 
 from shuttle import core, run
 
+
+class QuickClock(run.Clock):
+    """Real time, but each poll waits a thousandth of a second, so a child that exits at once is seen at once."""
+
+    def sleep(self, seconds):
+        super().sleep(0.001)
+
 AFTER_THE_CLAIM = [name for name, _ in run.STEPS][2:14]   # steps 3 to 14
 CNS, EF = "could_not_start", "execution_failed"
 
@@ -38,6 +45,13 @@ IF_SIGNALLED.update({name: ("stopped_from_outside", "signal", "none")
 IF_SIGNALLED.update({name: ("ended_by_itself", "none", "none") for name in AFTER_THE_CLAIM[6:]})
 
 
+# The child ends at once, except where a case needs a live process: there it sleeps until the run
+# ends it (the run asks it to end as soon as the signal fact is seen, so nothing waits out the sleep).
+ENDS_AT_ONCE = "pass"
+STAYS_ALIVE = "import time; time.sleep(60)"
+NEEDS_A_LIVE_PROCESS = ("launch_executor", "wait_for_the_end")
+
+
 def boom(state):
     raise RuntimeError("injected")
 
@@ -55,13 +69,20 @@ class InjectionTables(unittest.TestCase):
                 "format_version": 1, "request_id": "inj-1", "records_location": self.records,
                 "thread": "t", "round": 1, "kind": "plain", "time_limit_seconds": 30,
                 "executor": {"name": "command", "settings": {
-                    "command": sys.executable, "arguments": ["-c", "import time; time.sleep(0.5)"]}},
+                    "command": sys.executable, "arguments": ["-c", ENDS_AT_ONCE]}},
             }, f)
 
     def run_it(self, steps=None, **kwargs):
         out, err = io.StringIO(), io.StringIO()
-        code = run.run(self.doc, out, err, steps=steps, **kwargs)
+        code = run.run(self.doc, out, err, steps=steps, clock=QuickClock(), **kwargs)
         return code, out.getvalue().splitlines(), err.getvalue()
+
+    def use_script(self, code):
+        with open(self.doc) as f:
+            document = json.load(f)
+        document["executor"]["settings"]["arguments"] = ["-c", code]
+        with open(self.doc, "w") as f:
+            json.dump(document, f)
 
     def replaced(self, name, function):
         return [(n, function if n == name else f) for n, f in run.STEPS]
@@ -97,6 +118,7 @@ class InjectionTables(unittest.TestCase):
         for name in AFTER_THE_CLAIM:
             with self.subTest(name):
                 self.clean()
+                self.use_script(STAYS_ALIVE if name in NEEDS_A_LIVE_PROCESS else ENDS_AT_ONCE)
                 real = dict(run.STEPS)[name]
 
                 def signalled(state, real=real):
