@@ -3,6 +3,7 @@
 An executor driver offers four functions (check, launch, observe, declare) and
 its declarations as data. It never names an ending. There is no base class.
 """
+
 import shutil
 
 NAME = "command"

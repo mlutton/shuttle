@@ -4,6 +4,7 @@ Covers which cause ends the wait, what is ended and in what order (ask, wait the
 what facts each outcome gives, and that a later signal changes nothing. The one test that waits
 for real is in test_grace.py; signals sent to the real command are in test_command.py.
 """
+
 import datetime
 import signal
 import unittest
@@ -11,7 +12,7 @@ import unittest
 from shuttle import core, run
 
 POLL = run._POLL_SECONDS
-GRACE = 3   # a stand-in clock makes the real default affordable here
+GRACE = 3  # a stand-in clock makes the real default affordable here
 
 
 class StandInClock:
@@ -76,7 +77,9 @@ class WhichCauseEndsTheWait(unittest.TestCase):
                 cause = run.wait_for_the_cause(process, limit, signal_from(clock, signal_at), clock)
                 self.assertEqual(cause, expected)
                 self.assertLessEqual(clock.t, limit + POLL)
-                self.assertEqual(process.calls, [])   # the wait only watches; ending is a separate decision
+                self.assertEqual(
+                    process.calls, []
+                )  # the wait only watches; ending is a separate decision
 
 
 class WhatIsEndedAndInWhatOrder(unittest.TestCase):
@@ -118,11 +121,16 @@ class TheWaitStepGivesTheseFacts(unittest.TestCase):
     def step(self, limit, signal_at=None, exits_at=None, obeys=("terminate", "kill")):
         """Run the wait step on stand-ins. `signal_at` is when a signal arrives, on the stand-in clock."""
         state = {"signal": None, "facts": {}, "grace": GRACE, "raw": {"time_limit_seconds": limit}}
-        arrives = [(signal_at, lambda: state.update(signal="SIGINT"))] if signal_at is not None else []
+        arrives = (
+            [(signal_at, lambda: state.update(signal="SIGINT"))] if signal_at is not None else []
+        )
         clock = StandInClock(arrives)
         process = StandInProcess(clock, exits_at, obeys)
-        state.update(clock=clock, stand_ins={"boundary": {"process": process}},
-                     clock_start=datetime.datetime.now(datetime.timezone.utc))
+        state.update(
+            clock=clock,
+            stand_ins={"boundary": {"process": process}},
+            clock_start=datetime.datetime.now(datetime.timezone.utc),
+        )
         run.step_wait_for_the_end(state)
         return state["facts"], process
 
@@ -141,12 +149,16 @@ class TheWaitStepGivesTheseFacts(unittest.TestCase):
         facts, _ = self.step(limit=10, signal_at=1)
         self.assertEqual(facts["wait"], "signal")
 
-    def test_a_signal_during_the_grace_after_the_limit_changes_nothing_and_the_child_is_killed(self):
+    def test_a_signal_during_the_grace_after_the_limit_changes_nothing_and_the_child_is_killed(
+        self,
+    ):
         facts, process = self.step(limit=2, signal_at=2 + GRACE / 2, obeys=("kill",))
         self.assertEqual(facts["wait"], "time_limit")
         self.assertNotIn("stop", facts)
         self.assertEqual([name for name, _ in process.calls], ["terminate", "kill"])
-        self.assertEqual((facts["exit_code"], facts["child_signal"]), core.exit_facts(-signal.SIGKILL))
+        self.assertEqual(
+            (facts["exit_code"], facts["child_signal"]), core.exit_facts(-signal.SIGKILL)
+        )
 
     def test_a_limit_passing_in_the_grace_after_a_signal_changes_nothing(self):
         facts, process = self.step(limit=2, signal_at=1, obeys=("kill",))
@@ -164,7 +176,9 @@ class TheHandlersOnlyRecordTheFirstSignal(unittest.TestCase):
             with self.subTest(signal=number.name):
                 state = {"signal": None}
                 previous = run._install_handlers(state)
-                self.addCleanup(lambda previous=previous: [signal.signal(n, h) for n, h in previous.items()])
+                self.addCleanup(
+                    lambda previous=previous: [signal.signal(n, h) for n, h in previous.items()]
+                )
                 signal.raise_signal(number)
                 other = signal.SIGHUP if number != signal.SIGHUP else signal.SIGINT
                 signal.raise_signal(other)

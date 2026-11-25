@@ -1,4 +1,5 @@
 """By value: validating the input document."""
+
 import copy
 import unittest
 
@@ -35,16 +36,19 @@ class ValidateDocument(unittest.TestCase):
     def test_a_good_document_has_a_header_source_and_no_refusal(self):
         got = core.validate_document(GOOD)
         self.assertIsNone(got["refusal"])
-        self.assertEqual(got["header_source"], {
-            "request_id": "req-1",
-            "records_location": "/some/records",
-            "executor_name": "command",
-            "thread": "t-1",
-            "round": 2,
-            "kind": "plain",
-            "parent_session": "none",
-            "asked_by": "none",
-        })
+        self.assertEqual(
+            got["header_source"],
+            {
+                "request_id": "req-1",
+                "records_location": "/some/records",
+                "executor_name": "command",
+                "thread": "t-1",
+                "round": 2,
+                "kind": "plain",
+                "parent_session": "none",
+                "asked_by": "none",
+            },
+        )
 
     def test_optional_header_fields_are_carried_when_given(self):
         got = core.validate_document(with_change(parent_session="p-9", asked_by="someone"))
@@ -53,9 +57,11 @@ class ValidateDocument(unittest.TestCase):
         self.assertEqual(got["header_source"]["asked_by"], "someone")
 
     def test_small_and_large_usable_time_limits_are_accepted(self):
-        for limit in (0.001, 1, 30.5, 86400, 10 ** 8):
+        for limit in (0.001, 1, 30.5, 86400, 10**8):
             with self.subTest(limit):
-                self.assertIsNone(core.validate_document(with_change(time_limit_seconds=limit))["refusal"])
+                self.assertIsNone(
+                    core.validate_document(with_change(time_limit_seconds=limit))["refusal"]
+                )
 
     def test_a_good_document_may_name_environment_variables(self):
         self.assertIsNone(core.validate_document(with_change(environment=["A_B", "C"]))["refusal"])
@@ -83,13 +89,25 @@ class ValidateDocument(unittest.TestCase):
             ("negative time limit", with_change(time_limit_seconds=-5), "no_time_limit"),
             ("time limit true", with_change(time_limit_seconds=True), "no_time_limit"),
             ("time limit text", with_change(time_limit_seconds="30"), "no_time_limit"),
-            ("time limit a huge integer", with_change(time_limit_seconds=10 ** 400), "no_time_limit"),
+            ("time limit a huge integer", with_change(time_limit_seconds=10**400), "no_time_limit"),
             ("time limit infinity", with_change(time_limit_seconds=float("inf")), "no_time_limit"),
-            ("time limit not a number", with_change(time_limit_seconds=float("nan")), "no_time_limit"),
-            ("time limit the clock cannot use", with_change(time_limit_seconds=1e30), "no_time_limit"),
+            (
+                "time limit not a number",
+                with_change(time_limit_seconds=float("nan")),
+                "no_time_limit",
+            ),
+            (
+                "time limit the clock cannot use",
+                with_change(time_limit_seconds=1e30),
+                "no_time_limit",
+            ),
             ("environment not a list", with_change(environment="PATH"), "missing_setting"),
             ("environment name not text", with_change(environment=[1]), "missing_setting"),
-            ("environment name with an equals sign", with_change(environment=["A=b"]), "missing_setting"),
+            (
+                "environment name with an equals sign",
+                with_change(environment=["A=b"]),
+                "missing_setting",
+            ),
         ]
         for name, doc, reason in cases:
             with self.subTest(name):
@@ -129,7 +147,10 @@ class ValidateDocument(unittest.TestCase):
 
 class ParseCommandLine(unittest.TestCase):
     def test_run_with_one_path(self):
-        self.assertEqual(core.parse_command_line(["run", "doc.json"]), {"form": "run", "document_path": "doc.json"})
+        self.assertEqual(
+            core.parse_command_line(["run", "doc.json"]),
+            {"form": "run", "document_path": "doc.json"},
+        )
 
     def test_other_forms_are_refused_in_one_line(self):
         for form in ("check", "stop", "status"):

@@ -1,4 +1,5 @@
 """Every fixed value, written to a real records folder and read back."""
+
 import json
 import os
 import shutil
@@ -7,16 +8,33 @@ import unittest
 
 from shuttle import core, fixed, records
 
-HEADER_SOURCE = {"request_id": "req-1", "records_location": None, "executor_name": "command",
-                 "thread": "t", "round": 1, "kind": "plain", "parent_session": "none", "asked_by": "none"}
+HEADER_SOURCE = {
+    "request_id": "req-1",
+    "records_location": None,
+    "executor_name": "command",
+    "thread": "t",
+    "round": 1,
+    "kind": "plain",
+    "parent_session": "none",
+    "asked_by": "none",
+}
 
 
 def facts():
     return {
-        "receipt_id": "r-1", "execution_version": "1", "host": "h", "input_hash": "x",
-        "launched": False, "started_at": None, "ended_at": None,
-        "executor_duration": None, "exit_code": None, "signal": None,
-        "executor_driver_observations": None, "stand_ins": {}, "reason_text": None,
+        "receipt_id": "r-1",
+        "execution_version": "1",
+        "host": "h",
+        "input_hash": "x",
+        "launched": False,
+        "started_at": None,
+        "ended_at": None,
+        "executor_duration": None,
+        "exit_code": None,
+        "signal": None,
+        "executor_driver_observations": None,
+        "stand_ins": {},
+        "reason_text": None,
     }
 
 
@@ -28,8 +46,12 @@ class RecordsFolder(unittest.TestCase):
 
     def write_and_read(self, decision, request_id):
         receipt = core.build_receipt(decision, facts())
-        header = core.build_header("outcome", dict(HEADER_SOURCE, request_id=request_id), "rec", "t")
-        path = records.write_outcome_record(self.root, request_id, {"header": header, "receipt": receipt})
+        header = core.build_header(
+            "outcome", dict(HEADER_SOURCE, request_id=request_id), "rec", "t"
+        )
+        path = records.write_outcome_record(
+            self.root, request_id, {"header": header, "receipt": receipt}
+        )
         return receipt, records.read_record(path)
 
     def test_every_ending_can_be_written_and_read_back(self):
@@ -37,7 +59,11 @@ class RecordsFolder(unittest.TestCase):
             with self.subTest(ending):
                 reasons = fixed.REASONS_BY_ENDING[ending]
                 reason = reasons[0] if reasons else fixed.NONE
-                step = next(x for x in fixed.STEPS_FOR_REASON[reason] if x != fixed.CANNOT_TELL) if reason != fixed.NONE else fixed.NONE
+                step = (
+                    next(x for x in fixed.STEPS_FOR_REASON[reason] if x != fixed.CANNOT_TELL)
+                    if reason != fixed.NONE
+                    else fixed.NONE
+                )
                 decision = {"ending": ending, "reason": reason, "failed_step": step}
                 receipt, back = self.write_and_read(decision, "e%d" % i)
                 self.assertEqual(back["receipt"], receipt)
@@ -48,11 +74,17 @@ class RecordsFolder(unittest.TestCase):
         for ending, reasons in fixed.REASONS_BY_ENDING.items():
             for reason in reasons:
                 with self.subTest(ending=ending, reason=reason):
-                    step = next(x for x in fixed.STEPS_FOR_REASON[reason]
-                                if x in (fixed.NONE, fixed.CANNOT_TELL) + fixed.STEPS_BY_ENDING.get(ending, ())
-                                and not (x == fixed.CANNOT_TELL and ending == "could_not_start"))
+                    step = next(
+                        x
+                        for x in fixed.STEPS_FOR_REASON[reason]
+                        if x
+                        in (fixed.NONE, fixed.CANNOT_TELL) + fixed.STEPS_BY_ENDING.get(ending, ())
+                        and not (x == fixed.CANNOT_TELL and ending == "could_not_start")
+                    )
                     decision = {"ending": ending, "reason": reason, "failed_step": step}
-                    _, back = self.write_and_read(decision, "r-%s-%s" % (ending, reason.replace("_", "-")))
+                    _, back = self.write_and_read(
+                        decision, "r-%s-%s" % (ending, reason.replace("_", "-"))
+                    )
                     self.assertEqual(back["receipt"]["the_ending"]["reason"], reason)
                     self.assertEqual(core.check_receipt(back["receipt"]), [])
 
@@ -60,7 +92,11 @@ class RecordsFolder(unittest.TestCase):
         for ending, steps in fixed.STEPS_BY_ENDING.items():
             for step in steps:
                 with self.subTest(ending=ending, step=step):
-                    reason = next(r for r in fixed.REASONS_BY_ENDING[ending] if step in fixed.STEPS_FOR_REASON[r])
+                    reason = next(
+                        r
+                        for r in fixed.REASONS_BY_ENDING[ending]
+                        if step in fixed.STEPS_FOR_REASON[r]
+                    )
                     decision = {"ending": ending, "reason": reason, "failed_step": step}
                     _, back = self.write_and_read(decision, "s-%s" % step.replace("_", "-"))
                     self.assertEqual(back["receipt"]["the_ending"]["failed_step"], step)
@@ -77,7 +113,9 @@ class RecordsFolder(unittest.TestCase):
         first = {"header": {"a": 1}, "receipt": {"first": True}}
         path = records.write_outcome_record(self.root, "same", first)
         with self.assertRaises(FileExistsError):
-            records.write_outcome_record(self.root, "same", {"header": {}, "receipt": {"first": False}})
+            records.write_outcome_record(
+                self.root, "same", {"header": {}, "receipt": {"first": False}}
+            )
         self.assertEqual(records.read_record(path), first)
         self.assertEqual(sorted(os.listdir(self.root)), [os.path.basename(path)])
 
@@ -94,17 +132,24 @@ if __name__ == "__main__":
 
 
 POINTS = ("build_text", "write_temporary", "flush", "put_in_place")
-RAISES = {"build_text": records.RecordNotBuilt, "write_temporary": OSError, "flush": OSError, "put_in_place": OSError}
+RAISES = {
+    "build_text": records.RecordNotBuilt,
+    "write_temporary": OSError,
+    "flush": OSError,
+    "put_in_place": OSError,
+}
 
 
 def claim_a_request_record(root, fault):
     return records.claim_request_record(
-        root, "w-1", {"header": {"k": "request"}, "input": {"a": [1, 2]}}, fault=fault)
+        root, "w-1", {"header": {"k": "request"}, "input": {"a": [1, 2]}}, fault=fault
+    )
 
 
 def write_an_outcome_record(root, fault):
     return records.write_outcome_record(
-        root, "w-1", {"header": {"k": "outcome"}, "receipt": {"a": [1, 2]}}, fault=fault)
+        root, "w-1", {"header": {"k": "outcome"}, "receipt": {"a": [1, 2]}}, fault=fault
+    )
 
 
 WRITERS = {
@@ -112,14 +157,18 @@ WRITERS = {
     "write_outcome_record": ("w-1.outcome.json", write_an_outcome_record),
 }
 # One row per writer and point: (writer, file it writes, write function, point, exception the fault raises).
-CASES = [(name, filename, write, point, RAISES[point])
-         for name, (filename, write) in WRITERS.items() for point in POINTS]
+CASES = [
+    (name, filename, write, point, RAISES[point])
+    for name, (filename, write) in WRITERS.items()
+    for point in POINTS
+]
 
 
 def fail_at(point):
     def fault(reached):
         if reached == point:
             raise OSError("injected at %s" % point)
+
     return fault
 
 
@@ -133,14 +182,20 @@ class WholeOrAbsent(unittest.TestCase):
         self.addCleanup(shutil.rmtree, root)
         return root
 
-    def test_a_write_cut_short_part_way_leaves_no_file_under_the_real_name_and_no_temporary_file(self):
+    def test_a_write_cut_short_part_way_leaves_no_file_under_the_real_name_and_no_temporary_file(
+        self,
+    ):
         root = self.fresh_root()
         for name, (filename, write) in WRITERS.items():
             with self.subTest(name):
-                self.assertRaises(OSError, write, root, fail_at("flush"))   # the text is already written
+                self.assertRaises(
+                    OSError, write, root, fail_at("flush")
+                )  # the text is already written
                 self.assertEqual(os.listdir(root), [])
 
-    def test_after_a_failure_at_each_point_nothing_is_under_a_real_name_and_no_temporary_file_is_left(self):
+    def test_after_a_failure_at_each_point_nothing_is_under_a_real_name_and_no_temporary_file_is_left(
+        self,
+    ):
         for name, filename, write, point, raises in CASES:
             with self.subTest(writer=name, point=point):
                 root = self.fresh_root()
@@ -156,7 +211,9 @@ class WholeOrAbsent(unittest.TestCase):
                 write(root, None)
                 self.assertEqual(os.listdir(root), [filename])
 
-    def test_a_record_whose_text_cannot_be_built_is_not_built_and_leaves_nothing_and_the_id_stays_free(self):
+    def test_a_record_whose_text_cannot_be_built_is_not_built_and_leaves_nothing_and_the_id_stays_free(
+        self,
+    ):
         root = self.fresh_root()
         loop = []
         loop.append(loop)

@@ -4,6 +4,7 @@ Each record is built in memory, written under a temporary name, flushed and then
 linked into place, which fails if the name exists. So a record is whole or absent,
 is written once, and the request record's claim is first one wins.
 """
+
 import json
 import os
 

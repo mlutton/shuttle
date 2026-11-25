@@ -4,6 +4,7 @@ Exit codes:
   0  an outcome record was written (whatever the ending, "could not start" included)
   1  no outcome record was written; one line on standard error says why
 """
+
 import sys
 
 from shuttle import core, run

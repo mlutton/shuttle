@@ -3,6 +3,7 @@
 Each has the signature the real step will have and returns a marked value, so
 a receipt field fed by it says "cannot tell" instead of an invented value.
 """
+
 import subprocess
 
 from shuttle import fixed
@@ -17,8 +18,12 @@ def _stand_in(name, **extra):
 def start_in_boundary(launch_spec, environment):
     """Boundary: a plain child process, no containment yet. Raises when it cannot start."""
     process = subprocess.Popen(
-        launch_spec["argv"], env=environment,
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        launch_spec["argv"],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     return _stand_in("boundary", process=process)
 
 

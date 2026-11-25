@@ -2,6 +2,7 @@
 
 Nothing here touches a file, the clock, the environment or a process.
 """
+
 import math
 import signal as signal_module
 
@@ -68,7 +69,11 @@ def _decide(f):
         reason = f.get(step)
         if reason is None:
             continue
-        if isinstance(reason, str) and reason in fixed.REASONS_BY_ENDING[_CNS] and step in fixed.STEPS_FOR_REASON[reason]:
+        if (
+            isinstance(reason, str)
+            and reason in fixed.REASONS_BY_ENDING[_CNS]
+            and step in fixed.STEPS_FOR_REASON[reason]
+        ):
             return _decision(_CNS, reason, step)
         return _before_launch_error(step)
     for step, bad in (
@@ -135,7 +140,10 @@ def check_decision(decision):
         return ["reason %r does not belong to ending %s" % (reason, ending)]
     if step not in fixed.STEPS_FOR_REASON[reason]:
         return ["failed step %r does not go with reason %s" % (step, reason)]
-    if step not in fixed.STEPS_BY_ENDING.get(ending, ()) and step not in (fixed.NONE, fixed.CANNOT_TELL):
+    if step not in fixed.STEPS_BY_ENDING.get(ending, ()) and step not in (
+        fixed.NONE,
+        fixed.CANNOT_TELL,
+    ):
         return ["failed step %r does not belong to ending %s" % (step, ending)]
     if step == fixed.CANNOT_TELL and ending == _CNS:
         return ["ending %s always names its step" % ending]
@@ -195,7 +203,10 @@ STEP_ORDER = (
 _STEP_FAILURES = {
     "read_and_validate_document": (None, {"unreadable": True}),
     "claim_request_id": ("id_claim", {"id_claim": "unusable"}),
-    "run_input_checks_and_executor_driver_check": ("executor_driver_check", {"executor_driver_check": "execution_error"}),
+    "run_input_checks_and_executor_driver_check": (
+        "executor_driver_check",
+        {"executor_driver_check": "execution_error"},
+    ),
     "run_gates": ("gates", {"gates": "failed"}),
     "set_up_run_area": ("setup", {"setup": "failed"}),
     "take_opening_fingerprint": ("opening_freeze", {"opening_freeze": "failed"}),
@@ -240,9 +251,12 @@ def wait_cause(child_exited, deadline_passed, signal_name):
 
 def _failed_before_launch(f):
     return bool(
-        f.get("input_check") or f.get("executor_driver_check")
-        or f.get("gates") in ("no", "failed") or f.get("setup") == "failed"
-        or f.get("opening_freeze") == "failed" or f.get("launch") in ("failed", "stopped_before")
+        f.get("input_check")
+        or f.get("executor_driver_check")
+        or f.get("gates") in ("no", "failed")
+        or f.get("setup") == "failed"
+        or f.get("opening_freeze") == "failed"
+        or f.get("launch") in ("failed", "stopped_before")
     )
 
 
@@ -282,7 +296,11 @@ def outcome_kind(facts):
 
 def result_status(result):
     """A step's result as a fact: a stand-in never fails; a real step reports ok=False when it does."""
-    return "failed" if isinstance(result, dict) and result.get("ok") is False and not is_stand_in(result) else "ok"
+    return (
+        "failed"
+        if isinstance(result, dict) and result.get("ok") is False and not is_stand_in(result)
+        else "ok"
+    )
 
 
 def conclude(outcome):
@@ -298,22 +316,43 @@ def conclude(outcome):
     if kind == "write_failed":
         return {
             "stdout": [outcome["receipt_text"], outcome["decision"]["ending"]],
-            "stderr": ["shuttle: the outcome record was not written (%s); the receipt is printed below "
-                       "and the ending stands" % outcome["problem"]],
+            "stderr": [
+                "shuttle: the outcome record was not written (%s); the receipt is printed below "
+                "and the ending stands" % outcome["problem"]
+            ],
             "exit": 1,
         }
     if kind == "not_recorded":
-        problem = outcome.get("problem") or "the request id could not be claimed; nothing was done; check the records_location"
-        return {"stdout": [outcome["decision"]["ending"]], "stderr": ["shuttle: %s" % problem], "exit": 1}
-    problem = outcome.get("problem") or "the input document could not be read far enough to start; nothing was done; fix it and run again"
+        problem = (
+            outcome.get("problem")
+            or "the request id could not be claimed; nothing was done; check the records_location"
+        )
+        return {
+            "stdout": [outcome["decision"]["ending"]],
+            "stderr": ["shuttle: %s" % problem],
+            "exit": 1,
+        }
+    problem = (
+        outcome.get("problem")
+        or "the input document could not be read far enough to start; nothing was done; fix it and run again"
+    )
     return {"stdout": ["none"], "stderr": ["shuttle: %s" % problem], "exit": 1}
 
 
 # ------------------------------------------------------------------ the document
 
 _DOCUMENT_FIELDS = (
-    "format_version", "request_id", "records_location", "thread", "round", "kind",
-    "parent_session", "asked_by", "time_limit_seconds", "environment", "executor",
+    "format_version",
+    "request_id",
+    "records_location",
+    "thread",
+    "round",
+    "kind",
+    "parent_session",
+    "asked_by",
+    "time_limit_seconds",
+    "environment",
+    "executor",
 )
 _EXECUTOR_FIELDS = ("name", "settings")
 _COMMAND_SETTINGS = ("command", "arguments")
@@ -322,7 +361,9 @@ _NAME_CHARACTERS = _ID_CHARACTERS
 
 
 def _valid_request_id(value):
-    return isinstance(value, str) and 0 < len(value) <= 64 and all(c in _ID_CHARACTERS for c in value)
+    return (
+        isinstance(value, str) and 0 < len(value) <= 64 and all(c in _ID_CHARACTERS for c in value)
+    )
 
 
 def _plain_int(value):
@@ -333,7 +374,7 @@ def _text(value):
     return isinstance(value, str) and bool(value)
 
 
-_LONGEST_TIME_LIMIT_SECONDS = 10 ** 9
+_LONGEST_TIME_LIMIT_SECONDS = 10**9
 
 
 def _usable_time_limit(value):
@@ -348,7 +389,11 @@ def _usable_time_limit(value):
 
 
 def _refusal(reason, problem, header_source):
-    return {"header_source": header_source, "refusal": {"reason": reason, "step": "input_check"}, "problem": problem}
+    return {
+        "header_source": header_source,
+        "refusal": {"reason": reason, "step": "input_check"},
+        "problem": problem,
+    }
 
 
 def _no_header(problem):
@@ -385,11 +430,17 @@ def validate_document(raw):
         "kind": raw["kind"],
         "parent_session": raw.get("parent_session", fixed.NONE),
         "asked_by": raw.get("asked_by", fixed.NONE),
-        "executor_name": executor["name"] if isinstance(executor, dict) and _text(executor.get("name")) else fixed.CANNOT_TELL,
+        "executor_name": executor["name"]
+        if isinstance(executor, dict) and _text(executor.get("name"))
+        else fixed.CANNOT_TELL,
     }
 
     if not _plain_int(raw.get("format_version")) or raw["format_version"] != fixed.FORMAT_VERSION:
-        return _refusal("unknown_format_version", "format_version must be the integer %d" % fixed.FORMAT_VERSION, header_source)
+        return _refusal(
+            "unknown_format_version",
+            "format_version must be the integer %d" % fixed.FORMAT_VERSION,
+            header_source,
+        )
     unknown = sorted(set(raw) - set(_DOCUMENT_FIELDS))
     if unknown:
         return _refusal("unknown_field", "unknown field: %s" % ", ".join(unknown), header_source)
@@ -397,32 +448,54 @@ def validate_document(raw):
         return _refusal("missing_setting", "executor is missing", header_source)
     unknown = sorted(set(executor) - set(_EXECUTOR_FIELDS))
     if unknown:
-        return _refusal("unknown_field", "unknown field in executor: %s" % ", ".join(unknown), header_source)
+        return _refusal(
+            "unknown_field", "unknown field in executor: %s" % ", ".join(unknown), header_source
+        )
     if executor.get("name") != "command":
-        return _refusal("unknown_executor", "executor name must be 'command' (the command driver)", header_source)
+        return _refusal(
+            "unknown_executor",
+            "executor name must be 'command' (the command driver)",
+            header_source,
+        )
     settings = executor.get("settings")
     if not isinstance(settings, dict):
         return _refusal("missing_setting", "executor settings are missing", header_source)
     unknown = sorted(set(settings) - set(_COMMAND_SETTINGS))
     if unknown:
-        return _refusal("unknown_setting", "unknown setting: %s" % ", ".join(unknown), header_source)
+        return _refusal(
+            "unknown_setting", "unknown setting: %s" % ", ".join(unknown), header_source
+        )
     command, arguments = settings.get("command"), settings.get("arguments")
     if not _text(command):
         return _refusal("missing_setting", "setting 'command' is missing", header_source)
     if not isinstance(arguments, list) or not all(isinstance(a, str) for a in arguments):
-        return _refusal("missing_setting", "setting 'arguments' is missing or not a list of text", header_source)
+        return _refusal(
+            "missing_setting", "setting 'arguments' is missing or not a list of text", header_source
+        )
     if not _usable_time_limit(raw.get("time_limit_seconds")):
-        return _refusal("no_time_limit", "time_limit_seconds is required and must be a number above zero and at most %d" % _LONGEST_TIME_LIMIT_SECONDS, header_source)
+        return _refusal(
+            "no_time_limit",
+            "time_limit_seconds is required and must be a number above zero and at most %d"
+            % _LONGEST_TIME_LIMIT_SECONDS,
+            header_source,
+        )
     names = raw.get("environment", [])
-    if not isinstance(names, list) or not all(_text(n) and all(c in _NAME_CHARACTERS for c in n) for n in names):
-        return _refusal("missing_setting", "environment must be a list of variable names", header_source)
+    if not isinstance(names, list) or not all(
+        _text(n) and all(c in _NAME_CHARACTERS for c in n) for n in names
+    ):
+        return _refusal(
+            "missing_setting", "environment must be a list of variable names", header_source
+        )
     return {"header_source": header_source, "refusal": None, "problem": None}
 
 
 def parse_command_line(argv):
     """Turn the arguments after the program name into a form, or a one-line refusal."""
     if argv and argv[0] in ("check", "stop", "status"):
-        return {"refusal": "shuttle: the %s form is not built yet; only 'run <input document>' exists" % argv[0]}
+        return {
+            "refusal": "shuttle: the %s form is not built yet; only 'run <input document>' exists"
+            % argv[0]
+        }
     if len(argv) == 2 and argv[0] == "run":
         return {"form": "run", "document_path": argv[1]}
     return {"refusal": "shuttle: usage: python3 -m shuttle run <input document>"}
@@ -432,21 +505,35 @@ def executor_driver_check(command, environment_names, caller_environment, tool_f
     """The command driver's check and the check of the named variables: (reason, one line) or (None, None)."""
     missing = [n for n in environment_names if n not in caller_environment]
     if missing:
-        return "missing_setting", "environment variable(s) %s named in the document are not set; set them or remove the names" % ", ".join(missing)
+        return (
+            "missing_setting",
+            "environment variable(s) %s named in the document are not set; set them or remove the names"
+            % ", ".join(missing),
+        )
     if not tool_found:
-        return "tool_not_installed", "the command %r was not found; install it or name one that exists" % command
+        return (
+            "tool_not_installed",
+            "the command %r was not found; install it or name one that exists" % command,
+        )
     return None, None
 
 
 def claim_problem(kind, request_id, records_location, error_name):
     """The one line for a request id that could not be claimed."""
     if kind == "used":
-        return "request id %r was already used; nothing was done; give the run a new request id" % request_id
+        return (
+            "request id %r was already used; nothing was done; give the run a new request id"
+            % request_id
+        )
     if kind == "not_built":
-        return ("the request record could not be built from the document (%s); nothing was done and "
-                "request id %r is NOT spent; fix the document and run again" % (error_name, request_id))
-    return ("records_location %r cannot take the request record (%s); nothing was done and the request id is NOT spent; "
-            "name a folder that exists and can be written" % (records_location, error_name))
+        return (
+            "the request record could not be built from the document (%s); nothing was done and "
+            "request id %r is NOT spent; fix the document and run again" % (error_name, request_id)
+        )
+    return (
+        "records_location %r cannot take the request record (%s); nothing was done and the request id is NOT spent; "
+        "name a folder that exists and can be written" % (records_location, error_name)
+    )
 
 
 def check_environment(names, caller_environment):
@@ -465,6 +552,7 @@ def build_environment(names, caller_environment):
 
 
 # --------------------------------------------------------------------- the records
+
 
 def build_header(record_type, header_source, record_id, time):
     return {
@@ -528,7 +616,9 @@ def build_receipt(decision, facts):
     observed = facts.get("executor_driver_observations")
     unlooked = fixed.NONE
 
-    receipt = {group: {name: fixed.NONE for name in names} for group, names in fixed.RECEIPT_GROUPS.items()}
+    receipt = {
+        group: {name: fixed.NONE for name in names} for group, names in fixed.RECEIPT_GROUPS.items()
+    }
     receipt["the_ending"].update(
         decision,
         reason_text=reason,
@@ -562,7 +652,9 @@ def build_receipt(decision, facts):
         exit_code=_plain(facts["exit_code"]),
         signal=_plain(facts["signal"]),
         peak_memory=_from_step(steps.get("boundary"), "peak_memory") if launched else unlooked,
-        processor_time=_from_step(steps.get("boundary"), "processor_time") if launched else unlooked,
+        processor_time=_from_step(steps.get("boundary"), "processor_time")
+        if launched
+        else unlooked,
         session_file_kept_at=_from_step(steps.get("kept_files"), "session_file"),
         teardown_failure=_from_step(steps.get("teardown"), "failure"),
         stop_reason=_from_step(steps.get("stop_confirmation"), "stop_reason"),
@@ -572,17 +664,26 @@ def build_receipt(decision, facts):
         receipt["what_the_executor_driver_observed"].update(observed)
     elif launched:
         receipt["what_the_executor_driver_observed"].update(
-            {name: fixed.CANNOT_TELL for name in fixed.RECEIPT_GROUPS["what_the_executor_driver_observed"]})
-    receipt["what_the_executor_said"].update({
-        name: _from_step(steps.get("kept_files"), name) if launched else unlooked
-        for name in fixed.RECEIPT_GROUPS["what_the_executor_said"]
-    })
+            {
+                name: fixed.CANNOT_TELL
+                for name in fixed.RECEIPT_GROUPS["what_the_executor_driver_observed"]
+            }
+        )
+    receipt["what_the_executor_said"].update(
+        {
+            name: _from_step(steps.get("kept_files"), name) if launched else unlooked
+            for name in fixed.RECEIPT_GROUPS["what_the_executor_said"]
+        }
+    )
     return receipt
 
 
 def minimal_receipt(decision):
     """The receipt when building the full one failed: the decision, and "cannot tell" for everything else."""
-    receipt = {group: {name: fixed.CANNOT_TELL for name in names} for group, names in fixed.RECEIPT_GROUPS.items()}
+    receipt = {
+        group: {name: fixed.CANNOT_TELL for name in names}
+        for group, names in fixed.RECEIPT_GROUPS.items()
+    }
     receipt["the_ending"].update(decision)
     return receipt
 
@@ -600,7 +701,10 @@ def check_receipt(receipt):
             problems.append("%s: field %s is not on the list" % (group, name))
         for name in names:
             if name in held and (held[name] is None or held[name] in ("", [], {})):
-                problems.append("%s: field %s holds nothing; it must be a value, 'none' or 'cannot tell'" % (group, name))
+                problems.append(
+                    "%s: field %s holds nothing; it must be a value, 'none' or 'cannot tell'"
+                    % (group, name)
+                )
     ending = receipt["the_ending"]
     if all(k in ending for k in ("ending", "reason", "failed_step")):
         problems += check_decision({k: ending[k] for k in ("ending", "reason", "failed_step")})
