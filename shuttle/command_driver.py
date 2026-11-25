@@ -5,23 +5,27 @@ its declarations as data. It never names an ending. There is no base class.
 """
 
 import shutil
+from collections.abc import Mapping
+from typing import Any
+
+from shuttle.shapes import LaunchSpec
 
 NAME = "command"
 VERSION = "1"
 
 # What this tool loads and runs by itself, and what it needs set up: nothing.
-DECLARATIONS = {
+DECLARATIONS: dict[str, list[str]] = {
     "loads_by_itself": [],
     "runs_by_itself": [],
     "needs_setup": [],
 }
 
 
-def declare():
+def declare() -> dict[str, list[str]]:
     return DECLARATIONS
 
 
-def locate(settings):
+def locate(settings: Mapping[str, Any]) -> bool:
     """Shell: whether the command can be found and run. Returns True or False."""
     try:
         return shutil.which(settings["command"]) is not None
@@ -29,19 +33,19 @@ def locate(settings):
         return False
 
 
-def check(settings, tool_found):
+def check(settings: Mapping[str, Any], tool_found: bool) -> str | None:
     """Pure: the reason code that refuses these settings, or None."""
     if not tool_found:
         return "tool_not_installed"
     return None
 
 
-def launch(settings):
+def launch(settings: Mapping[str, Any]) -> LaunchSpec:
     """Pure: the one command to start. It exits when done. The environment is built by the core."""
     return {"argv": [settings["command"]] + list(settings["arguments"])}
 
 
-def observe(none_fact, cannot_tell):
+def observe(none_fact: str, cannot_tell: str) -> dict[str, str]:
     """Pure: the driver group of the receipt. A plain command reports nothing of its own.
 
     "none" means looked and nothing there; "cannot tell" means could not look.

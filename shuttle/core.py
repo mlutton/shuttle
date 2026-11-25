@@ -4,8 +4,20 @@ Nothing here touches a file, the clock, the environment or a process.
 """
 
 import math
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 from shuttle import fixed
+from shuttle.shapes import (
+    Conclusion,
+    Decision,
+    Document,
+    DocumentCheck,
+    Facts,
+    HeaderSource,
+    Receipt,
+    StepResult,
+)
 
 # ---------------------------------------------------------------- the ending
 
@@ -15,21 +27,21 @@ _CNS = "could_not_start"
 _EF = "execution_failed"
 
 
-def _decision(ending, reason=fixed.NONE, failed_step=fixed.NONE):
+def _decision(ending: str, reason: str = fixed.NONE, failed_step: str = fixed.NONE) -> Decision:
     return {"ending": ending, "reason": reason, "failed_step": failed_step}
 
 
-def _before_launch_error(step):
+def _before_launch_error(step: str) -> Decision:
     """Execution itself broke before the executor started, in this step."""
     return _decision(_CNS, "execution_error", step)
 
 
-def _after_launch_error():
+def _after_launch_error() -> Decision:
     """Execution itself broke after the executor started, in a step that is not known."""
     return _decision(_EF, "execution_error", fixed.CANNOT_TELL)
 
 
-def decide_ending(facts):
+def decide_ending(facts: Facts) -> Decision:
     """Decide the ending from facts. Total: it never raises.
 
     For every combination of fact values, including facts that are missing or
@@ -56,7 +68,7 @@ def decide_ending(facts):
     return decision
 
 
-def _decide(f):
+def _decide(f: Facts) -> Decision:
     before = _decide_before_launch(f)
     if before is not None:
         return before
@@ -70,7 +82,7 @@ def _decide(f):
     return _decide_after_launch(f)
 
 
-def _decide_before_launch(f):
+def _decide_before_launch(f: Facts) -> Decision | None:
     """The decision when a step before the launch refused or failed, else None."""
     claim = f.get("id_claim", "ok")
     if claim == "used":
@@ -104,7 +116,7 @@ def _decide_before_launch(f):
     return None
 
 
-def _decide_after_launch(f):
+def _decide_after_launch(f: Facts) -> Decision:
     wait = f.get("wait")
     if wait not in _WAIT:
         return _after_launch_error()
@@ -129,7 +141,7 @@ def _decide_after_launch(f):
     return _decision("ended_by_itself")
 
 
-def check_decision(decision):
+def check_decision(decision: Mapping[str, Any]) -> list[str]:
     """Problems with a decision, judged against the fixed list. Empty when fine.
 
     For a reader of records and for the tests; the writer never blocks on it.
@@ -159,7 +171,7 @@ def check_decision(decision):
     return []
 
 
-def ending_conflicts(known, receipt):
+def ending_conflicts(known: Mapping[str, Any], receipt: Receipt) -> list[str]:
     """Problems when a receipt's ending differs from the ending already known."""
     shown = receipt.get("the_ending", {})
     return [
@@ -169,7 +181,7 @@ def ending_conflicts(known, receipt):
     ]
 
 
-def reason_text(decision, problems):
+def reason_text(decision: Decision, problems: Mapping[str, str]) -> str:
     """The one line beside the reason: the problem recorded for its step, or none, or cannot tell."""
     if decision["reason"] == fixed.NONE:
         return fixed.NONE
@@ -197,7 +209,7 @@ STEP_ORDER = (
 )
 
 # For a step that fails: the failed step it stands for and the facts it leaves.
-_STEP_FAILURES = {
+_STEP_FAILURES: dict[str, tuple[str | None, Facts]] = {
     "read_and_validate_document": (None, {"unreadable": True}),
     "claim_request_id": ("id_claim", {"id_claim": "unusable"}),
     "run_input_checks_and_executor_driver_check": (
@@ -215,17 +227,17 @@ _STEP_FAILURES = {
 }
 
 
-def facts_after_error(step):
+def facts_after_error(step: str) -> Facts:
     """The facts a step leaves when it raises an error. Observing, kept files and teardown leave none."""
     return dict(_STEP_FAILURES.get(step, (None, {}))[1])
 
 
-def failed_step_after_error(step):
+def failed_step_after_error(step: str) -> str | None:
     """The failed step an error in this step stands for, or None."""
     return _STEP_FAILURES.get(step, (None, {}))[0]
 
 
-def facts_after_signal(facts, signal_name):
+def facts_after_signal(facts: Facts, signal_name: str | None) -> Facts:
     """A signal that arrived before the executor started is a stop before launch.
 
     After launch it adds no fact: the wait sees the signal itself.
@@ -235,7 +247,7 @@ def facts_after_signal(facts, signal_name):
     return {}
 
 
-def wait_cause(child_exited, deadline_passed, signal_name):
+def wait_cause(child_exited: bool, deadline_passed: bool, signal_name: str | None) -> str | None:
     """What ends the wait, or None to keep waiting. The first cause seen wins."""
     if child_exited:
         return "exited"
@@ -246,7 +258,7 @@ def wait_cause(child_exited, deadline_passed, signal_name):
     return None
 
 
-def _failed_before_launch(f):
+def _failed_before_launch(f: Facts) -> bool:
     return bool(
         f.get("input_check")
         or f.get("executor_driver_check")
@@ -257,7 +269,7 @@ def _failed_before_launch(f):
     )
 
 
-def step_runs(step, facts):
+def step_runs(step: str, facts: Facts) -> bool:
     """Whether a step runs, given the facts so far.
 
     The last step always runs. The first runs once, until a header is formed. After a refusal only the claim of the request id
@@ -282,7 +294,7 @@ def step_runs(step, facts):
     return True
 
 
-def outcome_kind(facts):
+def outcome_kind(facts: Facts) -> str:
     """What the last step must do: "unreadable", "not_recorded" or "record"."""
     if facts.get("unreadable") or facts.get("header_source") is None:
         return "unreadable"
@@ -291,7 +303,7 @@ def outcome_kind(facts):
     return "record"
 
 
-def result_status(result):
+def result_status(result: object) -> str:
     """A step's result as a fact: a stand-in never fails; a real step reports ok=False when it does."""
     return (
         "failed"
@@ -300,7 +312,7 @@ def result_status(result):
     )
 
 
-def conclude(outcome):
+def conclude(outcome: Mapping[str, Any]) -> Conclusion:
     """What the command prints and returns, from how the last step went.
 
     outcome: {"kind": "written" | "write_failed" | "not_recorded" | "unreadable",
@@ -357,24 +369,24 @@ _ID_CHARACTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 _NAME_CHARACTERS = _ID_CHARACTERS
 
 
-def _valid_request_id(value):
+def _valid_request_id(value: object) -> bool:
     return (
         isinstance(value, str) and 0 < len(value) <= 64 and all(c in _ID_CHARACTERS for c in value)
     )
 
 
-def _plain_int(value):
+def _plain_int(value: object) -> bool:
     return type(value) is int
 
 
-def _text(value):
+def _text(value: object) -> bool:
     return isinstance(value, str) and bool(value)
 
 
 _LONGEST_TIME_LIMIT_SECONDS = 10**9
 
 
-def _usable_time_limit(value):
+def _usable_time_limit(value: object) -> bool:
     """A finite number above zero that the clock can use."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
@@ -385,7 +397,7 @@ def _usable_time_limit(value):
     return math.isfinite(seconds) and 0 < seconds <= _LONGEST_TIME_LIMIT_SECONDS
 
 
-def _refusal(reason, problem, header_source):
+def _refusal(reason: str, problem: str, header_source: HeaderSource) -> DocumentCheck:
     return {
         "header_source": header_source,
         "refusal": {"reason": reason, "step": "input_check"},
@@ -393,11 +405,11 @@ def _refusal(reason, problem, header_source):
     }
 
 
-def _no_header(problem):
+def _no_header(problem: str) -> DocumentCheck:
     return {"header_source": None, "refusal": None, "problem": problem}
 
 
-def _header_problem(raw):
+def _header_problem(raw: object) -> str | None:
     """The problem that stops a header being formed from the document, or None."""
     if not isinstance(raw, dict):
         return "the document is not a JSON object"
@@ -414,9 +426,11 @@ def _header_problem(raw):
     return None
 
 
-def _header_source(raw):
+def _header_source(raw: Document) -> HeaderSource:
     executor = raw.get("executor")
-    named = isinstance(executor, dict) and _text(executor.get("name"))
+    name = fixed.CANNOT_TELL
+    if isinstance(executor, dict) and _text(executor.get("name")):
+        name = executor["name"]
     return {
         "request_id": raw["request_id"],
         "records_location": raw["records_location"],
@@ -425,15 +439,15 @@ def _header_source(raw):
         "kind": raw["kind"],
         "parent_session": raw.get("parent_session", fixed.NONE),
         "asked_by": raw.get("asked_by", fixed.NONE),
-        "executor_name": executor["name"] if named else fixed.CANNOT_TELL,
+        "executor_name": name,
     }
 
 
-def _unknown_names(found, allowed):
+def _unknown_names(found: Iterable[str], allowed: Iterable[str]) -> str:
     return ", ".join(sorted(set(found) - set(allowed)))
 
 
-def _executor_refusal(executor):
+def _executor_refusal(executor: object) -> tuple[str, str] | None:
     """(reason, problem) when the executor part of the document is refused, else None."""
     if not isinstance(executor, dict):
         return "missing_setting", "executor is missing"
@@ -456,7 +470,7 @@ def _executor_refusal(executor):
     return None
 
 
-def _document_refusal(raw):
+def _document_refusal(raw: Document) -> tuple[str, str] | None:
     """(reason, problem) when a document whose header can be formed is refused, else None."""
     if not _plain_int(raw.get("format_version")) or raw["format_version"] != fixed.FORMAT_VERSION:
         return (
@@ -483,7 +497,7 @@ def _document_refusal(raw):
     return None
 
 
-def validate_document(raw):
+def validate_document(raw: object) -> DocumentCheck:
     """Check an input document read from JSON.
 
     Returns {"header_source", "refusal", "problem"}. header_source is None when
@@ -492,8 +506,8 @@ def validate_document(raw):
     good document or {"reason", "step"} for a refusal that gets recorded.
     """
     problem = _header_problem(raw)
-    if problem:
-        return _no_header(problem)
+    if problem or not isinstance(raw, dict):
+        return _no_header(problem or "the document is not a JSON object")
     header_source = _header_source(raw)
     refusal = _document_refusal(raw)
     if refusal:
@@ -501,7 +515,7 @@ def validate_document(raw):
     return {"header_source": header_source, "refusal": None, "problem": None}
 
 
-def parse_command_line(argv):
+def parse_command_line(argv: Sequence[str]) -> dict[str, str]:
     """Turn the arguments after the program name into a form, or a one-line refusal."""
     if argv and argv[0] in ("check", "stop", "status"):
         return {
@@ -512,7 +526,12 @@ def parse_command_line(argv):
     return {"refusal": "shuttle: usage: python3 -m shuttle run <input document>"}
 
 
-def executor_driver_check(command, environment_names, caller_environment, tool_found):
+def executor_driver_check(
+    command: str,
+    environment_names: Iterable[str],
+    caller_environment: Mapping[str, str],
+    tool_found: bool,
+) -> tuple[str | None, str | None]:
     """The command driver's check and the check of the named variables: (reason, one line) or (None, None)."""
     missing = [n for n in environment_names if n not in caller_environment]
     if missing:
@@ -530,7 +549,7 @@ def executor_driver_check(command, environment_names, caller_environment, tool_f
     return None, None
 
 
-def claim_problem(kind, request_id, records_location, error_name):
+def claim_problem(kind: str, request_id: str, records_location: str, error_name: str) -> str:
     """The one line for a request id that could not be claimed."""
     if kind == "used":
         return (
@@ -547,14 +566,16 @@ def claim_problem(kind, request_id, records_location, error_name):
     )
 
 
-def check_environment(names, caller_environment):
+def check_environment(names: Iterable[str], caller_environment: Mapping[str, str]) -> str | None:
     """The reason code that refuses the named variables, or None."""
     if any(name not in caller_environment for name in names):
         return "missing_setting"
     return None
 
 
-def build_environment(names, caller_environment):
+def build_environment(
+    names: Iterable[str], caller_environment: Mapping[str, str]
+) -> dict[str, str]:
     """The executor's environment: PATH and the named variables, nothing else."""
     built = {"PATH": caller_environment.get("PATH", "/usr/bin:/bin")}
     for name in names:
@@ -565,7 +586,9 @@ def build_environment(names, caller_environment):
 # --------------------------------------------------------------------- the records
 
 
-def build_header(record_type, header_source, record_id, time):
+def build_header(
+    record_type: str, header_source: HeaderSource, record_id: str, time: str
+) -> dict[str, Any]:
     return {
         "record_id": record_id,
         "record_type": record_type,
@@ -581,11 +604,11 @@ def build_header(record_type, header_source, record_id, time):
     }
 
 
-def is_stand_in(value):
+def is_stand_in(value: object) -> bool:
     return isinstance(value, dict) and fixed.STAND_IN_KEY in value
 
 
-def _from_step(result, key=None):
+def _from_step(result: StepResult | None, key: str) -> Any:
     """A receipt value from a step's result.
 
     A step that was not reached gives none. A stand-in gives "cannot tell".
@@ -598,11 +621,11 @@ def _from_step(result, key=None):
     return result.get(key, fixed.CANNOT_TELL)
 
 
-def _plain(value):
+def _plain(value: Any) -> Any:
     return fixed.NONE if value is None else value
 
 
-def _changed_nothing(steps):
+def _changed_nothing(steps: Mapping[str, StepResult]) -> Any:
     before, after = steps.get("opening_fingerprint"), steps.get("closing_freeze")
     if before is None or after is None:
         return fixed.NONE
@@ -611,7 +634,7 @@ def _changed_nothing(steps):
     return before.get("fingerprint") == after.get("fingerprint")
 
 
-def build_receipt(decision, facts):
+def build_receipt(decision: Mapping[str, Any], facts: Facts) -> Receipt:
     """Build the receipt from the decision and the facts gathered. Every field is present.
 
     facts: receipt_id, execution_version, host, input_hash, launched, started_at,
@@ -689,7 +712,7 @@ def build_receipt(decision, facts):
     return receipt
 
 
-def minimal_receipt(decision):
+def minimal_receipt(decision: Mapping[str, Any]) -> Receipt:
     """The receipt when building the full one failed: the decision, and "cannot tell" for everything else."""
     receipt = {
         group: {name: fixed.CANNOT_TELL for name in names}
@@ -699,7 +722,7 @@ def minimal_receipt(decision):
     return receipt
 
 
-def check_receipt(receipt):
+def check_receipt(receipt: Receipt) -> list[str]:
     """Problems with a receipt, judged against the fixed list. Empty when fine."""
     problems = []
     if set(receipt) != set(fixed.RECEIPT_GROUPS):

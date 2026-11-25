@@ -18,20 +18,25 @@ import json
 import os
 import signal
 import socket
+import subprocess
 import time
 import uuid
+from collections.abc import Callable, Mapping, Sequence
+from types import FrameType
+from typing import Any, TextIO
 
 from shuttle import __version__, command_driver, core, fixed, records, stand_ins
+from shuttle.shapes import Conclusion, Decision, Facts, Receipt, State
 
 END_GRACE_SECONDS = 3  # as of 2026-11-25: seconds between asking a child to end and killing it; passed in by code, never read from the world
 _POLL_SECONDS = 0.05
 
 
-def _now():
+def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat(timespec="milliseconds")
 
 
-def exit_facts(returncode):
+def exit_facts(returncode: int | None) -> tuple[int | None, str | None]:
     """From a child's return code: (exit code, signal name). A kill by signal has no exit code."""
     if returncode is None:
         return None, None
@@ -46,17 +51,17 @@ def exit_facts(returncode):
 class Clock:
     """The waiting seam: what time it is, and waiting. Everything in this file that waits goes through one."""
 
-    def now(self):
+    def now(self) -> float:
         return time.monotonic()
 
-    def sleep(self, seconds):
+    def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
 
 
 REAL_CLOCK = Clock()
 
 
-def _exited_within(process, seconds, clock):
+def _exited_within(process: subprocess.Popen[bytes], seconds: float, clock: Clock) -> bool:
     deadline = clock.now() + seconds
     while process.poll() is None:
         if clock.now() >= deadline:
@@ -65,7 +70,9 @@ def _exited_within(process, seconds, clock):
     return True
 
 
-def end_child(process, grace=END_GRACE_SECONDS, clock=REAL_CLOCK):
+def end_child(
+    process: subprocess.Popen[bytes], grace: float = END_GRACE_SECONDS, clock: Clock = REAL_CLOCK
+) -> str:
     """End the direct child, for every cause: ask, wait a short grace (seconds), then kill.
 
     Returns "ended" or "not_confirmed". Whether everything the child started is gone
@@ -82,7 +89,12 @@ def end_child(process, grace=END_GRACE_SECONDS, clock=REAL_CLOCK):
     return "ended"
 
 
-def wait_for_the_cause(process, limit_seconds, get_signal, clock=REAL_CLOCK):
+def wait_for_the_cause(
+    process: subprocess.Popen[bytes],
+    limit_seconds: float,
+    get_signal: Callable[[], str | None],
+    clock: Clock = REAL_CLOCK,
+) -> str:
     """Poll until the child exits, a signal is seen, or the limit passes. Returns the first cause seen."""
     deadline = clock.now() + limit_seconds
     while True:
@@ -92,7 +104,7 @@ def wait_for_the_cause(process, limit_seconds, get_signal, clock=REAL_CLOCK):
         clock.sleep(_POLL_SECONDS)
 
 
-def step_read_and_validate_document(state):
+def step_read_and_validate_document(state: State) -> None:
     facts = state["facts"]
     try:
         with open(state["document_path"], "rb") as f:
@@ -121,7 +133,7 @@ def step_read_and_validate_document(state):
     state["out"].flush()
 
 
-def step_claim_request_id(state):
+def step_claim_request_id(state: State) -> None:
     facts, source = state["facts"], state["facts"]["header_source"]
     header = core.build_header("request", source, uuid.uuid4().hex, _now())
     try:
@@ -149,7 +161,7 @@ def step_claim_request_id(state):
         facts["id_claim"] = "ok"
 
 
-def step_run_input_checks_and_executor_driver_check(state):
+def step_run_input_checks_and_executor_driver_check(state: State) -> None:
     # The input checks are real in the first step (the document's shape). This step is the
     # executor driver's check and the check of the named environment variables.
     settings = state["raw"]["executor"]["settings"]
@@ -164,22 +176,22 @@ def step_run_input_checks_and_executor_driver_check(state):
         state["problems"]["executor_driver_check"] = text
 
 
-def step_run_gates(state):  # stand-in
+def step_run_gates(state: State) -> None:  # stand-in
     state["stand_ins"]["gates"] = stand_ins.run_gates([])
     state["facts"]["gates"] = core.result_status(state["stand_ins"]["gates"])
 
 
-def step_set_up_run_area(state):  # stand-in
+def step_set_up_run_area(state: State) -> None:  # stand-in
     state["stand_ins"]["setup"] = stand_ins.set_up_run_area(command_driver.declare()["needs_setup"])
     state["facts"]["setup"] = core.result_status(state["stand_ins"]["setup"])
 
 
-def step_take_opening_fingerprint(state):  # stand-in
+def step_take_opening_fingerprint(state: State) -> None:  # stand-in
     state["stand_ins"]["opening_fingerprint"] = stand_ins.take_opening_fingerprint(None)
     state["facts"]["opening_freeze"] = core.result_status(state["stand_ins"]["opening_fingerprint"])
 
 
-def step_launch_executor(state):
+def step_launch_executor(state: State) -> None:
     spec = command_driver.launch(state["raw"]["executor"]["settings"])
     environment = core.build_environment(state["raw"].get("environment", []), os.environ)
     state["started_at"] = _now()
@@ -188,7 +200,7 @@ def step_launch_executor(state):
     state["facts"]["launch"] = "ok"
 
 
-def step_wait_for_the_end(state):
+def step_wait_for_the_end(state: State) -> None:
     process = state["stand_ins"]["boundary"]["process"]
     facts = state["facts"]
     clock = state["clock"]
@@ -209,7 +221,7 @@ def step_wait_for_the_end(state):
     state["ended_at"] = _now()
 
 
-def step_stop_everything_and_confirm_empty(state):  # stand-in
+def step_stop_everything_and_confirm_empty(state: State) -> None:  # stand-in
     state["stand_ins"]["stop_confirmation"] = stand_ins.stop_and_confirm_empty(
         state["stand_ins"]["boundary"]
     )
@@ -220,33 +232,35 @@ def step_stop_everything_and_confirm_empty(state):  # stand-in
         state["facts"]["stop"] = "confirmed" if status == "ok" else "not_confirmed"
 
 
-def step_observe(state):
+def step_observe(state: State) -> None:
     state["executor_driver_observations"] = command_driver.observe(fixed.NONE, fixed.CANNOT_TELL)
 
 
-def step_take_closing_freeze(state):  # stand-in
+def step_take_closing_freeze(state: State) -> None:  # stand-in
     state["stand_ins"]["closing_freeze"] = stand_ins.take_closing_freeze(
         None, state["stand_ins"].get("opening_fingerprint")
     )
     state["facts"]["closing_freeze"] = core.result_status(state["stand_ins"]["closing_freeze"])
 
 
-def step_deliver(state):  # stand-in
+def step_deliver(state: State) -> None:  # stand-in
     state["stand_ins"]["delivery"] = stand_ins.deliver(
         None, state["stand_ins"].get("closing_freeze")
     )
     state["facts"]["delivery"] = core.result_status(state["stand_ins"]["delivery"])
 
 
-def step_move_kept_files(state):  # stand-in
+def step_move_kept_files(state: State) -> None:  # stand-in
     state["stand_ins"]["kept_files"] = stand_ins.keep_files([])
 
 
-def step_tear_down(state):  # stand-in
+def step_tear_down(state: State) -> None:  # stand-in
     state["stand_ins"]["teardown"] = stand_ins.tear_down(None)
 
 
-def _full_receipt(state, decision, build_receipt):
+def _full_receipt(
+    state: State, decision: Decision, build_receipt: Callable[[Decision, Facts], Receipt]
+) -> Receipt:
     facts = state["facts"]
     return build_receipt(
         decision,
@@ -268,7 +282,7 @@ def _full_receipt(state, decision, build_receipt):
     )
 
 
-def conclude_run(state):
+def conclude_run(state: State) -> Conclusion:
     """The conclusion: decide, build the receipt, write the record. Each part has its own fallback."""
     facts = state["facts"]
     kind = core.outcome_kind(facts)
@@ -301,7 +315,7 @@ def conclude_run(state):
     return core.conclude({"kind": "written", "decision": decision, "path": path})
 
 
-def step_write_outcome_record(state):
+def step_write_outcome_record(state: State) -> None:
     state["conclusion"] = conclude_run(state)
 
 
@@ -324,7 +338,7 @@ STEPS = (
 )
 
 
-def guarded(name, step, state):
+def guarded(name: str, step: Callable[[State], None], state: State) -> None:
     """Run one step. An error becomes a fact; it never escapes."""
     facts = state["facts"]
     try:
@@ -343,36 +357,36 @@ def guarded(name, step, state):
             )
 
 
-def _install_handlers(state):
+def _install_handlers(state: State) -> dict[int, Any]:
     """Signals only record which one came first. They never raise."""
 
-    def handler(number, frame):
+    def handler(number: int, frame: FrameType | None) -> None:
         if state["signal"] is None:
             state["signal"] = signal.Signals(number).name
 
-    previous = {}
+    previous: dict[int, Any] = {}
     for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         previous[number] = signal.signal(number, handler)
     return previous
 
 
 def run(
-    document_path,
-    out,
-    err,
-    steps=None,
-    build_receipt=None,
-    write_record=None,
-    grace=END_GRACE_SECONDS,
-    clock=REAL_CLOCK,
-):
+    document_path: str,
+    out: TextIO,
+    err: TextIO,
+    steps: Sequence[tuple[str, Callable[[State], None]]] | None = None,
+    build_receipt: Callable[[Decision, Facts], Receipt] | None = None,
+    write_record: Callable[[str, str, Mapping[str, Any]], str] | None = None,
+    grace: float = END_GRACE_SECONDS,
+    clock: Clock = REAL_CLOCK,
+) -> int:
     """Run one input document end to end. Returns the exit code.
 
     clock: the waiting seam (a Clock); a test passes a stand-in.
     grace: seconds between asking the child to end and killing it; code passes it, a test passes a short one.
     steps: the ordered (name, function) table, the real one by default, so a test can replace any step.
     """
-    state = {
+    state: State = {
         "document_path": document_path,
         "out": out,
         "err": err,
@@ -405,4 +419,5 @@ def run(
         out.write(line + "\n")
     for line in state["conclusion"]["stderr"]:
         err.write(line + "\n")
-    return state["conclusion"]["exit"]
+    exit_code: int = state["conclusion"]["exit"]
+    return exit_code
