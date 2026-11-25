@@ -176,6 +176,77 @@ class CommandSeam(unittest.TestCase):
         self.assertFalse(os.path.exists(self.witness), "the script must not run")
         self.assertTrue(os.path.exists(os.path.join(self.records, "req-1.request.json")))
 
+    def nesting_that_cannot_be_written(self):
+        """A list nested deep enough that this Python reads it but cannot write it back, or None."""
+        for depth in (1500, 5000, 20000, 50000):
+            nested = "[" * depth + "]" * depth
+            try:
+                json.dumps({"a": json.loads(nested)}, indent=2)
+            except RecursionError:
+                return nested
+            except ValueError:
+                return None
+        return None
+
+    def test_a_request_record_cut_short_by_a_file_size_limit_leaves_no_record_and_the_id_works_afterwards(self):
+        import resource
+        text = json.dumps(self.document())[:-1] + ', "note": "%s"}' % ("x" * 200000)
+        limit = lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (100000, 100000))
+        path = os.path.join(self.root, "big.json")
+        with open(path, "w") as f:
+            f.write(text.replace('"note"', '"surprise"'))
+        done = subprocess.run([sys.executable, "-m", "shuttle", "run", path], cwd=REPO, capture_output=True,
+                              text=True, timeout=60, preexec_fn=limit)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout.splitlines()[-1], "could_not_start")
+        self.assertIn("NOT spent", done.stderr)
+        self.assertEqual(os.listdir(self.records), [], "a record cut short must leave nothing behind")
+        path = os.path.join(self.root, "fixed.json")
+        with open(path, "w") as f:
+            json.dump(self.document(), f)
+        done = subprocess.run([sys.executable, "-m", "shuttle", "run", path], cwd=REPO, capture_output=True,
+                              text=True, timeout=60, preexec_fn=limit)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"])
+
+    def test_a_document_whose_request_record_cannot_be_built_leaves_no_record_and_the_id_works_afterwards(self):
+        deep = self.nesting_that_cannot_be_written()
+        if deep is None:
+            self.skipTest("this Python writes any nesting it can read; the size-limit test covers the same path")
+        text = json.dumps(self.document())[:-1] + ', "surprise": %s}' % deep
+        done, lines = self.run_command(text)
+        if lines == ["none"]:
+            self.skipTest("this Python cannot even read a document that deep")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(lines[-1], "could_not_start")
+        self.assertEqual(len(done.stderr.strip().splitlines()), 1)
+        self.assertIn("NOT spent", done.stderr)
+        self.assertEqual(os.listdir(self.records), [], "neither record may exist")
+        done, lines = self.run_command(self.document())
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(lines[-1], "ended_by_itself")
+        self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
+        self.assertEqual(self.read("req-1.outcome.json")["header"]["request_id"], "req-1")
+
+    def test_two_commands_started_together_with_one_request_id_exactly_one_claims_it_and_its_records_are_whole(self):
+        """Pins behaviour that held before the change too; a race cannot be made to fail on demand."""
+        paths = []
+        for n in range(2):
+            path = os.path.join(self.root, "in%d.json" % n)
+            with open(path, "w") as f:
+                json.dump(self.document(exit_code=n), f)
+            paths.append(path)
+        children = [subprocess.Popen([sys.executable, "-m", "shuttle", "run", p], cwd=REPO,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for p in paths]
+        results = [(c.communicate(timeout=60), c.returncode) for c in children]
+        codes = sorted(code for _, code in results)
+        self.assertEqual(codes, [0, 1])
+        loser = next(out_err for out_err, code in results if code == 1)
+        self.assertIn("already used", loser[1])
+        self.assertEqual(sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"])
+        self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
+        self.assertEqual(self.read("req-1.outcome.json")["receipt"]["the_ending"]["ending"], "ended_by_itself")
+
     def test_a_tool_that_is_not_installed_could_not_start_at_the_executor_driver_check(self):
         doc = self.document()
         doc["executor"]["settings"]["command"] = os.path.join(self.root, "no-such-tool")
