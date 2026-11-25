@@ -28,6 +28,7 @@ from typing import Any, TextIO
 from shuttle import __version__, command_driver, core, fixed, records, stand_ins
 from shuttle.shapes import Conclusion, Decision, Facts, Receipt, State
 
+# The deadline (the time limit) and this grace are stand-ins until the boundary owns the time limit.
 END_GRACE_SECONDS = 3  # as of 2026-11-25: seconds between asking a child to end and killing it; passed in by code, never read from the world
 _POLL_SECONDS = 0.05
 
