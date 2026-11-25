@@ -1,19 +1,6 @@
 #!/bin/bash
-# Checks whether the Shuttle boundary can stop the command inside it from writing
-# two protected folders (records, kept) while still letting it write the place.
-# The boundary is as in checks/boundary.sh, plus two read-only binds placed after
-# the whole-filesystem bind:
-#   systemd-run --user --scope  around
-#   bwrap --unshare-pid --die-with-parent --bind / / --ro-bind R R --ro-bind K K
-#         --dev /dev --proc /proc <command>
-# From inside it tries, one output line each:
-#   a create a file in records      b overwrite the file in records
-#   c delete the file in records    d rename the records folder
-#   e create a file in kept         f create a file in the place (must succeed)
-#   g remount records read-write    h write to records by a second path
-# (h is two tries: via /proc/self/root, and via a symlink made in the place.)
-# After the command exits, from outside, records and kept are checked by content
-# and the place is checked for the new file. Last line:
+# Answers: with records and kept bound read-only inside the boundary, can the command
+# inside still write the place but not records or kept? Last line:
 #   records protection: works
 #   records protection: does not work: <which attempt got through>
 # Only the unit this script starts is stopped, by exact name.
@@ -41,7 +28,6 @@ echo "records original" > "$R/old.txt"
 echo "kept original" > "$K/old.txt"
 
 # The command that runs inside the boundary. It lives outside the three folders.
-# Each line: <code> <status> <what was tried and what was seen>
 cat > "$WORK/inner.sh" <<'INNER'
 R=$1; K=$2; P=$3
 one() { tr '\n' ' ' | sed 's/  */ /g; s/ $//' | cut -c1-300; }
@@ -82,7 +68,6 @@ while read -r code status text; do
   [ "$code" = f ] && [ "$status" = bad ] && THROUGH="$THROUGH f(place not writable)"
 done < "$WORK/inner.out"
 
-# Verify from outside, by content.
 V=""
 [ -d "$R" ] && [ "$(ls -A "$R")" = "old.txt" ] && [ "$(cat "$R/old.txt")" = "records original" ] \
   && echo "outside: records unchanged (only old.txt, content 'records original')" \
