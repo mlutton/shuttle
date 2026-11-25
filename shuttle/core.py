@@ -552,9 +552,7 @@ def executor_driver_check(
 def claim_problem(kind: str, request_id: str, records_location: str, error_name: str) -> str:
     """The one line for a request id that could not be claimed."""
     if kind == "used":
-        return (
-            f"request id {request_id!r} was already used; nothing was done; give the run a new request id"
-        )
+        return f"request id {request_id!r} was already used; nothing was done; give the run a new request id"
     if kind == "not_built":
         return (
             f"the request record could not be built from the document ({error_name}); nothing was done and "

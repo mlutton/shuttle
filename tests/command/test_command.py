@@ -230,8 +230,10 @@ class CommandSeam(unittest.TestCase):
         import resource
 
         text = json.dumps(self.document())[:-1] + ', "note": "%s"}' % ("x" * 200000)
+
         def limit():
             return resource.setrlimit(resource.RLIMIT_FSIZE, (100000, 100000))
+
         path = os.path.join(self.root, "big.json")
         with open(path, "w") as f:
             f.write(text.replace('"note"', '"surprise"'))

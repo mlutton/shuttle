@@ -22,13 +22,46 @@ Early build. It is not usable yet, and it may not be for a while. The first incr
 - Inside: functions over plain data. Each decision is a pure function; the code that touches files and processes is a thin shell around them.
 - Python, standard library only.
 
+## Checking a change
+
+One script decides whether a change is sound: lint (ruff, including a limit of three nested blocks and a ban on importing libraries that reach the world outside the shell modules named in `pyproject.toml`), format check (ruff), strict types (mypy, over `shuttle/`) and the tests (under a 20 second budget). The pre-push hook and the hosted `tests (unittest)` job both run it and nothing else.
+
+Install the development tools once (they are not runtime dependencies; the package itself uses only the standard library), preferably in a virtual environment inside the clone:
+
+```
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+```
+
+Run the check:
+
+```
+./checks/all.sh
+```
+
+It prints one line per stage and a last line, `check: passed` or `check: failed: <stage>`. Exit code 0 means passed, 1 means a stage failed, 2 means the check could not run (a tool is missing; the last line names it and the install command). The script uses `.venv/bin/python` when it exists, else `python3`; set `PYTHON` to use another interpreter. Nothing is retried.
+
+Switch on the pre-push hook, once per clone:
+
+```
+git config core.hooksPath .githooks
+```
+
+A push is then refused unless `./checks/all.sh` passes on each commit being pushed. The hook checks out that commit into a temporary folder and runs the script there, so uncommitted changes in your folder neither pass nor fail a push.
+
 ## Tests
 
 ```
 python3 -m unittest discover -s tests
 ```
 
-The tests run the real command as a child process against a temporary records folder, and test each decision as a function over plain data. The `tests` workflow runs them on every pull request.
+The tests are sorted by seam, all run by that one command:
+
+- `tests/by_value/`: decisions as functions over plain data, and rules read from the source.
+- `tests/command/`: the real command, the check script and the hook, run as child processes or against a temporary folder.
+- `tests/boundary/`: tests of the boundary; none yet.
+
+The `tests (unittest)` workflow runs the check on every pull request.
 
 ## Contributing
 

@@ -6,7 +6,7 @@
 #   lint    ruff check .
 #   format  ruff format --check .
 #   types   mypy (strict, over shuttle/; see pyproject.toml)
-#   tests   python -m unittest discover -s tests
+#   tests   python -m unittest discover -s tests, under a 20 second budget
 # Prints one line per stage ("<stage>: passed" or "<stage>: failed"; a failed stage's
 # own output goes to standard error), then a last line on standard output:
 #   check: passed
@@ -55,5 +55,6 @@ stage() {
 stage lint "$PYTHON" -m ruff check .
 stage format "$PYTHON" -m ruff format --check .
 stage types "$PYTHON" -m mypy
-stage tests "$PYTHON" -m unittest discover -s tests
+# As of 2026-11-25 the suite takes about 4 seconds; a run past 20 is a wait that crept back in.
+stage tests timeout 20 "$PYTHON" -m unittest discover -s tests
 echo "check: passed"
