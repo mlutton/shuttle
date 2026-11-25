@@ -21,7 +21,7 @@ import uuid
 
 from shuttle import __version__, command_driver, core, fixed, records, stand_ins
 
-_END_GRACE_SECONDS = 3
+END_GRACE_SECONDS = 3   # as of 2026-11-25: seconds between asking a child to end and killing it; passed in by code, never read from the world
 _POLL_SECONDS = 0.05
 
 
@@ -38,8 +38,8 @@ def _exited_within(process, seconds):
     return True
 
 
-def end_child(process):
-    """End the direct child, for every cause: ask, wait a short grace, then kill.
+def end_child(process, grace=END_GRACE_SECONDS):
+    """End the direct child, for every cause: ask, wait a short grace (seconds), then kill.
 
     Returns "ended" or "not_confirmed". Whether everything the child started is gone
     is a stand-in (step 9); only the direct child is ended here.
@@ -49,12 +49,12 @@ def end_child(process):
             process.terminate()
         except OSError:
             pass
-        if not _exited_within(process, _END_GRACE_SECONDS):
+        if not _exited_within(process, grace):
             try:
                 process.kill()
             except OSError:
                 pass
-            if not _exited_within(process, _END_GRACE_SECONDS):
+            if not _exited_within(process, grace):
                 return "not_confirmed"
     return "ended"
 
@@ -149,11 +149,11 @@ def step_wait_for_the_end(state):
                 break
             time.sleep(_POLL_SECONDS)
         facts["wait"] = cause
-        if cause != "exited" and end_child(process) == "not_confirmed":
+        if cause != "exited" and end_child(process, state["grace"]) == "not_confirmed":
             facts["stop"] = "not_confirmed"
     finally:
         if process.poll() is None:  # the wait itself broke: still end the child
-            end_child(process)
+            end_child(process, state["grace"])
     facts["exit_code"], facts["child_signal"] = core.exit_facts(process.returncode)
     state["executor_duration"] = (datetime.datetime.now(datetime.timezone.utc) - state["clock_start"]).total_seconds()
     state["ended_at"] = _now()
@@ -279,14 +279,15 @@ def _install_handlers(state):
     return previous
 
 
-def run(document_path, out, err, steps=None, build_receipt=None, write_record=None):
+def run(document_path, out, err, steps=None, build_receipt=None, write_record=None, grace=END_GRACE_SECONDS):
     """Run one input document end to end. Returns the exit code.
 
+    grace: seconds between asking the child to end and killing it; code passes it, a test passes a short one.
     steps: the ordered (name, function) table, the real one by default, so a test can replace any step.
     """
     state = {
         "document_path": document_path, "out": out, "err": err,
-        "facts": {}, "stand_ins": {}, "problems": {}, "signal": None,
+        "facts": {}, "stand_ins": {}, "problems": {}, "signal": None, "grace": grace,
         "build_receipt": build_receipt or core.build_receipt,
         "write_record": write_record or records.write_outcome_record,
     }
@@ -299,7 +300,7 @@ def run(document_path, out, err, steps=None, build_receipt=None, write_record=No
     finally:
         boundary = state["stand_ins"].get("boundary")
         if boundary and boundary.get("process") is not None:
-            end_child(boundary["process"])  # whatever went wrong, nothing is left running
+            end_child(boundary["process"], grace)  # whatever went wrong, nothing is left running
         if "conclusion" not in state:  # the last step did not run, or did not finish
             state["conclusion"] = conclude_run(state)
         for number, handler in previous.items():
