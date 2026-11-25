@@ -2,7 +2,7 @@
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py312"  # minimum Python: 3.12 (the whole suite passes on it; on 3.11 one command test fails)
 
 [tool.ruff.lint]
 # E4, E7, E9: pycodestyle errors; F: pyflakes; I: import order; B: bugbear;
@@ -25,7 +25,8 @@ max-complexity = 10
 max-nested-blocks = 3
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-# One message, one list. The rule test tests/by_value/test_rules.py reads this table.
+# The linter's half of the shell-isolation rule: it points at the line. The other half, an
+# allow-list for the core, is tests/by_value/test_rules.py. Both read [tool.shuttle.modules].
 "os".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
 "sys".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
 "io".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
@@ -77,16 +78,46 @@ max-nested-blocks = 3
 "atexit".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
 "sysconfig".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
 "site".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"shuttle.__main__".msg = "The core may not import the shell. Move the code that needs it into the shell, or pass what it computes in as an argument."
+"shuttle.cli".msg = "The core may not import the shell. Move the code that needs it into the shell, or pass what it computes in as an argument."
+"shuttle.records".msg = "The core may not import the shell. Move the code that needs it into the shell, or pass what it computes in as an argument."
+"shuttle.run".msg = "The core may not import the shell. Move the code that needs it into the shell, or pass what it computes in as an argument."
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Absolute imports only, so that a banned module cannot be reached by a relative form
+# such as "from . import run".
+ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
 # The shell: the modules allowed to reach the world. Every other module in shuttle/ is core.
 "shuttle/__main__.py" = ["TID251"]  # the entry point: reads sys.argv and exits
 "shuttle/cli.py" = ["TID251"]  # the command line: reads argv, writes the standard streams
-"shuttle/command_driver.py" = ["TID251"]  # locates the command on PATH (shutil.which reads the environment)
 "shuttle/records.py" = ["TID251"]  # reads and writes the two record files
 "shuttle/run.py" = ["TID251"]  # the run: clock, signals, files, environment, host name, processes
-"shuttle/stand_ins.py" = ["TID251"]  # the boundary stand-in starts the child process
 "tests/**" = ["TID251"]  # tests spawn processes and use temporary folders; the ban is for the package
+
+[tool.shuttle.modules]
+# Every module in shuttle/, sub-folders included, is named here as core or shell. The
+# classification is the rule. The core decides and touches nothing; the shell touches the
+# world. tests/by_value/test_rules.py fails on a module that is in neither list (or on a
+# name here with no file) and on a core module that imports anything but another core
+# module or a standard library module on its short allow-list. The ruff settings above
+# (the shell modules banned, the per-file ignores) must agree with these lists; a test
+# checks that they do.
+core = [
+    "shuttle",  # __init__.py: the version string
+    "shuttle.command_driver",
+    "shuttle.core",
+    "shuttle.fixed",
+    "shuttle.shapes",
+    "shuttle.stand_ins",
+]
+shell = [
+    "shuttle.__main__",  # reads sys.argv and exits
+    "shuttle.cli",  # reads argv, writes the standard streams
+    "shuttle.records",  # reads and writes the record files
+    "shuttle.run",  # the run: clock, signals, files, environment, host name, processes
+]
 
 [tool.mypy]
 python_version = "3.12"
