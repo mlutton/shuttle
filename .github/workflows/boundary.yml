@@ -1,0 +1,41 @@
+name: boundary
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  plain:
+    name: boundary (plain runner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Environment facts
+        run: |
+          id -u; echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-unset}"
+          ls -d /run/user/* 2>&1 || true
+          sysctl kernel.unprivileged_userns_clone kernel.apparmor_restrict_unprivileged_userns 2>&1 || true
+      - name: Run the boundary check
+        run: ./checks/boundary.sh
+
+  adjusted:
+    name: boundary (with adjustments)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: "Adjustment 1: allow unprivileged user namespaces under AppArmor"
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: "Adjustment 2: enable linger so a user systemd session exists"
+        run: |
+          sudo loginctl enable-linger "$USER"
+          for i in $(seq 1 30); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 1; done
+          ls -l "/run/user/$(id -u)/" || true
+      - name: Run the boundary check
+        run: |
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          ./checks/boundary.sh
