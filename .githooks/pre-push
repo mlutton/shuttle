@@ -1,0 +1,14 @@
+#!/bin/sh
+# Refuses a push unless the check script passes. It runs checks/all.sh and nothing else.
+# Switch it on, once per clone:  git config core.hooksPath .githooks
+# Note: the check runs on the files in the working tree, not on the commits being pushed.
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+if [ ! -x checks/all.sh ]; then
+    echo "push refused: checks/all.sh is missing or not executable; nothing was pushed" >&2
+    exit 1
+fi
+if ! checks/all.sh; then
+    echo "push refused: the check did not pass; fix it and push again" >&2
+    exit 1
+fi

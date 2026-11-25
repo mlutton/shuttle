@@ -9,7 +9,7 @@ import datetime
 import signal
 import unittest
 
-from shuttle import core, run
+from shuttle import run
 
 POLL = run._POLL_SECONDS
 GRACE = 3  # a stand-in clock makes the real default affordable here

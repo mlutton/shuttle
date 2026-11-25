@@ -7,12 +7,86 @@ target-version = "py312"
 [tool.ruff.lint]
 # E4, E7, E9: pycodestyle errors; F: pyflakes; I: import order; B: bugbear;
 # UP: pyupgrade; SIM: simplify; C901: complexity per function.
-select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "C901"]
+# TID251: libraries that reach the world are banned outside the shell (see below).
+# PLR1702: at most three nested blocks in a function, tests included.
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "C901", "TID251", "PLR1702"]
+# PLR1702 is a preview rule in ruff 0.14.10. With explicit-preview-rules only the rules
+# named in select are previewed; no other preview rule turns on.
+preview = true
+explicit-preview-rules = true
 
 [tool.ruff.lint.mccabe]
 # As of 2026-11-25: the most complex functions are _decide_before_launch and
 # _decide_after_launch (10 each); _decide (24) and validate_document (19) were split to get there.
 max-complexity = 10
+
+[tool.ruff.lint.pylint]
+# As of 2026-11-25: the deepest nesting in the package is 3; one test was 5 deep and was flattened.
+max-nested-blocks = 3
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# One message, one list. The rule test tests/by_value/test_rules.py reads this table.
+"os".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"sys".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"io".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"pathlib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"shutil".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"tempfile".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"glob".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"fileinput".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"stat".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"subprocess".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"multiprocessing".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"threading".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"concurrent".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"asyncio".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"pty".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"time".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"datetime".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"sched".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"zoneinfo".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"signal".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"socket".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"ssl".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"select".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"selectors".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"http".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"urllib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"ftplib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"smtplib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"email".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"xmlrpc".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"socketserver".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"webbrowser".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"getpass".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"platform".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"pwd".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"grp".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"resource".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"ctypes".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"sqlite3".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"shelve".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"dbm".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"pickle".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"random".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"secrets".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"uuid".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"importlib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"runpy".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"logging".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"atexit".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"sysconfig".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+"site".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module exempted in per-file-ignores) and pass the value in as an argument."
+
+[tool.ruff.lint.per-file-ignores]
+# The shell: the modules allowed to reach the world. Every other module in shuttle/ is core.
+"shuttle/__main__.py" = ["TID251"]  # the entry point: reads sys.argv and exits
+"shuttle/cli.py" = ["TID251"]  # the command line: reads argv, writes the standard streams
+"shuttle/command_driver.py" = ["TID251"]  # locates the command on PATH (shutil.which reads the environment)
+"shuttle/records.py" = ["TID251"]  # reads and writes the two record files
+"shuttle/run.py" = ["TID251"]  # the run: clock, signals, files, environment, host name, processes
+"shuttle/stand_ins.py" = ["TID251"]  # the boundary stand-in starts the child process
+"tests/**" = ["TID251"]  # tests spawn processes and use temporary folders; the ban is for the package
 
 [tool.mypy]
 python_version = "3.12"

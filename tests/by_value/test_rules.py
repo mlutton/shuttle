@@ -7,27 +7,32 @@ These tests read source text; they start no process and write nothing.
 import ast
 import os
 import sys
+import tomllib
 import unittest
 
 PACKAGE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "shuttle")
 
 # The core: modules that decide and must touch nothing. fixed.py holds constants and
 # shapes.py holds types; both are read by the core. Every other module is the shell.
-CORE_MODULES = ("core.py", "fixed.py", "shapes.py")
+CORE_MODULES = ("__init__.py", "core.py", "fixed.py", "shapes.py")
 
-# Standard library modules that reach files, processes, the clock, signals, the network
-# or the environment (sys carries the arguments, the streams and exit).
-REACHING_MODULES = frozenset(
-    {
-        "os", "sys", "io", "pathlib", "shutil", "tempfile", "glob", "fileinput", "stat",
-        "subprocess", "multiprocessing", "threading", "concurrent", "asyncio", "pty",
-        "time", "datetime", "sched", "zoneinfo", "signal", "socket", "ssl", "select",
-        "selectors", "http", "urllib", "ftplib", "smtplib", "email", "xmlrpc",
-        "socketserver", "webbrowser", "getpass", "platform", "pwd", "grp", "resource",
-        "ctypes", "sqlite3", "shelve", "dbm", "pickle", "random", "secrets", "uuid",
-        "importlib", "runpy", "logging", "atexit", "sysconfig", "site",
-    }
-)  # fmt: skip
+
+def _pyproject():
+    with open(os.path.join(os.path.dirname(PACKAGE), "pyproject.toml"), "rb") as f:
+        return tomllib.load(f)["tool"]["ruff"]["lint"]
+
+
+# Standard library modules that reach files, processes, the clock, signals, the network or
+# the environment. The one list is the linter's banned-api table in pyproject.toml; the
+# linter bans them across the package, and this test checks the core by the same list.
+REACHING_MODULES = frozenset(_pyproject()["flake8-tidy-imports"]["banned-api"])
+
+# The shell, exempted from the ban by name in pyproject.toml.
+SHELL_EXEMPTIONS = frozenset(
+    name.removeprefix("shuttle/")
+    for name, rules in _pyproject()["per-file-ignores"].items()
+    if name.startswith("shuttle/") and "TID251" in rules
+)
 
 # Names that reach the world without an import.
 REACHING_CALLS = frozenset({"open", "__import__", "exec", "eval", "input", "print"})
@@ -90,6 +95,14 @@ class TestTheCoreTouchesNothing(unittest.TestCase):
             ("from shuttle import fixed", []),
         ):
             self.assertEqual(reaching_problems(source), expected, source)
+
+    def test_the_linter_ban_and_this_test_agree_on_which_modules_are_the_shell(self):
+        modules = {name for name, _ in package_sources()}
+        self.assertEqual(SHELL_EXEMPTIONS, modules - set(CORE_MODULES))
+
+    def test_the_ban_list_names_the_modules_that_reach_the_world(self):
+        for name in ("os", "sys", "subprocess", "time", "datetime", "signal", "socket", "pathlib"):
+            self.assertIn(name, REACHING_MODULES)
 
     def test_every_core_module_exists(self):
         for name in CORE_MODULES:
