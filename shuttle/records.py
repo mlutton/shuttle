@@ -17,7 +17,12 @@ def outcome_path(records_location, request_id):
 
 
 def claim_request_record(records_location, request_id, record):
-    """Create the request record. Raises FileExistsError when the id is used."""
+    """Create the request record. Raises FileExistsError when the id is used.
+
+    The id is used when either record of the pair exists.
+    """
+    if os.path.lexists(outcome_path(records_location, request_id)):
+        raise FileExistsError(outcome_path(records_location, request_id))
     with open(request_path(records_location, request_id), "x", encoding="utf-8") as f:
         json.dump(record, f, indent=2)
         f.write("\n")

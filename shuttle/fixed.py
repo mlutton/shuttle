@@ -32,7 +32,7 @@ REASONS_BY_ENDING = {
         "reach_not_available", "unknown_executor", "unknown_setting", "missing_setting",
         "tool_not_installed", "no_login", "request_id_used", "credential_like_value",
         "gate_said_no", "gate_failed", "setup_failed", "freeze_failed",
-        "launch_failed", "stopped",
+        "launch_failed", "stopped", "records_location_unusable",
     ),
     "execution_failed": (
         "stop_not_confirmed", "closing_freeze_failed", "destination_changed",
@@ -46,13 +46,43 @@ REASONS = tuple(r for ending in ENDINGS for r in REASONS_BY_ENDING[ending])
 # "could not start"; "record" is not a step.
 STEPS_BY_ENDING = {
     "could_not_start": (
-        "gates", "input_check", "driver_check", "id_claim", "setup",
+        "gates", "input_check", "executor_driver_check", "id_claim", "setup",
         "opening_freeze", "launch",
     ),
     "execution_failed": ("stop_not_confirmed", "closing_freeze", "delivery"),
 }
 
 STEPS = tuple(s for steps in STEPS_BY_ENDING.values() for s in steps)
+
+# Which failed step each reason may sit beside. "none" for a reason that names no step.
+_INPUT = ("input_check",)
+_INPUT_OR_DRIVER = ("input_check", "executor_driver_check")
+STEPS_FOR_REASON = {
+    "time_limit": (NONE,),
+    "stop_record": (NONE,),
+    "signal": (NONE,),
+    "stopped": (NONE,),
+    "request_id_used": ("id_claim",),
+    "records_location_unusable": ("id_claim",),
+    "unknown_executor": _INPUT_OR_DRIVER,
+    "unknown_setting": _INPUT_OR_DRIVER,
+    "missing_setting": _INPUT_OR_DRIVER,
+    "tool_not_installed": ("executor_driver_check",),
+    "no_login": ("executor_driver_check",),
+    "gate_said_no": ("gates",),
+    "gate_failed": ("gates",),
+    "setup_failed": ("setup",),
+    "freeze_failed": ("opening_freeze",),
+    "launch_failed": ("launch",),
+    "stop_not_confirmed": ("stop_not_confirmed",),
+    "closing_freeze_failed": ("closing_freeze",),
+    "destination_changed": ("delivery",),
+    "delivery_failed": ("delivery",),
+    "lost": (CANNOT_TELL,),
+}
+for _reason in REASONS:
+    STEPS_FOR_REASON.setdefault(_reason, _INPUT)
+del _reason
 
 # The receipt: four groups, by who knows the fact.
 RECEIPT_GROUPS = {
@@ -71,8 +101,8 @@ RECEIPT_GROUPS = {
         "exit_code", "signal", "peak_memory", "processor_time",
         "session_file_kept_at", "teardown_failure", "stop_reason", "stop_asker",
     ),
-    "what_the_driver_observed": (
-        "driver_name", "driver_version", "tool_version", "model", "effort",
+    "what_the_executor_driver_observed": (
+        "executor_driver_name", "executor_driver_version", "tool_version", "model", "effort",
         "tokens_in", "tokens_out", "tokens_cached", "activity",
         "session_id", "refused_actions", "quota_level",
         "vendor_limit_reached", "vendor_limit_reset", "tool_made_own_commits",

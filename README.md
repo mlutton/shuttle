@@ -6,7 +6,7 @@ A caller hands Shuttle one input document. Shuttle checks it, starts one executo
 
 ## Status
 
-Early build. It is not usable yet, and it may not be for a while. The first increment is a skeleton: `python3 -m shuttle run <input document>` runs one plain command from start to finish and writes a request record and an outcome record. Only the run form exists. The boundary, the fingerprints of the place, delivery and the other three forms are stand-ins or not built; a receipt field fed by a stand-in says "cannot tell". The code and its tests are published as they are written, so the tests are the best account of what works today.
+Early build. It is not usable yet, and it may not be for a while. The first increment is a skeleton: `python3 -m shuttle run <input document>` runs one plain command from start to finish (ending it when its time limit runs out or the command is interrupted) and writes a request record and an outcome record. Only the run form exists. The boundary (the command runs as a plain child process, and confirming that everything it started is stopped is a stand-in), the fingerprints of the place, delivery and the other three forms are stand-ins or not built; a receipt field fed by a stand-in says "cannot tell". The code and its tests are published as they are written, so the tests are the best account of what works today.
 
 ## What it will promise
 

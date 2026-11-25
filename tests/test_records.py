@@ -6,15 +6,16 @@ import unittest
 
 from shuttle import core, fixed, records
 
-HEADER_SOURCE = {"request_id": "req-1", "records_location": None, "executor_name": "command"}
+HEADER_SOURCE = {"request_id": "req-1", "records_location": None, "executor_name": "command",
+                 "thread": "t", "round": 1, "kind": "plain", "parent_session": "none", "asked_by": "none"}
 
 
 def facts():
     return {
         "receipt_id": "r-1", "execution_version": "1", "host": "h", "input_hash": "x",
-        "launched": False, "started_at": None, "ended_at": None, "observed_runtime": None,
+        "launched": False, "started_at": None, "ended_at": None,
         "executor_duration": None, "exit_code": None, "signal": None,
-        "driver_observations": None, "stand_ins": {}, "reason_text": None,
+        "executor_driver_observations": None, "stand_ins": {}, "reason_text": None,
     }
 
 
@@ -34,8 +35,9 @@ class RecordsFolder(unittest.TestCase):
         for i, ending in enumerate(fixed.ENDINGS):
             with self.subTest(ending):
                 reasons = fixed.REASONS_BY_ENDING[ending]
-                decision = {"ending": ending, "reason": reasons[0] if reasons else fixed.NONE,
-                            "failed_step": fixed.NONE}
+                reason = reasons[0] if reasons else fixed.NONE
+                step = fixed.STEPS_FOR_REASON[reason][0] if reason != fixed.NONE else fixed.NONE
+                decision = {"ending": ending, "reason": reason, "failed_step": step}
                 receipt, back = self.write_and_read(decision, "e%d" % i)
                 self.assertEqual(back["receipt"], receipt)
                 self.assertEqual(back["receipt"]["the_ending"]["ending"], ending)
@@ -45,7 +47,8 @@ class RecordsFolder(unittest.TestCase):
         for ending, reasons in fixed.REASONS_BY_ENDING.items():
             for reason in reasons:
                 with self.subTest(ending=ending, reason=reason):
-                    decision = {"ending": ending, "reason": reason, "failed_step": fixed.NONE}
+                    step = fixed.STEPS_FOR_REASON[reason][0]
+                    decision = {"ending": ending, "reason": reason, "failed_step": step}
                     _, back = self.write_and_read(decision, "r-%s" % reason.replace("_", "-"))
                     self.assertEqual(back["receipt"]["the_ending"]["reason"], reason)
                     self.assertEqual(core.check_receipt(back["receipt"]), [])
@@ -54,7 +57,7 @@ class RecordsFolder(unittest.TestCase):
         for ending, steps in fixed.STEPS_BY_ENDING.items():
             for step in steps:
                 with self.subTest(ending=ending, step=step):
-                    reason = fixed.REASONS_BY_ENDING[ending][0]
+                    reason = next(r for r in fixed.REASONS_BY_ENDING[ending] if step in fixed.STEPS_FOR_REASON[r])
                     decision = {"ending": ending, "reason": reason, "failed_step": step}
                     _, back = self.write_and_read(decision, "s-%s" % step.replace("_", "-"))
                     self.assertEqual(back["receipt"]["the_ending"]["failed_step"], step)
@@ -65,6 +68,7 @@ class RecordsFolder(unittest.TestCase):
         self.assertNotIn("record", fixed.STEPS)
         self.assertNotIn("record_failed", fixed.REASONS)
         self.assertEqual(len(fixed.ENDINGS), 6)
+        self.assertIn("records_location_unusable", fixed.REASONS_BY_ENDING["could_not_start"])
 
     def test_the_outcome_record_is_created_only_if_none_exists(self):
         first = {"header": {"a": 1}, "receipt": {"first": True}}

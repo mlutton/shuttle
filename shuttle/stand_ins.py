@@ -14,15 +14,12 @@ def _stand_in(name, **extra):
     return result
 
 
-def start_in_boundary(launch_spec):
-    """Boundary: a plain child process, no containment yet."""
-    try:
-        process = subprocess.Popen(
-            launch_spec["argv"],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except OSError as error:
-        return _stand_in("boundary", process=None, error=str(error))
-    return _stand_in("boundary", process=process, error=None)
+def start_in_boundary(launch_spec, environment):
+    """Boundary: a plain child process, no containment yet. Raises when it cannot start."""
+    process = subprocess.Popen(
+        launch_spec["argv"], env=environment,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return _stand_in("boundary", process=process)
 
 
 def run_gates(gates):

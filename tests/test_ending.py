@@ -1,98 +1,184 @@
-"""By value: the ending is a pure function of facts."""
+"""By value: the table of cases for a run's ending.
+
+Facts go in; (ending, reason, failed step) comes out. Reason, step and ending
+must agree with the fixed list, and the core refuses a pairing the list does
+not allow.
+"""
 import unittest
 
 from shuttle import core, fixed
 
 
 def facts(**changes):
+    """A run in which every step went well and the executor ended by itself."""
     base = {
-        "refusal": None,
+        "id_claim": "ok",
+        "input_check": None,
+        "executor_driver_check": None,
+        "gates": "ok",
+        "setup": "ok",
+        "opening_freeze": "ok",
         "launch": "ok",
         "wait": "exited",
         "stop": "confirmed",
         "closing_freeze": "ok",
         "delivery": "ok",
         "exit_code": 0,
+        "child_signal": None,
     }
     base.update(changes)
     return base
 
 
-def decision(ending, reason=fixed.NONE, failed_step=fixed.NONE):
+def early(**changes):
+    """A run that stopped before launch: later steps never ran, so their facts are absent."""
+    base = {"id_claim": "ok", "input_check": None, "executor_driver_check": None}
+    base.update(changes)
+    return base
+
+
+def d(ending, reason=fixed.NONE, failed_step=fixed.NONE):
     return {"ending": ending, "reason": reason, "failed_step": failed_step}
 
 
-class DecideEndingTable(unittest.TestCase):
-    CASES = [
-        ("ended by itself", facts(), decision("ended_by_itself")),
-        ("time limit", facts(wait="time_limit"), decision("time_limit", "time_limit")),
-        ("stop record", facts(wait="stop_record"), decision("stopped_from_outside", "stop_record")),
-        ("signal to execution", facts(wait="signal"), decision("stopped_from_outside", "signal")),
-        ("launch failed", facts(launch="failed", wait=None, stop=None, closing_freeze=None, delivery=None),
-         decision("could_not_start", "launch_failed", "launch")),
-        ("stop record before launch", facts(launch="stopped_before", wait=None, stop=None, closing_freeze=None, delivery=None),
-         decision("could_not_start", "stopped")),
-        ("refused by a check", facts(refusal={"reason": "unknown_field", "step": "input_check"}, launch=None, wait=None, stop=None, closing_freeze=None, delivery=None),
-         decision("could_not_start", "unknown_field", "input_check")),
-        ("stop not confirmed", facts(stop="not_confirmed"), decision("execution_failed", "stop_not_confirmed", "stop_not_confirmed")),
-        ("closing freeze failed", facts(closing_freeze="failed"), decision("execution_failed", "closing_freeze_failed", "closing_freeze")),
-        ("delivery failed", facts(delivery="failed"), decision("execution_failed", "delivery_failed", "delivery")),
-        ("stop not confirmed beats a time limit", facts(wait="time_limit", stop="not_confirmed"),
-         decision("execution_failed", "stop_not_confirmed", "stop_not_confirmed")),
-        ("time limit with failed delivery is execution failed", facts(wait="time_limit", delivery="failed"),
-         decision("execution_failed", "delivery_failed", "delivery")),
-    ]
+CNS = "could_not_start"
+EF = "execution_failed"
 
+# (name, facts, expected decision)
+TABLE = [
+    ("every step well, ended by itself", facts(), d("ended_by_itself")),
+    ("stand-in steps reporting success", facts(gates="ok", setup="ok", opening_freeze="ok",
+                                               stop="confirmed", closing_freeze="ok", delivery="ok"), d("ended_by_itself")),
+    # The order of a run, each step failing in turn.
+    ("step 1/3: input check refuses", early(input_check="unknown_field"), d(CNS, "unknown_field", "input_check")),
+    ("step 1/3: no time limit", early(input_check="no_time_limit"), d(CNS, "no_time_limit", "input_check")),
+    ("step 2: request id used", {"id_claim": "used"}, d(CNS, "request_id_used", "id_claim")),
+    ("step 2: records location unusable", {"id_claim": "unusable"}, d(CNS, "records_location_unusable", "id_claim")),
+    ("step 3: executor driver check refuses", early(executor_driver_check="tool_not_installed"),
+     d(CNS, "tool_not_installed", "executor_driver_check")),
+    ("step 3: a missing setting found by the executor driver check", early(executor_driver_check="missing_setting"),
+     d(CNS, "missing_setting", "executor_driver_check")),
+    ("step 4: a gate says no", early(gates="no"), d(CNS, "gate_said_no", "gates")),
+    ("step 4: a gate fails", early(gates="failed"), d(CNS, "gate_failed", "gates")),
+    ("step 5: setup fails", early(gates="ok", setup="failed"), d(CNS, "setup_failed", "setup")),
+    ("step 6: opening freeze fails", early(gates="ok", setup="ok", opening_freeze="failed"),
+     d(CNS, "freeze_failed", "opening_freeze")),
+    ("step 7: launch fails", early(gates="ok", setup="ok", opening_freeze="ok", launch="failed"),
+     d(CNS, "launch_failed", "launch")),
+    ("step 7: launch raises an error of any kind (it is a failed launch)",
+     early(gates="ok", setup="ok", opening_freeze="ok", launch="failed", exit_code=None), d(CNS, "launch_failed", "launch")),
+    ("an interrupt before launch", early(launch="stopped_before"), d(CNS, "stopped")),
+    ("step 8: the executor ends with exit code 0", facts(wait="exited", exit_code=0), d("ended_by_itself")),
+    ("step 8: the executor exits non-zero", facts(wait="exited", exit_code=3), d("ended_by_itself")),
+    ("step 8: the executor is killed by a signal", facts(wait="exited", exit_code=None, child_signal="SIGKILL"),
+     d("ended_by_itself")),
+    ("step 8: the time limit is reached", facts(wait="time_limit"), d("time_limit", "time_limit")),
+    ("step 8: a stop record", facts(wait="stop_record"), d("stopped_from_outside", "stop_record")),
+    ("step 8: an interrupt, terminate or hangup signal", facts(wait="signal"), d("stopped_from_outside", "signal")),
+    ("step 8: waiting itself fails", facts(wait="error", stop=None, closing_freeze=None, delivery=None),
+     d(EF, "stop_not_confirmed", "stop_not_confirmed")),
+    ("step 9: stop not confirmed", facts(stop="not_confirmed", closing_freeze=None, delivery=None),
+     d(EF, "stop_not_confirmed", "stop_not_confirmed")),
+    ("step 9: stop not confirmed beats a time limit", facts(wait="time_limit", stop="not_confirmed", closing_freeze=None, delivery=None),
+     d(EF, "stop_not_confirmed", "stop_not_confirmed")),
+    ("step 11: closing freeze fails", facts(closing_freeze="failed", delivery=None), d(EF, "closing_freeze_failed", "closing_freeze")),
+    ("step 12: delivery fails", facts(delivery="failed"), d(EF, "delivery_failed", "delivery")),
+    ("step 12: delivery fails after a time limit", facts(wait="time_limit", delivery="failed"),
+     d(EF, "delivery_failed", "delivery")),
+]
+
+
+class DecideEndingTable(unittest.TestCase):
     def test_table(self):
-        for name, given, expected in self.CASES:
+        for name, given, expected in TABLE:
             with self.subTest(name):
                 self.assertEqual(core.decide_ending(given), expected)
 
-    def test_executor_exit_code_never_changes_the_ending(self):
-        for name, given, expected in self.CASES:
-            for code in (0, 1, 2, 127, 255, -9, None):
-                with self.subTest(case=name, exit_code=code):
-                    self.assertEqual(core.decide_ending(dict(given, exit_code=code)), expected)
-
-    def test_a_failure_after_the_ending_is_known_changes_nothing(self):
-        later = {
-            "observation": "failed",
-            "kept_files": "failed",
-            "teardown": "failed",
-            "record_written": False,
-        }
-        for name, given, expected in self.CASES:
-            with self.subTest(name):
-                self.assertEqual(core.decide_ending(dict(given, **later)), expected)
-
-    def test_every_decision_uses_listed_values(self):
-        for name, given, expected in self.CASES:
+    def test_every_row_is_consistent_with_the_fixed_list(self):
+        for name, given, expected in TABLE:
             with self.subTest(name):
                 self.assertEqual(core.check_decision(expected), [])
 
-    def test_a_decision_with_a_value_off_the_list_is_rejected(self):
-        self.assertNotEqual(core.check_decision(decision("record_failed")), [])
-        self.assertNotEqual(core.check_decision(decision("could_not_start", "mystery", "launch")), [])
-        self.assertNotEqual(core.check_decision(decision("could_not_start", "launch_failed", "record")), [])
-        self.assertNotEqual(core.check_decision(decision("time_limit", "launch_failed")), [])
+    def test_the_executor_exit_code_never_changes_the_ending(self):
+        for name, given, expected in TABLE:
+            for code in (0, 1, 2, 127, 255, None):
+                with self.subTest(case=name, exit_code=code):
+                    self.assertEqual(core.decide_ending(dict(given, exit_code=code)), expected)
+
+    def test_a_failure_in_a_later_step_never_changes_an_ending_already_known(self):
+        later = {"observe": "failed", "kept_files": "failed", "teardown": "failed", "record_written": False}
+        for name, given, expected in TABLE:
+            with self.subTest(name):
+                self.assertEqual(core.decide_ending(dict(given, **later)), expected)
+
+    def test_a_check_may_only_name_a_reason_that_belongs_to_that_step(self):
+        for given in (
+            early(input_check="launch_failed"),
+            early(input_check="tool_not_installed"),
+            early(executor_driver_check="unknown_field"),
+            early(input_check="time_limit"),
+            early(input_check="delivery_failed"),
+            early(input_check="not a code"),
+        ):
+            with self.subTest(given):
+                with self.assertRaises(ValueError):
+                    core.decide_ending(given)
+
+    def test_facts_that_cannot_decide_are_refused_not_guessed(self):
+        for given in (
+            early(gates="ok", setup="ok", opening_freeze="ok"),            # no launch fact
+            dict(facts(), wait=None),                                       # launched, no wait fact
+            dict(facts(), wait="vanished"),
+            dict(facts(), launch="maybe"),
+        ):
+            with self.subTest(given):
+                with self.assertRaises(ValueError):
+                    core.decide_ending(given)
+
+
+class PairingsTheListForbids(unittest.TestCase):
+    def test_forbidden_pairings_are_refused(self):
+        for decision in (
+            d(CNS, "launch_failed", "gates"),
+            d(CNS, "launch_failed"),
+            d(CNS, "stopped", "launch"),
+            d(CNS),
+            d(EF, "delivery_failed", "closing_freeze"),
+            d(EF, "stop_not_confirmed"),
+            d(EF, "lost", "delivery"),
+            d("time_limit", "time_limit", "launch"),
+            d("time_limit", "launch_failed", "launch"),
+            d("ended_by_itself", fixed.NONE, "launch"),
+            d("ended_by_itself", "lost"),
+            d("record_failed"),
+            d(CNS, "launch_failed", "record"),
+        ):
+            with self.subTest(decision):
+                self.assertNotEqual(core.check_decision(decision), [])
+
+    def test_allowed_pairings_are_accepted(self):
+        for decision in (
+            d(EF, "lost", fixed.CANNOT_TELL),
+            d(CNS, "missing_setting", "input_check"),
+            d(CNS, "missing_setting", "executor_driver_check"),
+            d(CNS, "records_location_unusable", "id_claim"),
+            d("stopped_from_outside", "signal"),
+        ):
+            with self.subTest(decision):
+                self.assertEqual(core.check_decision(decision), [])
 
 
 class ReceiptEndingConflicts(unittest.TestCase):
     def test_a_receipt_that_keeps_the_known_ending_is_accepted(self):
-        known = decision("time_limit", "time_limit")
-        receipt = {"the_ending": dict(known)}
-        self.assertEqual(core.ending_conflicts(known, receipt), [])
+        known = d("time_limit", "time_limit")
+        self.assertEqual(core.ending_conflicts(known, {"the_ending": dict(known)}), [])
 
     def test_a_receipt_whose_ending_changed_after_a_later_failure_is_rejected(self):
-        known = decision("ended_by_itself")
-        for changed in (
-            decision("execution_failed", "delivery_failed", "delivery"),
-            decision("ended_by_itself", "lost"),
-            decision("ended_by_itself", fixed.NONE, "launch"),
-        ):
+        known = d("ended_by_itself")
+        for changed in (d(EF, "delivery_failed", "delivery"), d("ended_by_itself", "lost"),
+                        d("ended_by_itself", fixed.NONE, "launch")):
             with self.subTest(changed):
-                receipt = {"the_ending": dict(changed)}
-                self.assertNotEqual(core.ending_conflicts(known, receipt), [])
+                self.assertNotEqual(core.ending_conflicts(known, {"the_ending": dict(changed)}), [])
 
 
 if __name__ == "__main__":

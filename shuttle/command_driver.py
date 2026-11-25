@@ -1,4 +1,4 @@
-"""The command driver: an executor driver for a plain command.
+"""The command driver: the executor driver for a plain command.
 
 An executor driver offers four functions (check, launch, observe, declare) and
 its declarations as data. It never names an ending. There is no base class.
@@ -22,7 +22,10 @@ def declare():
 
 def locate(settings):
     """Shell: whether the command can be found and run. Returns True or False."""
-    return shutil.which(settings["command"]) is not None
+    try:
+        return shutil.which(settings["command"]) is not None
+    except (ValueError, OSError):
+        return False
 
 
 def check(settings, tool_found):
@@ -33,7 +36,7 @@ def check(settings, tool_found):
 
 
 def launch(settings):
-    """Pure: the one command to start. It exits when done."""
+    """Pure: the one command to start. It exits when done. The environment is built by the core."""
     return {"argv": [settings["command"]] + list(settings["arguments"])}
 
 
@@ -43,8 +46,8 @@ def observe(none_fact, cannot_tell):
     "none" means looked and nothing there; "cannot tell" means could not look.
     """
     return {
-        "driver_name": NAME,
-        "driver_version": VERSION,
+        "executor_driver_name": NAME,
+        "executor_driver_version": VERSION,
         "tool_version": none_fact,
         "model": none_fact,
         "effort": none_fact,
