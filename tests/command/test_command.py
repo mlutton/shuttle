@@ -15,7 +15,7 @@ import unittest
 
 from shuttle import fixed
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ENDS_BY_ITSELF = """
 import os, sys
