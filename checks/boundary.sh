@@ -1,7 +1,5 @@
 #!/bin/bash
-# Checks whether this machine can run the Shuttle boundary:
-#   systemd-run --user --scope  around
-#   bwrap --unshare-pid --die-with-parent --bind / / --dev /dev --proc /proc <command>
+# Answers: can this machine run the Shuttle boundary (systemd-run --user --scope around bwrap)?
 # Three parts, one output line each, then a last line:
 #   boundary: works
 #   boundary: does not work: <which part failed and the error text>
@@ -63,7 +61,6 @@ else
   fail "part 1 (run a command inside the boundary)" "scope $(scope_state), matching processes $(sleeper_count), launcher output: $(cat "$WORK/launch.out")"
 fi
 
-# Part 2: kill the launching parent hard; everything inside must die.
 kill -9 "$PARENT_PID" 2>/dev/null
 wait "$PARENT_PID" 2>/dev/null
 if wait_for 15 is_gone; then
@@ -73,8 +70,6 @@ else
 fi
 PARENT_PID=""
 
-# Part 3: start a second, fresh boundary, see it running, stop it by exact
-# name while it is running, then see the boundary empty.
 UNIT2="shuttle-boundary-check-$$-$RANDOM-b"
 SLEEP2_SECS=$((3600 + RANDOM % 500))
 SLEEP2_CMD="sleep $SLEEP2_SECS"
