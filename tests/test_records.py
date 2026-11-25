@@ -90,3 +90,58 @@ class RecordsFolder(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+POINTS = ("build_text", "write_temporary", "flush", "put_in_place")
+WRITERS = {
+    "claim_request_record": lambda root, fault: records.claim_request_record(
+        root, "w-1", {"header": {"k": "request"}, "input": {"a": [1, 2]}}, fault=fault),
+    "write_outcome_record": lambda root, fault: records.write_outcome_record(
+        root, "w-1", {"header": {"k": "outcome"}, "receipt": {"a": [1, 2]}}, fault=fault),
+}
+
+
+def fail_at(point):
+    def fault(reached):
+        if reached == point:
+            raise OSError("injected at %s" % point)
+    return fault
+
+
+class WholeOrAbsent(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = self._tmp.name
+
+    def test_a_write_cut_short_part_way_leaves_no_file_under_the_real_name_and_no_temporary_file(self):
+        for name, write in WRITERS.items():
+            with self.subTest(name):
+                with self.assertRaises(OSError):
+                    write(self.root, fail_at("flush"))   # the text is already written when the flush fails
+                self.assertEqual(os.listdir(self.root), [])
+
+    def test_after_a_failure_at_each_point_every_file_under_a_real_name_parses_and_is_complete(self):
+        for name, write in WRITERS.items():
+            for point in POINTS:
+                with self.subTest(writer=name, point=point):
+                    with self.assertRaises(Exception):
+                        write(self.root, fail_at(point))
+                    for found in os.listdir(self.root):
+                        self.assertTrue(found.endswith((".request.json", ".outcome.json")),
+                                        "stray file %s" % found)
+                        self.assertEqual(records.read_record(os.path.join(self.root, found))["header"]["k"],
+                                         "request" if "request" in found else "outcome")
+                    self.assertEqual(os.listdir(self.root), [])   # a failed write leaves nothing at all
+                    write(self.root, None)                         # and the id is still free
+                    for found in os.listdir(self.root):
+                        os.remove(os.path.join(self.root, found))
+
+    def test_a_record_whose_text_cannot_be_built_is_not_built_and_leaves_nothing_and_the_id_stays_free(self):
+        loop = []
+        loop.append(loop)
+        with self.assertRaises(records.RecordNotBuilt):
+            records.claim_request_record(self.root, "w-1", {"header": {}, "input": loop})
+        self.assertEqual(os.listdir(self.root), [])
+        records.claim_request_record(self.root, "w-1", {"header": {}, "input": {}})
+        self.assertEqual(os.listdir(self.root), ["w-1.request.json"])

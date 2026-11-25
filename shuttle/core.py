@@ -442,7 +442,10 @@ def claim_problem(kind, request_id, records_location, error_name):
     """The one line for a request id that could not be claimed."""
     if kind == "used":
         return "request id %r was already used; nothing was done; give the run a new request id" % request_id
-    return ("records_location %r cannot take the request record (%s); nothing was done; "
+    if kind == "not_built":
+        return ("the request record could not be built from the document (%s); nothing was done and "
+                "request id %r is NOT spent; fix the document and run again" % (error_name, request_id))
+    return ("records_location %r cannot take the request record (%s); nothing was done and the request id is NOT spent; "
             "name a folder that exists and can be written" % (records_location, error_name))
 
 

@@ -90,6 +90,9 @@ def step_claim_request_id(state):
     try:
         records.claim_request_record(
             source["records_location"], source["request_id"], {"header": header, "input": state["raw"]})
+    except records.RecordNotBuilt as error:
+        facts["id_claim"] = "unusable"   # nothing is claimed; no record is written either way
+        state["problem"] = core.claim_problem("not_built", source["request_id"], source["records_location"], str(error))
     except FileExistsError as error:
         facts["id_claim"] = "used"
         state["problem"] = core.claim_problem("used", source["request_id"], source["records_location"], type(error).__name__)

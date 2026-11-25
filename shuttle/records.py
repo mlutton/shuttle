@@ -1,8 +1,8 @@
 """Records: the shell that reads and writes the two JSON records.
 
-The request record is claimed by creating it, which fails if it exists.
-The outcome record is written under a temporary name and then linked into
-place, which fails if one exists, so it is written once and never changed.
+Each record is built in memory, written under a temporary name, flushed and then
+linked into place, which fails if the name exists. So a record is whole or absent,
+is written once, and the request record's claim is first one wins.
 """
 import json
 import os
@@ -16,33 +16,32 @@ def outcome_path(records_location, request_id):
     return os.path.join(records_location, "%s.outcome.json" % request_id)
 
 
-def claim_request_record(records_location, request_id, record):
-    """Create the request record. Raises FileExistsError when the id is used.
+class RecordNotBuilt(Exception):
+    """The text of a record could not be built; nothing was written."""
 
-    The id is used when either record of the pair exists.
+
+def _put_whole(final, record, fault):
+    """Put a record under its real name whole, or not at all.
+
+    The text is built first, written under a temporary name in the same folder, flushed, and
+    then linked to the real name, which fails if the name exists. The temporary name is always
+    removed. `fault` is a test seam: it is called with the name of each point and may raise.
     """
-    if os.path.lexists(outcome_path(records_location, request_id)):
-        raise FileExistsError(outcome_path(records_location, request_id))
-    with open(request_path(records_location, request_id), "x", encoding="utf-8") as f:
-        json.dump(record, f, indent=2)
-        f.write("\n")
-        f.flush()
-        os.fsync(f.fileno())
-
-
-def write_outcome_record(records_location, request_id, record):
-    """Write the outcome record once. Raises FileExistsError when one exists.
-
-    Returns the path.
-    """
-    final = outcome_path(records_location, request_id)
+    fault = fault or (lambda point: None)
+    try:
+        fault("build_text")
+        text = json.dumps(record, indent=2) + "\n"
+    except Exception as error:
+        raise RecordNotBuilt(type(error).__name__) from error
     temporary = "%s.tmp-%d" % (final, os.getpid())
     try:
         with open(temporary, "x", encoding="utf-8") as f:
-            json.dump(record, f, indent=2)
-            f.write("\n")
+            fault("write_temporary")
+            f.write(text)
+            fault("flush")
             f.flush()
             os.fsync(f.fileno())
+        fault("put_in_place")
         os.link(temporary, final)
     finally:
         try:
@@ -50,6 +49,25 @@ def write_outcome_record(records_location, request_id, record):
         except FileNotFoundError:
             pass
     return final
+
+
+def claim_request_record(records_location, request_id, record, fault=None):
+    """Claim the request id by putting the request record in place whole.
+
+    Raises FileExistsError when the id is used, and RecordNotBuilt when the text cannot be
+    built (the id is then not spent). The id is used when either record of the pair exists.
+    """
+    if os.path.lexists(outcome_path(records_location, request_id)):
+        raise FileExistsError(outcome_path(records_location, request_id))
+    return _put_whole(request_path(records_location, request_id), record, fault)
+
+
+def write_outcome_record(records_location, request_id, record, fault=None):
+    """Write the outcome record once. Raises FileExistsError when one exists.
+
+    Returns the path.
+    """
+    return _put_whole(outcome_path(records_location, request_id), record, fault)
 
 
 def read_record(path):
