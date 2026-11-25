@@ -11,21 +11,30 @@ from shuttle import fixed
 
 _LAUNCH = ("ok", "failed", "stopped_before")
 _WAIT = ("exited", "time_limit", "stop_record", "signal", "error")
+_CNS = "could_not_start"
+_EF = "execution_failed"
 
 
 def _decision(ending, reason=fixed.NONE, failed_step=fixed.NONE):
     return {"ending": ending, "reason": reason, "failed_step": failed_step}
 
 
-def _checked(decision):
-    problems = check_decision(decision)
-    if problems:
-        raise ValueError("; ".join(problems))
-    return decision
+def _before_launch_error(step):
+    """Execution itself broke before the executor started, in this step."""
+    return _decision(_CNS, "execution_error", step)
+
+
+def _after_launch_error():
+    """Execution itself broke after the executor started, in a step that is not known."""
+    return _decision(_EF, "execution_error", fixed.CANNOT_TELL)
 
 
 def decide_ending(facts):
-    """Decide the ending from facts. Raises ValueError for facts that cannot decide.
+    """Decide the ending from facts. Total: it never raises.
+
+    For every combination of fact values, including facts that are missing or
+    "cannot tell", it returns an (ending, reason, failed step) that the fixed
+    list allows. A fact it cannot make sense of is "execution_error".
 
     The facts, by step of a run (a step that did not run has no fact):
       id_claim: "ok", "used" or "unusable".
@@ -37,51 +46,80 @@ def decide_ending(facts):
 
     The executor's exit code and signal, and anything that happens after delivery
     (observing, kept files, teardown, the record write), are not read.
-    A reason that does not belong to the step that names it is refused.
     """
-    claim = facts.get("id_claim", "ok")
+    try:
+        decision = _decide(facts)
+    except Exception:
+        return _after_launch_error()
+    if check_decision(decision):
+        return _after_launch_error()
+    return decision
+
+
+def _decide(f):
+    claim = f.get("id_claim", "ok")
     if claim == "used":
-        return _checked(_decision("could_not_start", "request_id_used", "id_claim"))
+        return _decision(_CNS, "request_id_used", "id_claim")
     if claim == "unusable":
-        return _checked(_decision("could_not_start", "records_location_unusable", "id_claim"))
+        return _decision(_CNS, "records_location_unusable", "id_claim")
+    if claim != "ok":
+        return _before_launch_error("id_claim")
     for step in ("input_check", "executor_driver_check"):
-        if facts.get(step):
-            return _checked(_decision("could_not_start", facts[step], step))
-    if facts.get("gates") == "no":
-        return _checked(_decision("could_not_start", "gate_said_no", "gates"))
-    if facts.get("gates") == "failed":
-        return _checked(_decision("could_not_start", "gate_failed", "gates"))
-    if facts.get("setup") == "failed":
-        return _checked(_decision("could_not_start", "setup_failed", "setup"))
-    if facts.get("opening_freeze") == "failed":
-        return _checked(_decision("could_not_start", "freeze_failed", "opening_freeze"))
-    launch = facts.get("launch")
-    if launch not in _LAUNCH:
-        raise ValueError("cannot decide: launch fact is %r" % (launch,))
+        reason = f.get(step)
+        if reason is None:
+            continue
+        if isinstance(reason, str) and reason in fixed.REASONS_BY_ENDING[_CNS] and step in fixed.STEPS_FOR_REASON[reason]:
+            return _decision(_CNS, reason, step)
+        return _before_launch_error(step)
+    for step, bad in (
+        ("gates", {"no": "gate_said_no", "failed": "gate_failed"}),
+        ("setup", {"failed": "setup_failed"}),
+        ("opening_freeze", {"failed": "freeze_failed"}),
+    ):
+        value = f.get(step)
+        if value is None or value == "ok":
+            continue
+        if value in bad:
+            return _decision(_CNS, bad[value], step)
+        return _before_launch_error(step)
+    launch = f.get("launch")
     if launch == "failed":
-        return _checked(_decision("could_not_start", "launch_failed", "launch"))
+        return _decision(_CNS, "launch_failed", "launch")
     if launch == "stopped_before":
-        return _checked(_decision("could_not_start", "stopped"))
-    wait = facts.get("wait")
+        return _decision(_CNS, "stopped")
+    if launch != "ok":
+        return _before_launch_error("launch")
+    wait = f.get("wait")
     if wait not in _WAIT:
-        raise ValueError("cannot decide: wait fact is %r" % (wait,))
-    if wait == "error" or facts.get("stop") == "not_confirmed":
-        return _checked(_decision("execution_failed", "stop_not_confirmed", "stop_not_confirmed"))
-    if facts.get("closing_freeze") == "failed":
-        return _checked(_decision("execution_failed", "closing_freeze_failed", "closing_freeze"))
-    if facts.get("delivery") == "failed":
-        return _checked(_decision("execution_failed", "delivery_failed", "delivery"))
+        return _after_launch_error()
+    if wait == "error":
+        return _decision(_EF, "stop_not_confirmed", "stop_not_confirmed")
+    if f.get("stop") == "not_confirmed":
+        return _decision(_EF, "stop_not_confirmed", "stop_not_confirmed")
+    if f.get("stop") != "confirmed":
+        return _after_launch_error()
+    if f.get("closing_freeze") == "failed":
+        return _decision(_EF, "closing_freeze_failed", "closing_freeze")
+    if f.get("closing_freeze") != "ok":
+        return _after_launch_error()
+    if f.get("delivery") == "failed":
+        return _decision(_EF, "delivery_failed", "delivery")
+    if f.get("delivery") != "ok":
+        return _after_launch_error()
     if wait == "time_limit":
-        return _checked(_decision("time_limit", "time_limit"))
+        return _decision("time_limit", "time_limit")
     if wait == "stop_record":
-        return _checked(_decision("stopped_from_outside", "stop_record"))
+        return _decision("stopped_from_outside", "stop_record")
     if wait == "signal":
-        return _checked(_decision("stopped_from_outside", "signal"))
-    return _checked(_decision("ended_by_itself"))
+        return _decision("stopped_from_outside", "signal")
+    return _decision("ended_by_itself")
 
 
 def check_decision(decision):
-    """Problems with a decision, judged against the fixed list. Empty when fine."""
+    """Problems with a decision, judged against the fixed list. Empty when fine.
+
+    For a reader of records and for the tests; the writer never blocks on it.
+    """
     ending = decision.get("ending")
     reason = decision.get("reason")
     step = decision.get("failed_step")
@@ -97,6 +135,10 @@ def check_decision(decision):
         return ["reason %r does not belong to ending %s" % (reason, ending)]
     if step not in fixed.STEPS_FOR_REASON[reason]:
         return ["failed step %r does not go with reason %s" % (step, reason)]
+    if step not in fixed.STEPS_BY_ENDING.get(ending, ()) and step not in (fixed.NONE, fixed.CANNOT_TELL):
+        return ["failed step %r does not belong to ending %s" % (step, ending)]
+    if step == fixed.CANNOT_TELL and ending == _CNS:
+        return ["ending %s always names its step" % ending]
     return []
 
 
@@ -153,7 +195,7 @@ STEP_ORDER = (
 _STEP_FAILURES = {
     "read_and_validate_document": (None, {"unreadable": True}),
     "claim_request_id": ("id_claim", {"id_claim": "unusable"}),
-    "run_input_checks_and_executor_driver_check": ("executor_driver_check", {"executor_driver_check": "tool_not_installed"}),
+    "run_input_checks_and_executor_driver_check": ("executor_driver_check", {"executor_driver_check": "execution_error"}),
     "run_gates": ("gates", {"gates": "failed"}),
     "set_up_run_area": ("setup", {"setup": "failed"}),
     "take_opening_fingerprint": ("opening_freeze", {"opening_freeze": "failed"}),
@@ -175,11 +217,25 @@ def failed_step_after_error(step):
     return _STEP_FAILURES.get(step, (None, {}))[0]
 
 
-def facts_after_interrupt(facts):
-    """An interrupt before the executor has started is a stop before launch."""
-    if facts.get("launch") != "ok":
+def facts_after_signal(facts, signal_name):
+    """A signal that arrived before the executor started is a stop before launch.
+
+    After launch it adds no fact: the wait sees the signal itself.
+    """
+    if signal_name and facts.get("launch") != "ok":
         return {"launch": "stopped_before"}
     return {}
+
+
+def wait_cause(child_exited, deadline_passed, signal_name):
+    """What ends the wait, or None to keep waiting. The first cause seen wins."""
+    if child_exited:
+        return "exited"
+    if signal_name:
+        return "signal"
+    if deadline_passed:
+        return "time_limit"
+    return None
 
 
 def _failed_before_launch(f):
@@ -247,8 +303,10 @@ def conclude(outcome):
             "exit": 1,
         }
     if kind == "not_recorded":
-        return {"stdout": [outcome["decision"]["ending"]], "stderr": ["shuttle: %s" % outcome["problem"]], "exit": 1}
-    return {"stdout": ["none"], "stderr": ["shuttle: %s" % outcome["problem"]], "exit": 1}
+        problem = outcome.get("problem") or "the request id could not be claimed; nothing was done; check the records_location"
+        return {"stdout": [outcome["decision"]["ending"]], "stderr": ["shuttle: %s" % problem], "exit": 1}
+    problem = outcome.get("problem") or "the input document could not be read far enough to start; nothing was done; fix it and run again"
+    return {"stdout": ["none"], "stderr": ["shuttle: %s" % problem], "exit": 1}
 
 
 # ------------------------------------------------------------------ the document
@@ -273,6 +331,20 @@ def _plain_int(value):
 
 def _text(value):
     return isinstance(value, str) and bool(value)
+
+
+_LONGEST_TIME_LIMIT_SECONDS = 10 ** 9
+
+
+def _usable_time_limit(value):
+    """A finite number above zero that the clock can use."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        seconds = float(value)
+    except OverflowError:
+        return False
+    return math.isfinite(seconds) and 0 < seconds <= _LONGEST_TIME_LIMIT_SECONDS
 
 
 def _refusal(reason, problem, header_source):
@@ -339,9 +411,8 @@ def validate_document(raw):
         return _refusal("missing_setting", "setting 'command' is missing", header_source)
     if not isinstance(arguments, list) or not all(isinstance(a, str) for a in arguments):
         return _refusal("missing_setting", "setting 'arguments' is missing or not a list of text", header_source)
-    limit = raw.get("time_limit_seconds")
-    if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit) or limit <= 0:
-        return _refusal("no_time_limit", "time_limit_seconds is required and must be a positive number", header_source)
+    if not _usable_time_limit(raw.get("time_limit_seconds")):
+        return _refusal("no_time_limit", "time_limit_seconds is required and must be a number above zero and at most %d" % _LONGEST_TIME_LIMIT_SECONDS, header_source)
     names = raw.get("environment", [])
     if not isinstance(names, list) or not all(_text(n) and all(c in _NAME_CHARACTERS for c in n) for n in names):
         return _refusal("missing_setting", "environment must be a list of variable names", header_source)
@@ -355,6 +426,24 @@ def parse_command_line(argv):
     if len(argv) == 2 and argv[0] == "run":
         return {"form": "run", "document_path": argv[1]}
     return {"refusal": "shuttle: usage: python3 -m shuttle run <input document>"}
+
+
+def executor_driver_check(command, environment_names, caller_environment, tool_found):
+    """The command driver's check and the check of the named variables: (reason, one line) or (None, None)."""
+    missing = [n for n in environment_names if n not in caller_environment]
+    if missing:
+        return "missing_setting", "environment variable(s) %s named in the document are not set; set them or remove the names" % ", ".join(missing)
+    if not tool_found:
+        return "tool_not_installed", "the command %r was not found; install it or name one that exists" % command
+    return None, None
+
+
+def claim_problem(kind, request_id, records_location, error_name):
+    """The one line for a request id that could not be claimed."""
+    if kind == "used":
+        return "request id %r was already used; nothing was done; give the run a new request id" % request_id
+    return ("records_location %r cannot take the request record (%s); nothing was done; "
+            "name a folder that exists and can be written" % (records_location, error_name))
 
 
 def check_environment(names, caller_environment):
@@ -485,6 +574,13 @@ def build_receipt(decision, facts):
         name: _from_step(steps.get("kept_files"), name) if launched else unlooked
         for name in fixed.RECEIPT_GROUPS["what_the_executor_said"]
     })
+    return receipt
+
+
+def minimal_receipt(decision):
+    """The receipt when building the full one failed: the decision, and "cannot tell" for everything else."""
+    receipt = {group: {name: fixed.CANNOT_TELL for name in names} for group, names in fixed.RECEIPT_GROUPS.items()}
+    receipt["the_ending"].update(decision)
     return receipt
 
 

@@ -4,9 +4,11 @@ Each step gathers facts from the world (files, the clock, a process) into one
 facts dictionary and hands every decision to shuttle.core. Steps marked
 "stand-in" call a function in shuttle.stand_ins that returns a marked value.
 
-One guarantee: once the request id is claimed, every step runs under `guarded`,
-so an error or a signal becomes a fact for the core, and the last step still
-writes the outcome record.
+One guarantee: once the request id is claimed, every step runs under `guarded`
+and the conclusion runs in a `finally`. An error becomes a fact for the core.
+A signal only sets a fact (the handlers never raise), and the wait polls for it.
+The ending is decided by a total function, the receipt falls back to a minimal
+one, and a record that cannot be written is printed instead.
 """
 import datetime
 import hashlib
@@ -14,31 +16,47 @@ import json
 import os
 import signal
 import socket
-import subprocess
+import time
 import uuid
 
 from shuttle import __version__, command_driver, core, fixed, records, stand_ins
 
-_END_GRACE_SECONDS = 5
-
-
-class Interrupted(BaseException):
-    """Raised by the signal handler. Not an Exception, so no step swallows it."""
+_END_GRACE_SECONDS = 3
+_POLL_SECONDS = 0.05
 
 
 def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds")
 
 
-def _end_child(process):
-    """End the direct child. Whether everything it started is gone is a stand-in (step 9)."""
+def _exited_within(process, seconds):
+    deadline = time.monotonic() + seconds
+    while process.poll() is None:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_POLL_SECONDS)
+    return True
+
+
+def end_child(process):
+    """End the direct child, for every cause: ask, wait a short grace, then kill.
+
+    Returns "ended" or "not_confirmed". Whether everything the child started is gone
+    is a stand-in (step 9); only the direct child is ended here.
+    """
     if process.poll() is None:
-        process.terminate()
         try:
-            process.wait(timeout=_END_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+            process.terminate()
+        except OSError:
+            pass
+        if not _exited_within(process, _END_GRACE_SECONDS):
+            try:
+                process.kill()
+            except OSError:
+                pass
+            if not _exited_within(process, _END_GRACE_SECONDS):
+                return "not_confirmed"
+    return "ended"
 
 
 def step_read_and_validate_document(state):
@@ -72,13 +90,12 @@ def step_claim_request_id(state):
     try:
         records.claim_request_record(
             source["records_location"], source["request_id"], {"header": header, "input": state["raw"]})
-    except FileExistsError:
+    except FileExistsError as error:
         facts["id_claim"] = "used"
-        state["problem"] = "request id %r was already used; nothing was done; give the run a new request id" % source["request_id"]
+        state["problem"] = core.claim_problem("used", source["request_id"], source["records_location"], type(error).__name__)
     except OSError as error:
         facts["id_claim"] = "unusable"
-        state["problem"] = ("records_location %r cannot take the request record (%s); nothing was done; "
-                            "name a folder that exists and can be written" % (source["records_location"], type(error).__name__))
+        state["problem"] = core.claim_problem("unusable", source["request_id"], source["records_location"], type(error).__name__)
     else:
         facts["id_claim"] = "ok"
 
@@ -87,13 +104,11 @@ def step_run_input_checks_and_executor_driver_check(state):
     # The input checks are real in the first step (the document's shape). This step is the
     # executor driver's check and the check of the named environment variables.
     settings = state["raw"]["executor"]["settings"]
-    names = state["raw"].get("environment", [])
-    reason = core.check_environment(names, os.environ) or command_driver.check(settings, command_driver.locate(settings))
+    reason, text = core.executor_driver_check(
+        settings["command"], state["raw"].get("environment", []), os.environ, command_driver.locate(settings))
     if reason:
         state["facts"]["executor_driver_check"] = reason
-        state["problems"]["executor_driver_check"] = (
-            "the command %r was not found, or a named environment variable is not set; install the command "
-            "or set the variable" % settings["command"])
+        state["problems"]["executor_driver_check"] = text
 
 
 def step_run_gates(state):  # stand-in
@@ -123,15 +138,19 @@ def step_launch_executor(state):
 def step_wait_for_the_end(state):
     process = state["stand_ins"]["boundary"]["process"]
     facts = state["facts"]
+    deadline = time.monotonic() + float(state["raw"]["time_limit_seconds"])
     try:
-        process.wait(timeout=state["raw"]["time_limit_seconds"])
-        facts["wait"] = "exited"
-    except subprocess.TimeoutExpired:
-        _end_child(process)
-        facts["wait"] = "time_limit"
-    except Interrupted:
-        _end_child(process)
-        facts["wait"] = "signal"
+        while True:
+            cause = core.wait_cause(process.poll() is not None, time.monotonic() >= deadline, state["signal"])
+            if cause:
+                break
+            time.sleep(_POLL_SECONDS)
+        facts["wait"] = cause
+        if cause != "exited" and end_child(process) == "not_confirmed":
+            facts["stop"] = "not_confirmed"
+    finally:
+        if process.poll() is None:  # the wait itself broke: still end the child
+            end_child(process)
     facts["exit_code"], facts["child_signal"] = core.exit_facts(process.returncode)
     state["executor_duration"] = (datetime.datetime.now(datetime.timezone.utc) - state["clock_start"]).total_seconds()
     state["ended_at"] = _now()
@@ -140,7 +159,8 @@ def step_wait_for_the_end(state):
 def step_stop_everything_and_confirm_empty(state):  # stand-in
     state["stand_ins"]["stop_confirmation"] = stand_ins.stop_and_confirm_empty(state["stand_ins"]["boundary"])
     status = core.result_status(state["stand_ins"]["stop_confirmation"])
-    state["facts"]["stop"] = "confirmed" if status == "ok" else "not_confirmed"
+    if state["facts"].get("stop") != "not_confirmed":  # the wait may already have failed to end the child
+        state["facts"]["stop"] = "confirmed" if status == "ok" else "not_confirmed"
 
 
 def step_observe(state):
@@ -165,46 +185,51 @@ def step_tear_down(state):  # stand-in
     state["stand_ins"]["teardown"] = stand_ins.tear_down(None)
 
 
-def step_write_outcome_record(state):
+def _full_receipt(state, decision, build_receipt):
     facts = state["facts"]
-    kind = core.outcome_kind(facts)
-    if kind == "unreadable":
-        state["conclusion"] = core.conclude({
-            "kind": "unreadable",
-            "problem": state.get("problem") or "the input document could not be read far enough to start; "
-                                               "nothing was done; fix it and run again"})
-        return
-    decision = core.decide_ending(facts)
-    if kind == "not_recorded":
-        state["conclusion"] = core.conclude({"kind": "not_recorded", "decision": decision, "problem": state["problem"]})
-        return
-    exit_code, child_signal = facts.get("exit_code"), facts.get("child_signal")
-    launched = facts.get("launch") == "ok"
-    receipt = core.build_receipt(decision, {
+    return build_receipt(decision, {
         "receipt_id": uuid.uuid4().hex,
         "execution_version": __version__,
         "host": socket.gethostname(),
-        "input_hash": state["input_hash"],
-        "launched": launched,
+        "input_hash": state.get("input_hash", fixed.CANNOT_TELL),
+        "launched": facts.get("launch") == "ok",
         "started_at": state.get("started_at"),
         "ended_at": state.get("ended_at"),
         "executor_duration": state.get("executor_duration"),
-        "exit_code": exit_code,
-        "signal": child_signal,
+        "exit_code": facts.get("exit_code"),
+        "signal": facts.get("child_signal"),
         "executor_driver_observations": state.get("executor_driver_observations"),
         "stand_ins": state["stand_ins"],
         "reason_text": core.reason_text(decision, state["problems"]),
     })
-    source = facts["header_source"]
-    record = {"header": core.build_header("outcome", source, uuid.uuid4().hex, _now()), "receipt": receipt}
+
+
+def conclude_run(state):
+    """The conclusion: decide, build the receipt, write the record. Each part has its own fallback."""
+    facts = state["facts"]
+    kind = core.outcome_kind(facts)
+    if kind == "unreadable":
+        return core.conclude({"kind": "unreadable", "problem": state.get("problem")})
+    decision = core.decide_ending(facts)
+    if kind == "not_recorded":
+        return core.conclude({"kind": "not_recorded", "decision": decision, "problem": state.get("problem")})
     try:
-        path = records.write_outcome_record(source["records_location"], source["request_id"], record)
-    except Exception as error:  # nothing may prevent the receipt: print it instead
-        state["conclusion"] = core.conclude({
+        receipt = _full_receipt(state, decision, state["build_receipt"])
+    except BaseException:
+        receipt = core.minimal_receipt(decision)
+    source = facts["header_source"]
+    try:
+        header = core.build_header("outcome", source, uuid.uuid4().hex, _now())
+        path = state["write_record"](source["records_location"], source["request_id"], {"header": header, "receipt": receipt})
+    except BaseException as error:  # nothing may prevent the receipt: print it instead
+        return core.conclude({
             "kind": "write_failed", "decision": decision, "problem": type(error).__name__,
             "receipt_text": json.dumps(receipt, indent=2, default=str)})
-        return
-    state["conclusion"] = core.conclude({"kind": "written", "decision": decision, "path": path})
+    return core.conclude({"kind": "written", "decision": decision, "path": path})
+
+
+def step_write_outcome_record(state):
+    state["conclusion"] = conclude_run(state)
 
 
 STEPS = (
@@ -227,13 +252,11 @@ STEPS = (
 
 
 def guarded(name, step, state):
-    """Run one step. An error or a signal becomes a fact; it never escapes."""
+    """Run one step. An error becomes a fact; it never escapes."""
     facts = state["facts"]
     try:
         step(state)
-    except Interrupted:
-        facts.update(core.facts_after_interrupt(facts))
-    except Exception as error:
+    except BaseException as error:
         facts.update(core.facts_after_error(name))
         failed = core.failed_step_after_error(name)
         if failed:
@@ -243,39 +266,43 @@ def guarded(name, step, state):
 
 
 def _install_handlers(state):
+    """Signals only record which one came first. They never raise."""
     def handler(number, frame):
-        if state["shutting_down"]:
-            return
-        state["shutting_down"] = True
-        raise Interrupted()
+        if state["signal"] is None:
+            state["signal"] = signal.Signals(number).name
     previous = {}
     for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         previous[number] = signal.signal(number, handler)
     return previous
 
 
-def run(document_path, out, err):
-    """Run one input document end to end. Returns the exit code."""
+def run(document_path, out, err, steps=None, build_receipt=None, write_record=None):
+    """Run one input document end to end. Returns the exit code.
+
+    steps: the ordered (name, function) table, the real one by default, so a test can replace any step.
+    """
     state = {
         "document_path": document_path, "out": out, "err": err,
-        "facts": {}, "stand_ins": {}, "problems": {}, "shutting_down": False,
+        "facts": {}, "stand_ins": {}, "problems": {}, "signal": None,
+        "build_receipt": build_receipt or core.build_receipt,
+        "write_record": write_record or records.write_outcome_record,
     }
     previous = _install_handlers(state)
     try:
-        for name, step in STEPS:
-            if name == "write_outcome_record":
-                state["shutting_down"] = True  # a signal now would only stop the receipt
+        for name, step in (steps or STEPS):
+            state["facts"].update(core.facts_after_signal(state["facts"], state["signal"]))
             if core.step_runs(name, state["facts"]):
                 guarded(name, step, state)
     finally:
+        boundary = state["stand_ins"].get("boundary")
+        if boundary and boundary.get("process") is not None:
+            end_child(boundary["process"])  # whatever went wrong, nothing is left running
+        if "conclusion" not in state:  # the last step did not run, or did not finish
+            state["conclusion"] = conclude_run(state)
         for number, handler in previous.items():
             signal.signal(number, handler)
-    conclusion = state.get("conclusion")
-    if conclusion is None:
-        err.write("shuttle: the run ended without a conclusion; no outcome record was written\n")
-        return 1
-    for line in conclusion["stdout"]:
+    for line in state["conclusion"]["stdout"]:
         out.write(line + "\n")
-    for line in conclusion["stderr"]:
+    for line in state["conclusion"]["stderr"]:
         err.write(line + "\n")
-    return conclusion["exit"]
+    return state["conclusion"]["exit"]

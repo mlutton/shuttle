@@ -32,15 +32,15 @@ REASONS_BY_ENDING = {
         "reach_not_available", "unknown_executor", "unknown_setting", "missing_setting",
         "tool_not_installed", "no_login", "request_id_used", "credential_like_value",
         "gate_said_no", "gate_failed", "setup_failed", "freeze_failed",
-        "launch_failed", "stopped", "records_location_unusable",
+        "launch_failed", "stopped", "records_location_unusable", "execution_error",
     ),
     "execution_failed": (
         "stop_not_confirmed", "closing_freeze_failed", "destination_changed",
-        "delivery_failed", "lost",
+        "delivery_failed", "lost", "execution_error",
     ),
 }
 
-REASONS = tuple(r for ending in ENDINGS for r in REASONS_BY_ENDING[ending])
+REASONS = tuple(dict.fromkeys(r for ending in ENDINGS for r in REASONS_BY_ENDING[ending]))
 
 # Failed steps, by the ending that may name them. "gates" is a step for
 # "could not start"; "record" is not a step.
@@ -79,6 +79,8 @@ STEPS_FOR_REASON = {
     "destination_changed": ("delivery",),
     "delivery_failed": ("delivery",),
     "lost": (CANNOT_TELL,),
+    # Execution itself broke: the step that was running, or cannot tell when that is not known.
+    "execution_error": STEPS + (CANNOT_TELL,),
 }
 for _reason in REASONS:
     STEPS_FOR_REASON.setdefault(_reason, _INPUT)

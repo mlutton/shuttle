@@ -4,6 +4,7 @@ Facts go in; (ending, reason, failed step) comes out. Reason, step and ending
 must agree with the fixed list, and the core refuses a pairing the list does
 not allow.
 """
+import itertools
 import unittest
 
 from shuttle import core, fixed
@@ -111,29 +112,56 @@ class DecideEndingTable(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(core.decide_ending(dict(given, **later)), expected)
 
-    def test_a_check_may_only_name_a_reason_that_belongs_to_that_step(self):
-        for given in (
-            early(input_check="launch_failed"),
-            early(input_check="tool_not_installed"),
-            early(executor_driver_check="unknown_field"),
-            early(input_check="time_limit"),
-            early(input_check="delivery_failed"),
-            early(input_check="not a code"),
+    def test_a_reason_that_does_not_belong_to_the_step_that_names_it_is_an_execution_error(self):
+        for given, step in (
+            (early(input_check="launch_failed"), "input_check"),
+            (early(input_check="tool_not_installed"), "input_check"),
+            (early(executor_driver_check="unknown_field"), "executor_driver_check"),
+            (early(input_check="time_limit"), "input_check"),
+            (early(input_check="not a code"), "input_check"),
         ):
             with self.subTest(given):
-                with self.assertRaises(ValueError):
-                    core.decide_ending(given)
+                self.assertEqual(core.decide_ending(given), d(CNS, "execution_error", step))
 
-    def test_facts_that_cannot_decide_are_refused_not_guessed(self):
-        for given in (
-            early(gates="ok", setup="ok", opening_freeze="ok"),            # no launch fact
-            dict(facts(), wait=None),                                       # launched, no wait fact
-            dict(facts(), wait="vanished"),
-            dict(facts(), launch="maybe"),
+    def test_facts_that_cannot_decide_are_an_execution_error_not_a_guess(self):
+        for given, expected in (
+            (early(gates="ok", setup="ok", opening_freeze="ok"), d(CNS, "execution_error", "launch")),
+            (dict(facts(), wait=None), d(EF, "execution_error", fixed.CANNOT_TELL)),
+            (dict(facts(), wait="vanished"), d(EF, "execution_error", fixed.CANNOT_TELL)),
+            (dict(facts(), launch="maybe"), d(CNS, "execution_error", "launch")),
+            (dict(facts(), stop=fixed.CANNOT_TELL), d(EF, "execution_error", fixed.CANNOT_TELL)),
+            (dict(facts(), closing_freeze=None), d(EF, "execution_error", fixed.CANNOT_TELL)),
+            (dict(facts(), delivery=fixed.CANNOT_TELL), d(EF, "execution_error", fixed.CANNOT_TELL)),
+            (dict(facts(), gates=fixed.CANNOT_TELL), d(CNS, "execution_error", "gates")),
+            ("not a dict", d(EF, "execution_error", fixed.CANNOT_TELL)),
         ):
             with self.subTest(given):
-                with self.assertRaises(ValueError):
-                    core.decide_ending(given)
+                self.assertEqual(core.decide_ending(given), expected)
+
+    def test_the_decision_is_total_over_every_combination_of_fact_values(self):
+        missing = object()
+        domain = {
+            "id_claim": ("ok", "used", missing, fixed.CANNOT_TELL),
+            "input_check": (None, "unknown_field", fixed.CANNOT_TELL),
+            "executor_driver_check": (None, "tool_not_installed", fixed.CANNOT_TELL),
+            "gates": ("ok", "no", fixed.CANNOT_TELL),
+            "setup": ("ok", "failed", fixed.CANNOT_TELL),
+            "opening_freeze": ("ok", "failed", fixed.CANNOT_TELL),
+            "launch": ("ok", "failed", "stopped_before", fixed.CANNOT_TELL),
+            "wait": ("exited", "time_limit", "signal", "error", fixed.CANNOT_TELL),
+            "stop": ("confirmed", "not_confirmed", fixed.CANNOT_TELL),
+            "closing_freeze": ("ok", "failed", fixed.CANNOT_TELL),
+            "delivery": ("ok", "failed", fixed.CANNOT_TELL),
+        }
+        names = list(domain)
+        count = 0
+        for values in itertools.product(*(domain[n] for n in names)):
+            given = {n: v for n, v in zip(names, values) if v is not missing}
+            got = core.decide_ending(given)
+            if core.check_decision(got):
+                self.fail("%r gave %r, which the list does not allow" % (given, got))
+            count += 1
+        self.assertGreater(count, 100000)
 
 
 class PairingsTheListForbids(unittest.TestCase):
@@ -152,6 +180,11 @@ class PairingsTheListForbids(unittest.TestCase):
             d("ended_by_itself", "lost"),
             d("record_failed"),
             d(CNS, "launch_failed", "record"),
+            d("time_limit", "execution_error"),
+            d(CNS, "execution_error", "delivery"),
+            d(EF, "execution_error", "gates"),
+            d(CNS, "execution_error", fixed.CANNOT_TELL),
+            d(CNS, "execution_error"),
         ):
             with self.subTest(decision):
                 self.assertNotEqual(core.check_decision(decision), [])
@@ -163,6 +196,10 @@ class PairingsTheListForbids(unittest.TestCase):
             d(CNS, "missing_setting", "executor_driver_check"),
             d(CNS, "records_location_unusable", "id_claim"),
             d("stopped_from_outside", "signal"),
+            d(CNS, "execution_error", "input_check"),
+            d(CNS, "execution_error", "launch"),
+            d(EF, "execution_error", fixed.CANNOT_TELL),
+            d(EF, "execution_error", "delivery"),
         ):
             with self.subTest(decision):
                 self.assertEqual(core.check_decision(decision), [])

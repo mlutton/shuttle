@@ -68,7 +68,7 @@ class ErrorsAndInterrupts(unittest.TestCase):
     def test_an_error_in_a_step_becomes_the_fact_that_step_reports(self):
         expected = {
             "claim_request_id": {"id_claim": "unusable"},
-            "run_input_checks_and_executor_driver_check": {"executor_driver_check": "tool_not_installed"},
+            "run_input_checks_and_executor_driver_check": {"executor_driver_check": "execution_error"},
             "run_gates": {"gates": "failed"},
             "set_up_run_area": {"setup": "failed"},
             "take_opening_fingerprint": {"opening_freeze": "failed"},
@@ -83,11 +83,38 @@ class ErrorsAndInterrupts(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(core.facts_after_error(name), expected.get(name, {}))
 
-    def test_an_interrupt_before_launch_is_a_stop_before_launch(self):
-        self.assertEqual(core.facts_after_interrupt({"header_source": {}}), {"launch": "stopped_before"})
+    def test_a_signal_before_launch_is_a_stop_before_launch(self):
+        self.assertEqual(core.facts_after_signal({"header_source": {}}, "SIGINT"), {"launch": "stopped_before"})
 
-    def test_an_interrupt_after_launch_adds_no_fact_of_its_own(self):
-        self.assertEqual(core.facts_after_interrupt(LAUNCHED), {})
+    def test_a_signal_after_launch_adds_no_fact_here_the_wait_sees_it(self):
+        self.assertEqual(core.facts_after_signal(LAUNCHED, "SIGINT"), {})
+
+    def test_no_signal_adds_no_fact(self):
+        self.assertEqual(core.facts_after_signal({"header_source": {}}, None), {})
+
+
+class WaitCause(unittest.TestCase):
+    def test_rows(self):
+        rows = [
+            ((False, False, None), None),
+            ((True, False, None), "exited"),
+            ((True, True, "SIGINT"), "exited"),
+            ((False, True, None), "time_limit"),
+            ((False, False, "SIGTERM"), "signal"),
+            ((False, True, "SIGHUP"), "signal"),
+        ]
+        for given, expected in rows:
+            with self.subTest(given):
+                self.assertEqual(core.wait_cause(*given), expected)
+
+
+class MinimalReceipt(unittest.TestCase):
+    def test_it_holds_the_decision_and_cannot_tell_for_every_other_field(self):
+        decision = {"ending": "time_limit", "reason": "time_limit", "failed_step": "none"}
+        receipt = core.minimal_receipt(decision)
+        self.assertEqual(core.check_receipt(receipt), [])
+        self.assertEqual(core.ending_conflicts(decision, receipt), [])
+        self.assertEqual(receipt["what_execution_saw"]["exit_code"], "cannot tell")
 
 
 class WhatIsPrinted(unittest.TestCase):
@@ -118,6 +145,21 @@ class WhatIsPrinted(unittest.TestCase):
 
 
 class Environment(unittest.TestCase):
+    def test_a_missing_variable_has_its_own_reason_text(self):
+        reason, text = core.executor_driver_check("tool", ["NAMED", "OTHER"], {"PATH": "/bin"}, tool_found=True)
+        self.assertEqual(reason, "missing_setting")
+        self.assertIn("NAMED", text)
+        self.assertIn("OTHER", text)
+        self.assertNotIn("not found", text)
+
+    def test_a_missing_tool_has_its_own_reason_text(self):
+        reason, text = core.executor_driver_check("tool", [], {"PATH": "/bin"}, tool_found=False)
+        self.assertEqual(reason, "tool_not_installed")
+        self.assertIn("tool", text)
+
+    def test_nothing_missing_is_no_refusal(self):
+        self.assertEqual(core.executor_driver_check("tool", ["A"], {"A": "1"}, tool_found=True), (None, None))
+
     def test_the_executor_gets_path_and_the_named_variables_only(self):
         caller = {"PATH": "/bin", "HOME": "/h", "TOKEN": "s3", "NAMED": "v"}
         self.assertEqual(core.build_environment(["NAMED"], caller), {"PATH": "/bin", "NAMED": "v"})

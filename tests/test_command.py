@@ -253,6 +253,26 @@ class CommandSeam(unittest.TestCase):
         with open(pid_file) as f:
             self.assert_process_gone(int(f.read()))
 
+    def test_a_signal_during_the_grace_after_the_time_limit_changes_nothing_and_the_script_is_killed(self):
+        with open(self.script, "w") as f:
+            f.write("import os, signal, sys, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    "open(sys.argv[1], 'w').write(str(os.getpid()))\ntime.sleep(60)\n")
+        pid_file = os.path.join(self.root, "pid.txt")
+        doc = self.document(time_limit_seconds=1)
+        doc["executor"]["settings"]["arguments"] = [self.script, pid_file]
+        proc = self.spawn(doc)
+        self.wait_for_file(pid_file)
+        with open(pid_file) as f:
+            script_pid = int(f.read())
+        time.sleep(1.5)  # the limit has passed and the script is ignoring the first request to end
+        proc.send_signal(signal.SIGTERM)
+        stdout, stderr = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, stderr)
+        self.assertEqual(stdout.splitlines()[-1], "time_limit")
+        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]), ("time_limit", "time_limit", "none"))
+        self.assert_process_gone(script_pid)
+
     def test_a_document_without_a_time_limit_is_refused_with_no_time_limit(self):
         doc = self.document()
         del doc["time_limit_seconds"]

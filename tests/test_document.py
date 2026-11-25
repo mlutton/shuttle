@@ -52,6 +52,11 @@ class ValidateDocument(unittest.TestCase):
         self.assertEqual(got["header_source"]["parent_session"], "p-9")
         self.assertEqual(got["header_source"]["asked_by"], "someone")
 
+    def test_small_and_large_usable_time_limits_are_accepted(self):
+        for limit in (0.001, 1, 30.5, 86400, 10 ** 8):
+            with self.subTest(limit):
+                self.assertIsNone(core.validate_document(with_change(time_limit_seconds=limit))["refusal"])
+
     def test_a_good_document_may_name_environment_variables(self):
         self.assertIsNone(core.validate_document(with_change(environment=["A_B", "C"]))["refusal"])
 
@@ -78,6 +83,10 @@ class ValidateDocument(unittest.TestCase):
             ("negative time limit", with_change(time_limit_seconds=-5), "no_time_limit"),
             ("time limit true", with_change(time_limit_seconds=True), "no_time_limit"),
             ("time limit text", with_change(time_limit_seconds="30"), "no_time_limit"),
+            ("time limit a huge integer", with_change(time_limit_seconds=10 ** 400), "no_time_limit"),
+            ("time limit infinity", with_change(time_limit_seconds=float("inf")), "no_time_limit"),
+            ("time limit not a number", with_change(time_limit_seconds=float("nan")), "no_time_limit"),
+            ("time limit the clock cannot use", with_change(time_limit_seconds=1e30), "no_time_limit"),
             ("environment not a list", with_change(environment="PATH"), "missing_setting"),
             ("environment name not text", with_change(environment=[1]), "missing_setting"),
             ("environment name with an equals sign", with_change(environment=["A=b"]), "missing_setting"),

@@ -36,7 +36,7 @@ class RecordsFolder(unittest.TestCase):
             with self.subTest(ending):
                 reasons = fixed.REASONS_BY_ENDING[ending]
                 reason = reasons[0] if reasons else fixed.NONE
-                step = fixed.STEPS_FOR_REASON[reason][0] if reason != fixed.NONE else fixed.NONE
+                step = next(x for x in fixed.STEPS_FOR_REASON[reason] if x != fixed.CANNOT_TELL) if reason != fixed.NONE else fixed.NONE
                 decision = {"ending": ending, "reason": reason, "failed_step": step}
                 receipt, back = self.write_and_read(decision, "e%d" % i)
                 self.assertEqual(back["receipt"], receipt)
@@ -47,9 +47,11 @@ class RecordsFolder(unittest.TestCase):
         for ending, reasons in fixed.REASONS_BY_ENDING.items():
             for reason in reasons:
                 with self.subTest(ending=ending, reason=reason):
-                    step = fixed.STEPS_FOR_REASON[reason][0]
+                    step = next(x for x in fixed.STEPS_FOR_REASON[reason]
+                                if x in (fixed.NONE, fixed.CANNOT_TELL) + fixed.STEPS_BY_ENDING.get(ending, ())
+                                and not (x == fixed.CANNOT_TELL and ending == "could_not_start"))
                     decision = {"ending": ending, "reason": reason, "failed_step": step}
-                    _, back = self.write_and_read(decision, "r-%s" % reason.replace("_", "-"))
+                    _, back = self.write_and_read(decision, "r-%s-%s" % (ending, reason.replace("_", "-")))
                     self.assertEqual(back["receipt"]["the_ending"]["reason"], reason)
                     self.assertEqual(core.check_receipt(back["receipt"]), [])
 
