@@ -14,4 +14,4 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run the tests
-        run: timeout 20 python3 -m unittest discover -s tests   # a time budget: the suite takes about 6 s; 18 s before the grace became a parameter
+        run: timeout 20 python3 -m unittest discover -s tests   # a time budget: the suite takes about 3 s; it took 19 s before waits were put behind a seam
