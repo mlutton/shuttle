@@ -5,7 +5,7 @@
 # Three parts, one output line each, then a last line:
 #   boundary: works
 #   boundary: does not work: <which part failed and the error text>
-# Only the unit this script starts is stopped, by its exact name.
+# Only the units this script starts are stopped, by exact name.
 #
 # Exit codes:
 #   0  the check ran to a conclusion (works, or does not work)
@@ -23,6 +23,7 @@ PARENT_PID=""
 
 cleanup() {
   systemctl --user stop "$UNIT.scope" >/dev/null 2>&1
+  [ -n "$UNIT2_STARTED" ] && systemctl --user stop "$UNIT2.scope" >/dev/null 2>&1
   [ -n "$PARENT_PID" ] && kill -9 "$PARENT_PID" >/dev/null 2>&1
   rm -rf "$WORK"
 }
@@ -72,17 +73,38 @@ else
 fi
 PARENT_PID=""
 
-# Part 3: stop the unit by exact name, then see that the boundary is empty.
-systemctl --user stop "$UNIT.scope" >/dev/null 2>&1
-CG=$(systemctl --user show -p ControlGroup --value "$UNIT.scope" 2>/dev/null)
+# Part 3: start a second, fresh boundary, see it running, stop it by exact
+# name while it is running, then see the boundary empty.
+UNIT2="shuttle-boundary-check-$$-$RANDOM-b"
+SLEEP2_SECS=$((3600 + RANDOM % 500))
+SLEEP2_CMD="sleep $SLEEP2_SECS"
+UNIT2_STARTED=1
+bash -c '
+  systemd-run --user --scope --quiet --unit="$1" \
+    bwrap --unshare-pid --die-with-parent --bind / / --dev /dev --proc /proc \
+    sleep "$2"
+' _ "$UNIT2" "$SLEEP2_SECS" >"$WORK/launch2.out" 2>&1 &
+PARENT_PID=$!
+state2() { systemctl --user is-active "$UNIT2.scope" 2>&1 | head -1; }
+count2() { pgrep -fx "$SLEEP2_CMD" 2>/dev/null | wc -l; }
+running2() { [ "$(state2)" = active ] && [ "$(count2)" -ge 1 ]; }
+if ! wait_for 15 running2; then
+  fail "part 3 (second boundary did not start)" "scope $(state2), matching processes $(count2), launcher output: $(cat "$WORK/launch2.out")"
+fi
+CG=$(systemctl --user show -p ControlGroup --value "$UNIT2.scope" 2>/dev/null)
+BEFORE=0
+[ -n "$CG" ] && [ -r "/sys/fs/cgroup$CG/cgroup.procs" ] && BEFORE=$(wc -l < "/sys/fs/cgroup$CG/cgroup.procs")
+STOP_ERR=$(systemctl --user stop "$UNIT2.scope" 2>&1)
+STOP_RC=$?
+wait_for 15 bash -c '[ "$(systemctl --user is-active "$0" 2>&1 | head -1)" != active ]' "$UNIT2.scope"
 PROCS=0
 if [ -n "$CG" ] && [ -r "/sys/fs/cgroup$CG/cgroup.procs" ]; then
   PROCS=$(wc -l < "/sys/fs/cgroup$CG/cgroup.procs")
 fi
-if [ "$(scope_state)" != active ] && [ "$(sleeper_count)" -eq 0 ] && [ "$PROCS" -eq 0 ]; then
-  echo "3 empty: stopped $UNIT.scope by name; saw scope $(scope_state), $PROCS process(es) in its cgroup, $(sleeper_count) matching process(es)"
+if [ "$STOP_RC" -eq 0 ] && [ "$(state2)" != active ] && [ "$(count2)" -eq 0 ] && [ "$PROCS" -eq 0 ]; then
+  echo "3 stop and empty: started second scope $UNIT2.scope (saw active, $BEFORE process(es) in its cgroup), stopped it by name while running; saw scope $(state2), $PROCS process(es) in its cgroup, $(count2) matching process(es)"
 else
-  fail "part 3 (empty after stop)" "scope $(scope_state), cgroup processes $PROCS, matching processes $(sleeper_count)"
+  fail "part 3 (stop a running boundary)" "stop exit $STOP_RC ($STOP_ERR); scope $(state2), cgroup processes $PROCS, matching processes $(count2)"
 fi
 
 echo "boundary: works"
