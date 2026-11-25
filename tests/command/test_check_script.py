@@ -25,7 +25,7 @@ case "$*" in
   *) echo "unexpected call: $*" >&2; exit 99 ;;
 esac
 echo "$stage: tool output"
-[ "$FAIL_STAGE" = "$stage" ] && exit 1
+[ "$FAIL_STAGE" = "$stage" ] && exit "${FAIL_CODE:-1}"
 exit 0
 """
 
@@ -61,8 +61,28 @@ class CheckScriptTest(unittest.TestCase):
             with self.subTest(stage=stage):
                 result = self.check(FAIL_STAGE=stage)
                 self.assertEqual(result.returncode, 1)
-                self.assertEqual(self.last_line(result), f"check: failed: {stage}")
+                self.assertTrue(
+                    self.last_line(result).startswith(f"check: failed: {stage}"),
+                    self.last_line(result),
+                )
                 self.assertIn(f"{stage}: tool output", result.stderr)
+
+    def test_a_failing_format_stage_names_the_command_that_fixes_it(self):
+        last = self.last_line(self.check(FAIL_STAGE="format"))
+        self.assertEqual(
+            last, f"check: failed: format; fix it with: {self.stand_in} -m ruff format ."
+        )
+
+    def test_a_tests_stage_ended_by_its_budget_says_it_timed_out(self):
+        result = self.check(FAIL_STAGE="tests", FAIL_CODE="124")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            self.last_line(result), "check: failed: tests (timed out after 20 seconds)"
+        )
+
+    def test_a_tests_stage_that_fails_for_another_reason_does_not_say_timed_out(self):
+        result = self.check(FAIL_STAGE="tests", FAIL_CODE="3")
+        self.assertEqual(self.last_line(result), "check: failed: tests")
 
     def test_a_failing_stage_stops_the_later_stages(self):
         result = self.check(FAIL_STAGE="lint")

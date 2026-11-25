@@ -11,6 +11,8 @@
 # own output goes to standard error), then a last line on standard output:
 #   check: passed
 #   check: failed: <stage>
+# The format stage adds how to fix it: "check: failed: format; fix it with: ruff format ."
+# A tests stage ended by its time budget says so: "check: failed: tests (timed out after 20 seconds)".
 #   check: could not run: <tool> is not installed; install the tools with: <command>
 #
 # Exit codes:
@@ -42,14 +44,26 @@ trap 'rm -f "$output"' EXIT
 stage() {
     name=$1
     shift
-    if "$@" >"$output" 2>&1; then
+    "$@" >"$output" 2>&1
+    code=$?
+    if [ "$code" -eq 0 ]; then
         echo "$name: passed"
-    else
-        echo "$name: failed"
-        cat "$output" >&2
-        echo "check: failed: $name"
-        exit 1
+        return 0
     fi
+    echo "$name: failed"
+    cat "$output" >&2
+    case "$name" in
+        format) echo "check: failed: format; fix it with: $PYTHON -m ruff format ." ;;
+        tests)
+            if [ "$code" -eq 124 ]; then
+                echo "check: failed: tests (timed out after 20 seconds)"
+            else
+                echo "check: failed: tests"
+            fi
+            ;;
+        *) echo "check: failed: $name" ;;
+    esac
+    exit 1
 }
 
 stage lint "$PYTHON" -m ruff check .
