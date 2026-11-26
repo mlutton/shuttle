@@ -73,6 +73,13 @@ class SimulatedWorldHoldsTheContract(contract.ContractCases, unittest.TestCase):
         self.world = self.simulated.operations
         self.harness = SimulatedHarness(self.simulated)
 
+    def test_waiting_moves_the_clock_by_exactly_the_time_asked(self):
+        for seconds in (0.01, 0.1, 3):
+            with self.subTest(seconds=seconds):
+                before = self.world.clock.now()
+                self.world.clock.wait(seconds)
+                self.assertAlmostEqual(self.world.clock.now() - before, seconds, places=9)
+
     def test_a_signal_other_than_the_three_is_not_handed_to_the_handler(self):
         # the real half shows that only these three are installed (it cannot send the others)
         calls = []

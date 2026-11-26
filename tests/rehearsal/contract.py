@@ -264,12 +264,13 @@ class ContractCases:
         self.assertGreaterEqual(after - before, 0.02 - 0.001)
         self.assertGreaterEqual(self.world.clock.now(), after)
 
-    def test_waiting_takes_about_the_time_asked_not_twice_it(self):
+    def test_waiting_takes_at_least_the_time_asked(self):
+        # No upper bound: a paused or descheduled process takes as long as it likes. That a wait
+        # is not longer than asked is pinned on the simulated clock, which is exact
+        # (tests/by_value/test_world_contract.py); the real wait is one call of time.sleep.
         before = self.world.clock.now()
         self.world.clock.wait(0.1)
-        taken = self.world.clock.now() - before
-        self.assertGreaterEqual(taken, 0.1 - 0.001)
-        self.assertLess(taken, 0.19)
+        self.assertGreaterEqual(self.world.clock.now() - before, 0.1 - 0.001)
 
     def test_waiting_a_negative_time_raises_value_error(self):
         self.assertRaisesExactly(ValueError, self.world.clock.wait, -1)

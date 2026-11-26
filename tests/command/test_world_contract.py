@@ -10,6 +10,7 @@ import json
 import os
 import signal
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -119,18 +120,22 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
     # operating system to compare with.
 
     def test_a_started_child_has_exactly_the_environment_it_was_given(self):
-        report = os.path.join(self.harness.folder(), "report")
+        # The interpreter adds variables of its own at start-up (LC_CTYPE when no locale is
+        # set), so the child is compared with one started directly with the same environment:
+        # whatever the interpreter adds, it adds to both, and anything of the caller's that
+        # `start` let through would show only in the first.
+        folder = self.harness.folder()
+        started, direct = os.path.join(folder, "started"), os.path.join(folder, "direct")
         script = "import json, os, sys\njson.dump(sorted(os.environ), open(sys.argv[1], 'w'))\n"
-        environment = {"PATH": os.environ["PATH"], "SHUTTLE_ONLY": "1"}
-        process = self.world.processes.start([sys.executable, "-c", script, report], environment)
+        environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "SHUTTLE_ONLY": "1"}
+        subprocess.run([sys.executable, "-c", script, direct], env=environment, check=True)
+        process = self.world.processes.start([sys.executable, "-c", script, started], environment)
         self.addCleanup(self.stop, process)
         self.assertTrue(contract.until(self.world, lambda: self.world.processes.poll(process) == 0))
-        with open(report) as f:
-            seen = json.load(f)
-        # the interpreter may add LC_CTYPE and the like; nothing of the caller's may leak
+        with open(started) as f, open(direct) as g:
+            seen, expected = json.load(f), json.load(g)
+        self.assertEqual(seen, expected)
         self.assertIn("SHUTTLE_ONLY", seen)
-        self.assertNotIn("HOME", seen)
-        self.assertEqual([n for n in seen if n in os.environ and n not in environment], [])
 
     def test_installing_changes_the_handlers_of_the_three_signals_and_no_other(self):
         before = {n: signal.getsignal(n) for n in signal.valid_signals() if n < signal.NSIG}
@@ -149,8 +154,14 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
         self.assertEqual(self.world.identity.process_number(), os.getpid())
 
     def test_the_steady_clock_is_the_monotonic_clock(self):
-        self.assertAlmostEqual(self.world.clock.now(), time.monotonic(), delta=1.0)
-        self.assertNotAlmostEqual(self.world.clock.now(), time.time(), delta=1000.0)
+        # Ordering only, no bound on how long anything takes: the operation's reading, then the
+        # system's, then the operation's again, are in order on the one monotonic clock; a wall
+        # clock reads about fifty years later than the monotonic one and is out of order.
+        first = self.world.clock.now()
+        between = time.monotonic()
+        last = self.world.clock.now()
+        self.assertLessEqual(first, between)
+        self.assertLessEqual(between, last)
 
 
 if __name__ == "__main__":
