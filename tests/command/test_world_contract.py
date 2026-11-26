@@ -91,7 +91,7 @@ class RealHarness:
         return {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
 
     def have_previous_handler(self, handler):
-        for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        for number in (getattr(signal, name) for name in contract.HANDLED_SIGNALS):
             was = signal.signal(number, lambda n, frame: handler(signal.Signals(n).name))
             self.case.addCleanup(signal.signal, number, was)
 
@@ -137,7 +137,7 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
         self.assertEqual(seen, expected)
         self.assertIn("SHUTTLE_ONLY", seen)
 
-    def test_installing_changes_the_handlers_of_the_three_signals_and_no_other(self):
+    def test_installing_changes_the_handlers_of_the_handled_signals_and_no_other(self):
         before = {n: signal.getsignal(n) for n in signal.valid_signals() if n < signal.NSIG}
         restore = self.world.signals.install(lambda name: None)
         try:
@@ -148,7 +148,7 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
             }
         finally:
             restore()
-        self.assertEqual(changed, {"SIGINT", "SIGTERM", "SIGHUP"})
+        self.assertEqual(changed, set(contract.HANDLED_SIGNALS))
 
     def test_the_process_number_is_this_processs(self):
         self.assertEqual(self.world.identity.process_number(), os.getpid())

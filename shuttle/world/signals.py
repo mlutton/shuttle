@@ -6,21 +6,35 @@ from typing import Any
 
 from shuttle.core.shapes import SignalOperations
 
-HANDLED = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+HANDLED = (
+    signal.SIGINT,
+    signal.SIGTERM,
+    signal.SIGHUP,
+    signal.SIGQUIT,
+    signal.SIGUSR1,
+    signal.SIGUSR2,
+    signal.SIGALRM,
+)
 
 
 def install(on_signal: Callable[[str], None]) -> Callable[[], None]:
-    """Call on_signal with the name of each of SIGINT, SIGTERM and SIGHUP; return the undo."""
+    """Call on_signal with the name of each signal in HANDLED (the ones that ask a run to stop); return the undo."""
 
     def handler(number: int, frame: object) -> None:
         on_signal(signal.Signals(number).name)
 
-    previous: dict[int, Any] = {number: signal.signal(number, handler) for number in HANDLED}
+    previous: dict[int, Any] = {}
 
     def restore() -> None:
         for number, old in previous.items():
             signal.signal(number, old)
 
+    try:
+        for number in HANDLED:
+            previous[number] = signal.signal(number, handler)
+    except BaseException:  # leave nothing half installed
+        restore()
+        raise
     return restore
 
 

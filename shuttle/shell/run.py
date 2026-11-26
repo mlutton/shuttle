@@ -6,11 +6,14 @@ reached only through the operations `run` is handed (shuttle.core.shapes.Operati
 this module imports nothing that touches it. Steps marked "stand-in" call a function in
 shuttle.shell.stand_ins that returns a marked value.
 
-One guarantee: once the request id is claimed, every step runs under `guarded`
-and the conclusion runs in a `finally`. An error becomes a fact for the decisions.
-A signal only sets a fact (the handlers never raise), and the wait polls for it.
-The ending is decided by a total function, the receipt falls back to a minimal
-one, and a record that cannot be written is printed instead.
+One guarantee: a claimed run always ends with an outcome record, and a run that claimed nothing
+ends with a one-line refusal. `_the_run` is the one outermost guard that owes it: installing the
+signal handlers, every step, the final clean-up and the final print are inside it, and the
+conclusion is decided there. Each step runs under `guarded` only to name the step that failed:
+an error becomes a fact for the decisions. A signal only sets a fact (the handlers never raise),
+and the wait polls for it. The ending is decided by a total function, the receipt falls back to a
+minimal one, and a record that cannot be written is printed instead. A print that fails changes
+neither the ending nor the exit code, which says only whether the record was written.
 """
 
 import contextlib
@@ -144,6 +147,13 @@ def _header_source(state: RunState) -> HeaderSource:
     return source
 
 
+def _note_on_standard_error(state: RunState) -> Callable[[str], None]:
+    def note(line: str) -> None:
+        state["err"].write(line + "\n")
+
+    return note
+
+
 def step_claim_request_id(state: RunState) -> None:
     facts, source, world = state["facts"], _header_source(state), state["world"]
     header = decisions.build_header(
@@ -155,6 +165,7 @@ def step_claim_request_id(state: RunState) -> None:
             source["records_location"],
             source["request_id"],
             {"header": header, "input": state["input_text"]},
+            _note_on_standard_error(state),
         )
     except records.RecordNotBuilt as error:
         facts["id_claim"] = "unusable"  # nothing is claimed; no record is written either way
@@ -341,6 +352,7 @@ def conclude_run(state: RunState) -> Conclusion:
             source["records_location"],
             source["request_id"],
             {"header": header, "receipt": receipt},
+            _note_on_standard_error(state),
         )
     except BaseException as error:  # nothing may prevent the receipt: print it instead
         return decisions.conclude(
@@ -400,7 +412,13 @@ def guarded(name: str, step: Callable[[RunState], None], state: RunState) -> Non
 
 
 def _install_handlers(state: RunState) -> Callable[[], None]:
-    """Signals only record which one came first. They never raise. Returns the undo."""
+    """Signals only record which one came first. They never raise.
+
+    Returns the undo, which the run itself never calls (only a test that installs them in its own
+    process does): the handlers are never given back: the run is the command's whole life, and a signal that
+    arrives after the conclusion (during the final flush, the exit or the interpreter's shutdown)
+    must be caught, not end the process by that signal with the record already written.
+    """
 
     def note(name: str) -> None:
         if state["signal"] is None:
@@ -442,22 +460,64 @@ def run_steps(
         "problems": {},
         "signal": None,
     }
-    restore = _install_handlers(state)
+    return _the_run(steps, state)
+
+
+def _the_run(steps: Sequence[tuple[str, Callable[[RunState], None]]], state: RunState) -> int:
+    """The outermost guard of the run: whatever happens inside it, it owes a conclusion.
+
+    Installing the handlers, every step, the final clean-up (ending the child, concluding) and the
+    final print are inside it, and the handlers stay installed to the end of the process. The conclusion is the
+    outcome record, or before a claim the one-line refusal. The per-step guards (`guarded`) are
+    inside it only to name the step that failed. Returns the exit code.
+    """
     try:
+        _install_handlers(state)
         for name, step in steps:
             state["facts"].update(decisions.facts_after_signal(state["facts"], state["signal"]))
             if decisions.step_runs(name, state["facts"]):
                 guarded(name, step, state)
-    finally:
-        boundary = state["stand_ins"].get("boundary")
-        if boundary and boundary.get("process") is not None:
-            end_child(world, boundary["process"])  # whatever went wrong, nothing is left running
-        if "conclusion" not in state:  # the last step did not run, or did not finish
-            state["conclusion"] = conclude_run(state)
-        restore()
-    for line in state["conclusion"]["stdout"]:
-        out.write(line + "\n")
-    for line in state["conclusion"]["stderr"]:
-        err.write(line + "\n")
-    exit_code: int = state["conclusion"]["exit"]
+    except BaseException as error:  # outside every step: nothing here may prevent the conclusion
+        if "header_source" not in state["facts"]:
+            state["problem"] = (
+                f"the run could not be set up ({type(error).__name__}); nothing was done"
+            )
+    _clean_up(state)
+    return _print_the_conclusion(state)
+
+
+def _clean_up(state: RunState) -> None:
+    """Whatever went wrong, nothing is left running, and there is a conclusion."""
+    boundary = state["stand_ins"].get("boundary")
+    if boundary and boundary.get("process") is not None:
+        try:
+            end_child(state["world"], boundary["process"])
+        except BaseException as error:  # the last look at the child failed: say what cannot be said
+            if state["facts"].setdefault("stop", "not_confirmed") == "not_confirmed":
+                state["problems"].setdefault(
+                    "stop_not_confirmed",
+                    f"the last check on the child failed ({type(error).__name__}); "
+                    "it cannot be said to have ended",
+                )
+    if "conclusion" not in state:  # the last step did not run, or did not finish
+        state["conclusion"] = conclude_run(state)
+
+
+def _print_the_conclusion(state: RunState) -> int:
+    """Print the conclusion. The exit code says whether the record was written, never whether the print worked."""
+    conclusion = state["conclusion"]
+    try:
+        for line in conclusion["stdout"]:
+            state["out"].write(line + "\n")
+        state["out"].flush()
+    except (OSError, ValueError) as error:  # the reader went away: the record stands
+        with contextlib.suppress(Exception):
+            state["err"].write(
+                f"shuttle: the result could not be printed ({type(error).__name__}); "
+                "the exit code still says whether the outcome record was written\n"
+            )
+    with contextlib.suppress(OSError, ValueError):
+        for line in conclusion["stderr"]:
+            state["err"].write(line + "\n")
+    exit_code: int = conclusion["exit"]
     return exit_code

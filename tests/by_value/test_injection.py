@@ -94,46 +94,21 @@ RUNS = {
     ),
 }
 
-# A call that, failing, still leaves something the run promises not to. Each is a finding about
-# the code, not about the simulated world; the test fails when one stops being true, so a mark
-# cannot go stale. Key: (operation, "first" or "last" call of it in a run).
-KNOWN_GAPS = {
-    (
-        "files.remove",
-        "first",
-    ): "removing the request record's temporary name fails after the record was put in place: the run ends with a refusal that says the id is unusable and nothing was done, although the request record exists (the id is spent), and the temporary file stays in the records folder",
-    (
-        "files.remove",
-        "last",
-    ): "removing the outcome record's temporary name fails after the record was put in place: the run exits non-zero and prints the receipt as not written, although the outcome record exists, and the temporary file stays in the records folder",
-    (
-        "processes.poll",
-        "last",
-    ): "the last look at the child, in the run's own finally, is outside every guard: an error there ends the run with a traceback and no outcome record (the request record is left, the id is spent)",
-    (
-        "signals.install",
-        "first",
-    ): "the handlers are installed before the guard: an error there ends the run with a traceback before anything was claimed: no record of any kind, the id is not spent, nothing is left behind",
-}
 
+def what_a_failed_call_left_behind(world, code, operation):
+    """What is wrong after a run in which one call failed, as a list; empty when nothing is.
 
-def gap_for(operation, number, calls):
-    """The known gap a failure of this call is, or None."""
-    for place, hit in (("first", number == 1), ("last", number == calls)):
-        if hit and (operation, place) in KNOWN_GAPS:
-            return KNOWN_GAPS[(operation, place)]
-    return None
-
-
-def what_a_failed_call_left_behind(world, code):
-    """What is wrong after a run in which one call failed, as a list; empty when nothing is."""
+    A temporary name is left only where removing it was the call that failed: the record is in
+    place by then, and the run says so on standard error."""
     names = world.names_in(scenes.RECORDS)
     wrong = []
-    if any(".tmp-" in name for name in names):
+    if operation != "files.remove" and any(".tmp-" in name for name in names):
         wrong.append("a temporary is left")
     outcomes = [n for n in names if n.endswith(".outcome.json")]
     if code == 0 and not outcomes:
         wrong.append("exit 0 and no outcome record")
+    if outcomes and code != 0:
+        wrong.append("an outcome record is in place and the exit code says it is not")
     if outcomes and core.check_receipt(scenes.outcome(world)["receipt"]):
         wrong.append("an outcome record that fails the receipt check")
     if outcomes and "inj-1.request.json" not in names:
@@ -165,19 +140,14 @@ def run_with_a_failure(run_name, operation, number):
         code, _, _ = scenes.run_in(world)
     except RuntimeError:
         return ["the error escaped the run"]
-    return what_a_failed_call_left_behind(world, code)
+    return what_a_failed_call_left_behind(world, code, operation)
 
 
 class EveryOperationFailingInTurn(unittest.TestCase):
     def test_a_failure_in_any_call_of_any_operation_leaves_a_whole_trace_and_no_child_running(self):
-        for run_name, operation, number, calls in every_call():
+        for run_name, operation, number, _ in every_call():
             with self.subTest(run=run_name, operation=operation, call=number):
-                wrong = run_with_a_failure(run_name, operation, number)
-                gap = gap_for(operation, number, calls)
-                if gap:
-                    self.assertTrue(wrong, f"no longer a gap, remove the mark: {gap}")
-                else:
-                    self.assertEqual(wrong, [])
+                self.assertEqual(run_with_a_failure(run_name, operation, number), [])
 
     def test_the_runs_make_enough_calls_for_the_sweep_to_mean_something(self):
         for run_name, make in RUNS.items():
@@ -185,13 +155,6 @@ class EveryOperationFailingInTurn(unittest.TestCase):
             scenes.run_in(world)
             self.assertGreater(sum(world.counts.values()), 25, run_name)
             self.assertGreaterEqual(len(world.counts), 14, run_name)
-
-    def test_every_known_gap_names_an_operation_that_a_run_calls(self):
-        for operation, _ in KNOWN_GAPS:
-            with self.subTest(operation):
-                world = scenes.scene()
-                scenes.run_in(world)
-                self.assertIn(operation, world.counts)
 
 
 class Injection(unittest.TestCase):
