@@ -77,6 +77,8 @@ class GuardChangesTest(unittest.TestCase):
             "tests/command/test_base_check.py",
             "tests/command/test_check_script.py",
             "tests/command/test_hook.py",
+            "tests/by_value/test_report.py",
+            "tests/command/test_report.py",
         ]
         self.assertEqual(self.guards_in(*paths), sorted(paths))
 
@@ -138,81 +140,74 @@ class TheAttackListsAreGuardFilesTest(unittest.TestCase):
                 self.assertFalse(guards.is_guard(path))
 
     def files_to_read(self):
+        """Every test file except those in tests/hostile/, which is a guard folder already (they
+        name the tables in every line, so they would say nothing here)."""
         return [
             os.path.join(where, name)
             for where, _, files in os.walk(self.TESTS)
             for name in files
             if name.endswith(".py")
-            and "hostile" not in os.path.relpath(os.path.join(where, name), self.TESTS)
+            and os.path.relpath(where, self.TESTS).split(os.sep)[0] != "hostile"
         ]
+
+    @staticmethod
+    def mentions_the_tables(source):
+        """Whether any name, attribute, import or text constant in the source mentions
+        `hostile`, whatever the import form (`import_module("hostile.x")` after a bare
+        `from importlib import import_module`, `from . import hostile`, a path in a string)."""
+        for node in ast.walk(ast.parse(source)):
+            words = []
+            if isinstance(node, ast.Name):
+                words = [node.id]
+            elif isinstance(node, ast.Attribute):
+                words = [node.attr]
+            elif isinstance(node, ast.ImportFrom):
+                words = [node.module or "", *(a.name for a in node.names)]
+            elif isinstance(node, ast.Import):
+                words = [a.name for a in node.names]
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                words = [node.value]
+            if any("hostile" in word for word in words):
+                return True
+        return False
 
     def reads_the_tables_in(self, path):
         with open(path, encoding="utf-8") as f:
-            return any(self.reads_the_tables(node) for node in ast.walk(ast.parse(f.read())))
+            return self.mentions_the_tables(f.read())
 
-    @staticmethod
-    def reads_the_tables(node):
-        """`from hostile... import`, `import hostile...` or importlib.import_module("hostile..."),
-        and the same through the package: `from tests.hostile import x`, `from tests import
-        hostile`, `import tests.hostile`."""
-
-        def hostile(dotted):
-            parts = dotted.split(".")
-            return parts[0] == "hostile" or parts[:2] == ["tests", "hostile"]
-
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            return hostile(module) or (
-                module == "tests" and any(a.name == "hostile" for a in node.names)
-            )
-        if isinstance(node, ast.Import):
-            return any(hostile(a.name) for a in node.names)
-        return (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "import_module"
-            and bool(node.args)
-            and isinstance(node.args[0], ast.Constant)
-            and hostile(str(node.args[0].value))
-        )
-
-    @staticmethod
-    def first_node(source):
-        node = ast.parse(source).body[0]
-        return node.value if isinstance(node, ast.Expr) else node
-
-    def test_every_form_of_importing_the_tables_is_seen_and_other_imports_are_not(self):
+    def test_every_way_of_mentioning_the_tables_is_seen_and_a_file_that_does_not_is_not(self):
         for source in (
             "from hostile import x",
-            "from hostile.names_table import NAMES",
-            "import hostile",
             "import hostile.registry",
-            "from tests.hostile import x",
             "from tests.hostile.names_table import NAMES",
             "from tests import hostile",
-            "import tests.hostile",
+            "from tests import (by_value, hostile)",
             "import tests.hostile.registry as r",
-            "importlib.import_module('hostile.registry')",
+            "from . import hostile",
+            "from .. import hostile",
+            "from ..hostile import registry",
+            "from importlib import import_module\nimport_module('hostile.names_table')",
             "importlib.import_module('tests.hostile.registry')",
+            "__import__('hostile')",
+            "open('tests/hostile/names_table.py')",
+            "x = hostile.NAMES",
+            "x = tests.hostile",
         ):
             with self.subTest(source=source):
-                self.assertTrue(self.reads_the_tables(self.first_node(source)))
+                self.assertTrue(self.mentions_the_tables(source))
         for source in (
             "from tests import by_value",
             "from tests.by_value import x",
-            "import tests",
-            "from hostilex import x",
-            "from tests.hostile2 import x",
-            "from x.tests.hostile import y",
-            "import os",
+            "import os\nimport tests",
+            "x = 'names'",
         ):
             with self.subTest(source=source):
-                self.assertFalse(self.reads_the_tables(self.first_node(source)))
+                self.assertFalse(self.mentions_the_tables(source))
 
     def test_each_test_file_that_is_a_rule_or_loops_a_table_is_a_guard_file(self):
-        # The rule: a test file under tests/ that imports from `hostile` (the attack lists) is
-        # a guard file, so a pull request that weakens it is listed. A file that is a rule
-        # without importing `hostile` has to be named in GUARD_FILES by hand.
+        # The rule: a test file under tests/ that mentions `hostile` (the attack lists) is a
+        # guard file, so a pull request that weakens it is listed. A file that is a rule
+        # without mentioning `hostile` has to be named in GUARD_FILES by hand.
         found = [
             os.path.relpath(path, os.path.dirname(self.TESTS))
             for path in self.files_to_read()
@@ -366,6 +361,22 @@ class TableReportTest(unittest.TestCase):
         head = rows("a", a={"m.f": "a longer reason"})
         self.assertEqual(self.report(base, head), ["names: new known gap: a: m.f: a longer reason"])
 
+    def test_a_mark_removed_with_its_row_kept_is_a_closed_gap_and_no_longer_stands(self):
+        base = rows("a", "b", b={"m.f": "why f"})
+        head = rows("a", "b")
+        self.assertEqual(self.both(base, head), (["names: known gap closed: b: m.f: why f"], []))
+
+    def test_a_mark_that_went_with_its_removed_row_is_not_also_called_closed(self):
+        base = rows("a", "b", b={"m.f": "why f"})
+        self.assertEqual(self.both(base, rows("a")), (["names: row removed: b"], []))
+
+    def test_a_table_unreadable_at_the_base_still_lists_the_marks_standing_at_the_head(self):
+        changes, standing = self.both("SyntaxError: line 1", rows("a", a={"m.f": "why"}))
+        self.assertEqual(
+            changes, ["names: the table at the base could not be read: SyntaxError: line 1"]
+        )
+        self.assertEqual(standing, ["names: known gap: a: m.f: why"])
+
     def test_a_standing_mark_alone_is_no_change(self):
         both = rows("a", a={"m.f": "why"})
         self.assertEqual(self.both(both, both), ([], ["names: known gap: a: m.f: why"]))
@@ -433,6 +444,12 @@ class RenderTablesTest(unittest.TestCase):
         self.assertIn("names: new known gap: a: m.f: why", text)
         self.assertIn("names: known gap: a: m.f: why", text)
         self.assertLess(text.index(self.CHANGES), text.index(self.STANDING))
+
+    def test_a_pull_request_that_closes_a_mark_prints_the_changes_heading(self):
+        text = self.rendered(rows("a", a={"m.f": "why"}), rows("a"))
+        self.assertIn(self.CHANGES, text)
+        self.assertIn("names: known gap closed: a: m.f: why", text)
+        self.assertNotIn(self.STANDING, text)
 
     def test_a_standing_mark_is_not_listed_under_the_changes_heading(self):
         text = self.rendered(

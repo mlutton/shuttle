@@ -19,7 +19,8 @@ annotation mentions Path. A function already registered stays registered whateve
 parameters are called. What this cannot see: a name-carrying parameter called something else
 (`item`, `entry`, `x`, `facts`, `lines`), a name inside another value under such a parameter,
 a function reading a name from the environment or a global, and a lambda. When it misses a word
-a function really uses, add the word to NAME_PARTS. The rule is a net with wide holes; the
+a function really uses, add the word to NAME_PARTS. A parameter annotated only as bool, int or
+float, or a collection of those, is skipped whatever it is called. The rule is a net with wide holes; the
 table tests of the existing functions are the real guard.
 
 A registered test has to exist, be a test method, and refer to the names table (directly or
@@ -61,6 +62,23 @@ NAME_PARTS = (
 # (`dirty`).
 DIR_WORDS = ("dir", "dirs", "dirname", "dirpath")
 ANNOTATION_PARTS = ("Path",)
+PLAIN_TYPES = ("bool", "int", "float")
+PLAIN_COLLECTIONS = (
+    "list",
+    "tuple",
+    "set",
+    "frozenset",
+    "dict",
+    "Sequence",
+    "Iterable",
+    "Mapping",
+    "Optional",
+    "Union",
+    "List",
+    "Tuple",
+    "Set",
+    "Dict",
+)
 # What a test that loops the names table refers to (tests/by_value/test_names_table.py).
 TABLE_REFERENCES = frozenset({"ROWS", "NO_NUL", "HOLDABLE", "NAMES"})
 WHERE = (
@@ -70,8 +88,33 @@ WHERE = (
 )
 
 
+def plain_number(node):
+    """Whether an annotation (an ast node) is only bool, int, float or None, or a collection of
+    only those (`list[int]`, `tuple[int, ...]`, `int | None`): a value that cannot be a name."""
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, str):
+            try:
+                return plain_number(ast.parse(node.value, mode="eval").body)
+            except SyntaxError:
+                return False
+        return node.value is None or node.value is Ellipsis
+    if isinstance(node, ast.Name):
+        return node.id in PLAIN_TYPES
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return plain_number(node.left) and plain_number(node.right)
+    if isinstance(node, ast.Subscript):
+        base = ast.unparse(node.value).split(".")[-1]
+        items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+        return base in PLAIN_COLLECTIONS and all(plain_number(item) for item in items)
+    return False
+
+
 def carries_names(arg):
-    """Whether a parameter (an ast.arg) looks as if it carries file names or paths."""
+    """Whether a parameter (an ast.arg) looks as if it carries file names or paths. One
+    annotated as only numbers, booleans or None (or a collection of those) does not, whatever
+    it is called; one with no annotation is judged by its name."""
+    if arg.annotation is not None and plain_number(arg.annotation):
+        return False
     lowered = arg.arg.lower()
     if any(part in lowered for part in NAME_PARTS) or any(
         word in DIR_WORDS for word in lowered.split("_")
@@ -267,6 +310,53 @@ class TestRecognition(unittest.TestCase):
         found = functions(source, "m")
         self.assertEqual(sum(1 for params in found.values() if params), 12)
         self.assertEqual([k for k, v in found.items() if v], [f"m.{c}" for c in "abcdefghijkl"])
+
+    def test_the_reviewers_20_signatures_that_carry_no_file_name_are_three_flagged_not_twenty(
+        self,
+    ):
+        # Review of pull request #15, note N1: 20 signatures with no file name, all flagged by the
+        # name alone. Those annotated only as bool, int or float (or a collection of those) are
+        # skipped; `name: str` and `source: bytes` can carry names; `entries: dict[str, int]`
+        # keeps str keys, which can be file names, so it stays flagged too.
+        skipped = [
+            "def a(changed: bool): pass",
+            "def b(changed: int): pass",
+            "def c(failed: int): pass",
+            "def d(failed: bool): pass",
+            "def e(target: float): pass",
+            "def f(target: int): pass",
+            "def g(location: tuple[int, int]): pass",
+            "def h(location: float): pass",
+            "def i(entries: int): pass",
+            "def j(listing: bool): pass",
+            "def k(listing: list[float]): pass",
+            "def l(unchanged: bool): pass",
+            "def m(targets: list[int]): pass",
+            "def n(filename_count: int): pass",
+            "def o(rename_count: int): pass",
+            "def p(failed_count: int, changed_total: int): pass",
+            "def q(target_temperature: float, root_mean: float): pass",
+        ]
+        flagged = [
+            "def r(entries: dict[str, int]): pass",
+            "def s(name: str): pass",
+            "def t(source: bytes): pass",
+        ]
+        self.assertEqual(len(skipped + flagged), 20)
+        found = functions("\n".join(skipped + flagged) + "\n", "m")
+        self.assertEqual([k for k, v in found.items() if v], ["m.r", "m.s", "m.t"])
+
+    def test_an_annotation_that_is_only_numbers_is_skipped_and_no_annotation_is_not(self):
+        source = (
+            "def a(target: 'float'): pass\n"
+            "def b(target: int | None): pass\n"
+            "def c(target: tuple[int, ...]): pass\n"
+            "def d(target): pass\n"
+            "def e(target: str | int): pass\n"
+            "def f(target: list[Path]): pass\n"
+        )
+        found = {k for k, v in functions(source, "m").items() if v}
+        self.assertEqual(found, {"m.d", "m.e", "m.f"})
 
     def test_a_method_is_named_with_its_class(self):
         self.assertEqual(

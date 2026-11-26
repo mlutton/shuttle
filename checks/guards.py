@@ -40,6 +40,8 @@ GUARD_FILES = (
     "tests/command/test_base_check.py",
     "tests/command/test_check_script.py",
     "tests/command/test_hook.py",
+    "tests/by_value/test_report.py",
+    "tests/command/test_report.py",
 )
 # The attack lists: table name, file, the variable holding the rows, and (for tables whose rows
 # are tuples) the fields of a row in order.
@@ -178,6 +180,33 @@ def _relabelled(
     return pairs
 
 
+def _mark_lines(
+    table: str,
+    old: list[dict[str, Any]] | None,
+    new: list[dict[str, Any]] | None,
+    relabelled: dict[str, str],
+) -> tuple[list[str], list[str]]:
+    """The known-gap lines of one table: (marks added or closed, every mark in force at the
+    head). A mark follows its row when the row was relabelled; one that went with a removed row
+    is not called closed."""
+    carried = {
+        (relabelled.get(label, label), key): reason
+        for (label, key), reason in _gaps(old or []).items()
+    }
+    held = _gaps(new or [])
+    present = {r["label"] for r in new or []}
+    lines: list[str] = []
+    standing: list[str] = []
+    for (label, key), reason in held.items():
+        if carried.get((label, key)) != reason:
+            lines.append(f"{table}: new known gap: {label}: {key}: {reason}")
+        standing.append(f"{table}: known gap: {label}: {key}: {reason}")
+    for (label, key), reason in carried.items():
+        if label in present and (label, key) not in held:
+            lines.append(f"{table}: known gap closed: {label}: {key}: {reason}")
+    return lines, standing
+
+
 def _table_lines(
     table: str, old: list[dict[str, Any]] | None, new: list[dict[str, Any]] | None
 ) -> tuple[list[str], list[str]]:
@@ -202,15 +231,8 @@ def _table_lines(
         lines.append(f"{table}: no table at the base; all {added} rows are new")
     elif added:
         lines.append(f"{table}: {added} rows added")
-    carried = {
-        (renamed.get(label, label), key): reason
-        for (label, key), reason in _gaps(old or []).items()
-    }
-    standing: list[str] = []
-    for (label, key), reason in _gaps(new or []).items():
-        if carried.get((label, key)) != reason:
-            lines.append(f"{table}: new known gap: {label}: {key}: {reason}")
-        standing.append(f"{table}: known gap: {label}: {key}: {reason}")
+    marks, standing = _mark_lines(table, old, new, renamed)
+    lines += marks
     return lines, standing
 
 
@@ -222,7 +244,7 @@ def table_report(
     head, as (changes, standing), one line each. A table is its rows, or text saying why it
     could not be read, or None when it is not there. The changes name the table and label of
     each row removed, relabelled (old and new label) or changed (which fields), the count of
-    rows added, and each known-gap mark added or whose reason changed. The standing lines are
+    rows added, and each known-gap mark added, whose reason changed or closed (its row still there). The standing lines are
     every known-gap mark in force at the head, every time."""
     changes: list[str] = []
     standing: list[str] = []
@@ -235,6 +257,8 @@ def table_report(
             more, held = _table_lines(table, old, new)
             changes += more
             standing += held
+        elif isinstance(old, str) and isinstance(new, list):
+            standing += _table_lines(table, None, new)[1]
     return changes, standing
 
 
@@ -246,7 +270,7 @@ def render_tables(changes: list[str], standing: list[str]) -> str:
     if changes:
         text += (
             "\n## What this pull request does to the hostile-case tables\n\n"
-            "Rows removed, relabelled or changed, rows and marks added, one per line:\n\n"
+            "Rows removed, relabelled or changed, rows added, marks added or closed, one per line:\n\n"
             + fenced([escape_name(line) for line in changes])
         )
     if standing:

@@ -27,16 +27,19 @@ def pointed_paths(text: str, top_level: set[str], ignored: set[str]) -> list[tup
     points at the folder before it. A path (a) holds a slash and ends in a file extension or a
     slash, whatever its first component; or (b) is a bare word ending in `.md`; or (c) starts
     with a top-level entry of the tree. Absolute paths and anything under an ignored entry are
-    not paths. A span is not a path either when it starts with `~/` or `../`, or when its first
-    component holds a dot and is not an entry of the tree (`example.com/x.html`)."""
+    not paths. A span is not a path either when it starts with `~`, `$` or `../` (a home folder, a
+    variable, the folder above), or when its first component holds a dot after its first
+    character and is not an entry of the tree (`example.com/x.html`; a dot folder such as
+    `.github` starts with its dot, so a mistyped one is still reported)."""
     found = []
     for span in re.findall(r"`([^`\n]+)`", text):
         word = re.split(r":|#", span.split()[0].removeprefix("./"))[0]
         word = word[: word.index("*")] if "*" in word else word
         first = word.split("/")[0]
-        if not word or word.startswith(("/", "~/", "../")) or "<" in word or ">" in word:
+        if not word or word.startswith(("/", "~", "$", "../")) or "<" in word or ">" in word:
             continue
-        if first in ignored or ("/" in word and "." in first and first not in top_level):
+        host_like = "." in first[1:] and first not in top_level
+        if first in ignored or ("/" in word and host_like):
             continue
         last = word.rstrip("/").split("/")[-1]
         slash = "/" in word
@@ -131,6 +134,9 @@ class PointedPathsTest(unittest.TestCase):
             "../x.md",
             "../checks/all.sh",
             "~/checks/",
+            "$HOME/x.md",
+            "${HOME}/x.md",
+            "~user/x.md",
         ):
             with self.subTest(span=span):
                 self.assertEqual(self.paths(f"`{span}`"), [])
@@ -139,6 +145,14 @@ class PointedPathsTest(unittest.TestCase):
         # the tree no longer has `checks`; the documents still point at it
         found = problems("`checks/all.sh` and `checks/`", {"docs"}, IGNORED, lambda p: "")
         self.assertEqual(found, ["checks/all.sh does not exist", "checks does not exist"])
+
+    def test_a_mistyped_or_removed_dot_folder_is_reported_and_a_host_name_is_not(self):
+        text = "`.claud/agents/x.md` `.github/workflows/gone.yml` `example.com/x.html`"
+        found = problems(text, {".claude"}, IGNORED, lambda p: "")
+        self.assertEqual(
+            found,
+            [".claud/agents/x.md does not exist", ".github/workflows/gone.yml does not exist"],
+        )
 
     def test_a_mistyped_first_component_is_reported(self):
         found = problems("`doc/process.md` and `test/hostile/`", TOP, IGNORED, lambda p: "")

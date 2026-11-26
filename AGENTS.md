@@ -1,7 +1,7 @@
 # Working on Shuttle
 
 ## Everyone
-- Work in your own git worktree of the clone, beside it, in a folder named for your branch; check that the name is free before you create it. The worktree finds the clone's tools by itself. The tools and the pre-push hook are installed once per clone: README, "Checking a change".
+- Work in your own git worktree beside the clone, named for your branch (a detached one, for its commit); remove it before you hand back. It finds the clone's tools by itself. The tools and the pre-push hook are installed once per clone: README, "Checking a change".
 - Everything committed, and every pull request and comment, is public: no contact details, credentials or personal data.
 - Before pushing, run `git log -1 --format=%ae`; when it does not end in `users.noreply.github.com`, stop and report, and leave the configuration alone.
 - Merging and repository settings are the owner's.
