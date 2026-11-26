@@ -51,7 +51,7 @@ Switch on the pre-push hook, once per clone:
 git config core.hooksPath .githooks
 ```
 
-A push is then refused unless `./checks/all.sh` passes on each commit being pushed. The hook checks out that commit into a temporary folder and runs the script there, so uncommitted changes in your folder neither pass nor fail a push. From a linked worktree the hook uses the worktree's own `.venv` if it has one, else the main working tree's.
+A push is then refused unless `./checks/all.sh` passes on each commit being pushed. The hook checks out that commit into a temporary folder and runs the script there, so uncommitted changes in your folder neither pass nor fail a push (the one exception: `checks/interpreter.sh`, the interpreter lookup, is read from your folder). From a linked worktree the hook uses the worktree's own `.venv` if it has one, else the main working tree's.
 
 ## Tests
 

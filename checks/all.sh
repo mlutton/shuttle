@@ -50,11 +50,10 @@ root=$(cd "$(dirname "$0")/.." && pwd) || exit 2
 cd "$root" || exit 2
 
 if [ -z "${PYTHON:-}" ]; then
-    if [ ! -r checks/interpreter.sh ]; then
-        echo "check: could not run: checks/interpreter.sh is missing; set PYTHON or restore the file"
-        exit 2
-    fi
+    unusable="check: could not run: checks/interpreter.sh is missing or unusable; set PYTHON or restore the file"
+    [ -f checks/interpreter.sh ] || { echo "$unusable"; exit 2; }
     . checks/interpreter.sh
+    command -v choose_python >/dev/null 2>&1 || { echo "$unusable"; exit 2; }
     PYTHON=$(choose_python "$root")
     : "${PYTHON:=python3}"
 fi

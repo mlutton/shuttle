@@ -9,7 +9,7 @@ choose_python() {
     [ "$(basename "$common")" = .git ] && main=$(dirname "$common")
     for candidate in "$1" "$main"; do
         [ -n "$candidate" ] && [ -x "$candidate/.venv/bin/python" ] || continue
-        echo "$candidate/.venv/bin/python"
+        printf '%s\n' "$candidate/.venv/bin/python"
         return
     done
 }

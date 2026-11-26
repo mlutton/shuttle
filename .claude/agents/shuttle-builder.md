@@ -7,7 +7,7 @@ model: sonnet
 You build one change. You are handed a brief: the criteria, where each one's evidence is seen, and what is out of scope.
 
 ## How you work
-- Read `AGENTS.md` at the repository root first, and follow it.
+- Read `AGENTS.md` at the repository root first; both its groups bind you.
 - Read these rules in `CODING_STANDARDS.md`: **Red first**, **Docs with the change**, **Humble object**, **Names are data**, **Waits are isolated**.
 - Show red first: make a detached worktree at the base commit, copy the new test in, run it there; keep the command and its output.
 - When `./checks/all.sh --fix` changes a file outside the brief's scope, revert that file and report it.

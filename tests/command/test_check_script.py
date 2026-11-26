@@ -198,24 +198,38 @@ class InterpreterLookupTest(unittest.TestCase):
         self.interpreter(explicit, "explicit")
         self.assertIn("ran: explicit", self.run_in(self.linked, PYTHON=explicit))
 
-    def test_without_the_lookup_file_and_without_python_it_could_not_run_exit_2(self):
-        os.remove(os.path.join(self.linked, "checks", "interpreter.sh"))
+    def test_a_lookup_file_that_is_missing_empty_or_a_folder_could_not_run_exit_2(self):
+        lookup = os.path.join(self.linked, "checks", "interpreter.sh")
         bin_dir = os.path.join(self.root, "bin")
         self.interpreter(os.path.join(bin_dir, "python3"), "python3")
         env = {"PATH": bin_dir + os.pathsep + os.environ["PATH"], **GIT_ENV}
-        result = subprocess.run(
-            [os.path.join(self.linked, "checks", "all.sh")],
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=self.linked,
-            timeout=60,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(
-            result.stdout.strip(),
-            "check: could not run: checks/interpreter.sh is missing; set PYTHON or restore the file",
-        )
+        for what in ("missing", "empty", "folder"):
+            with self.subTest(what=what):
+                os.remove(lookup) if os.path.isfile(lookup) else shutil.rmtree(lookup, True)
+                if what == "empty":
+                    open(lookup, "w").close()
+                elif what == "folder":
+                    os.mkdir(lookup)
+                result = subprocess.run(
+                    [os.path.join(self.linked, "checks", "all.sh")],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    cwd=self.linked,
+                    timeout=60,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(
+                    result.stdout.strip(),
+                    "check: could not run: checks/interpreter.sh is missing or unusable; "
+                    "set PYTHON or restore the file",
+                )
+
+    def test_a_path_with_a_backslash_is_kept_whole(self):
+        odd = os.path.join(self.root, "back\\tslash")
+        shutil.copytree(self.main, odd, ignore=shutil.ignore_patterns(".git"))
+        self.interpreter(os.path.join(odd, ".venv", "bin", "python"), "odd venv")
+        self.assertIn("ran: odd venv", self.run_in(odd))
 
     def test_unchanged_behaviour_with_no_environment_anywhere_it_uses_python3(self):
         self.assertIn("ran: python3", self.run_in(self.linked))
