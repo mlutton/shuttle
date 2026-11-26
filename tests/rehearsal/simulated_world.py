@@ -50,6 +50,7 @@ class SimulatedWorld:
         self.files = {}  # name -> bytearray; a linked name shares the bytearray
         self.programs = {}  # command -> behaviour
         self.started = []  # (argv, environment) of every start
+        self.children = []  # every child started
         self.counts = {}  # operation -> number of calls so far
         self.log = []  # (operation, arguments, time) of every call, in order
         self._plan = []
@@ -138,6 +139,9 @@ class SimulatedWorld:
         """Something was installed before the run's own handler (for the contract's restore case)."""
         self._handlers.append(handler)
 
+    def every_child_has_ended(self):
+        return all(self._status(child) is not None for child in self.children)
+
     def calls(self, operation):
         return [(args, t) for op, args, t in self.log if op == operation]
 
@@ -219,7 +223,9 @@ class SimulatedWorld:
         for name in behaviour["creates"]:
             self.files[name] = bytearray(b"1")
         self.started.append((list(argv), dict(environment)))
-        return _Child(argv, behaviour, self.t)
+        child = _Child(argv, behaviour, self.t)
+        self.children.append(child)
+        return child
 
     def _status(self, child):
         due = child.behaviour["exits_after"]
