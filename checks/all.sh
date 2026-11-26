@@ -36,8 +36,8 @@
 #   2  the check could not run: a tool is missing (the last line names it and the command)
 #   3  the argument was not recognised (one line on standard error names the two forms)
 #
-# PYTHON names the interpreter that has the tools. By default it is .venv/bin/python
-# when that exists, else python3. There are no retries: a failed stage stays failed.
+# PYTHON names the interpreter that has the tools. By default checks/interpreter.sh picks this
+# tree's .venv/bin/python, else the main working tree's (for a linked worktree), else python3. There are no retries: a failed stage stays failed.
 
 mode=check
 [ "$#" -eq 1 ] && [ "$1" = --fix ] && mode=fix
@@ -50,7 +50,12 @@ root=$(cd "$(dirname "$0")/.." && pwd) || exit 2
 cd "$root" || exit 2
 
 if [ -z "${PYTHON:-}" ]; then
-    if [ -x .venv/bin/python ]; then PYTHON=.venv/bin/python; else PYTHON=python3; fi
+    unusable="check: could not run: checks/interpreter.sh is missing or unusable; set PYTHON or restore the file"
+    [ -f checks/interpreter.sh ] || { echo "$unusable"; exit 2; }
+    . checks/interpreter.sh
+    command -v choose_python >/dev/null 2>&1 || { echo "$unusable"; exit 2; }
+    PYTHON=$(choose_python "$root")
+    : "${PYTHON:=python3}"
 fi
 
 INSTALL="python3 -m pip install -r requirements-dev.txt"

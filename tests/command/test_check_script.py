@@ -5,6 +5,7 @@ passes or fails the stage it is told to, so these tests do not run the real suit
 """
 
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPT = os.path.join(REPO, "checks", "all.sh")
+INTERPRETER = os.path.join(REPO, "checks", "interpreter.sh")
 FIX_FAILED = "fix: failed; ruff could not finish (its output is on standard error)"
 
 STAND_IN = """#!/bin/sh
@@ -126,6 +128,111 @@ class CheckScriptTest(unittest.TestCase):
     def test_a_missing_tool_runs_no_stage(self):
         result = self.check(MISSING="mypy")
         self.assertNotIn("passed", result.stdout)
+
+
+GIT_ENV = {
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+}
+# A stand-in interpreter that names itself on standard error and fails the lint stage.
+NAMING = '#!/bin/sh\ncase "$*" in *--version) exit 0 ;; esac\necho "ran: LABEL" >&2\nexit 1\n'
+
+
+class InterpreterLookupTest(unittest.TestCase):
+    """Which interpreter all.sh picks when PYTHON is unset, in a clone and a linked worktree."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = folder.name
+        self.main = os.path.join(self.root, "main")
+        self.linked = os.path.join(self.root, "linked")
+        self.git("init", "-q", "-b", "main", self.main, cwd=self.root)
+        os.mkdir(os.path.join(self.main, "checks"))
+        shutil.copy(SCRIPT, os.path.join(self.main, "checks", "all.sh"))
+        shutil.copy(INTERPRETER, os.path.join(self.main, "checks", "interpreter.sh"))
+        self.git("add", ".", cwd=self.main)
+        self.git("commit", "-q", "-m", "x", cwd=self.main)
+        self.git("worktree", "add", "-q", "-b", "feature", self.linked, cwd=self.main)
+
+    def git(self, *args, cwd):
+        env = {"PATH": os.environ["PATH"], **GIT_ENV}
+        subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
+
+    def interpreter(self, path, label):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(NAMING.replace("LABEL", label))
+        os.chmod(path, 0o755)
+
+    def run_in(self, tree, **env):
+        bin_dir = os.path.join(self.root, "bin")
+        self.interpreter(os.path.join(bin_dir, "python3"), "python3")
+        full = {"PATH": bin_dir + os.pathsep + os.environ["PATH"], **GIT_ENV, **env}
+        result = subprocess.run(
+            [os.path.join(tree, "checks", "all.sh")],
+            capture_output=True,
+            text=True,
+            env=full,
+            cwd=tree,
+            timeout=60,
+        )
+        return result.stderr
+
+    def test_a_linked_worktree_without_an_environment_uses_the_main_working_trees(self):
+        self.interpreter(os.path.join(self.main, ".venv", "bin", "python"), "main venv")
+        self.assertIn("ran: main venv", self.run_in(self.linked))
+
+    def test_unchanged_behaviour_a_tree_with_its_own_environment_uses_its_own(self):
+        self.interpreter(os.path.join(self.main, ".venv", "bin", "python"), "main venv")
+        self.interpreter(os.path.join(self.linked, ".venv", "bin", "python"), "own venv")
+        self.assertIn("ran: own venv", self.run_in(self.linked))
+
+    def test_unchanged_behaviour_an_explicit_python_wins_over_any_environment(self):
+        self.interpreter(os.path.join(self.main, ".venv", "bin", "python"), "main venv")
+        explicit = os.path.join(self.root, "explicit", "python")
+        self.interpreter(explicit, "explicit")
+        self.assertIn("ran: explicit", self.run_in(self.linked, PYTHON=explicit))
+
+    def test_a_lookup_file_that_is_missing_empty_or_a_folder_could_not_run_exit_2(self):
+        lookup = os.path.join(self.linked, "checks", "interpreter.sh")
+        bin_dir = os.path.join(self.root, "bin")
+        self.interpreter(os.path.join(bin_dir, "python3"), "python3")
+        env = {"PATH": bin_dir + os.pathsep + os.environ["PATH"], **GIT_ENV}
+        for what in ("missing", "empty", "folder"):
+            with self.subTest(what=what):
+                os.remove(lookup) if os.path.isfile(lookup) else shutil.rmtree(lookup, True)
+                if what == "empty":
+                    open(lookup, "w").close()
+                elif what == "folder":
+                    os.mkdir(lookup)
+                result = subprocess.run(
+                    [os.path.join(self.linked, "checks", "all.sh")],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    cwd=self.linked,
+                    timeout=60,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(
+                    result.stdout.strip(),
+                    "check: could not run: checks/interpreter.sh is missing or unusable; "
+                    "set PYTHON or restore the file",
+                )
+
+    def test_a_path_with_a_backslash_is_kept_whole(self):
+        odd = os.path.join(self.root, "back\\tslash")
+        shutil.copytree(self.main, odd, ignore=shutil.ignore_patterns(".git"))
+        self.interpreter(os.path.join(odd, ".venv", "bin", "python"), "odd venv")
+        self.assertIn("ran: odd venv", self.run_in(odd))
+
+    def test_unchanged_behaviour_with_no_environment_anywhere_it_uses_python3(self):
+        self.assertIn("ran: python3", self.run_in(self.linked))
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ Run the check:
 ./checks/all.sh
 ```
 
-It prints one line per stage and a last line, `check: passed` or `check: failed: <stage>`. Exit code 0 means passed, 1 means a stage failed, 2 means the check could not run (a tool is missing; the last line names it and the install command), 3 means the argument was not recognised. The script uses `.venv/bin/python` when it exists, else `python3`; set `PYTHON` to use another interpreter. Nothing is retried.
+It prints one line per stage and a last line, `check: passed` or `check: failed: <stage>`. Exit code 0 means passed, 1 means a stage failed, 2 means the check could not run (a tool is missing; the last line names it and the install command), 3 means the argument was not recognised. The script uses the clone's `.venv/bin/python` when it exists (in a linked worktree, the main working tree's when the worktree has none; `checks/interpreter.sh` is the one lookup, shared with the hook), else `python3`; set `PYTHON` to use another interpreter. Nothing is retried.
 
 `./checks/all.sh --fix` applies what ruff can change mechanically (safe lint fixes and the formatter, never an ignore comment or a configuration edit) and needs ruff only. It lists each file it changed (`changed: <path>`) and each file ruff could not parse or write (`failed: <path>`), then ends `fix: changed N files; now run ./checks/all.sh`, `fix: nothing to change` or `fix: failed; ...` (exit 1). It runs no types or tests; run the check afterwards. File names in this output and in the guard listing are shown escaped (a newline, a backslash, a control or direction character, or a byte that is not valid UTF-8 appears as an escape such as `\n` or `\xff`), one per line.
 
@@ -51,7 +51,7 @@ Switch on the pre-push hook, once per clone:
 git config core.hooksPath .githooks
 ```
 
-A push is then refused unless `./checks/all.sh` passes on each commit being pushed. The hook checks out that commit into a temporary folder and runs the script there, so uncommitted changes in your folder neither pass nor fail a push. From a linked worktree the hook uses the worktree's own `.venv` if it has one, else the main working tree's.
+A push is then refused unless `./checks/all.sh` passes on each commit being pushed. The hook checks out that commit into a temporary folder and runs the script there, so uncommitted changes in your folder neither pass nor fail a push (the one exception: `checks/interpreter.sh`, the interpreter lookup, is read from your folder). From a linked worktree the hook uses the worktree's own `.venv` if it has one, else the main working tree's.
 
 ## Tests
 
@@ -65,7 +65,7 @@ The tests are sorted by seam, all run by that one command:
 - `tests/command/`: the real command, the check script and the hook, run as child processes or against a temporary folder.
 - `tests/boundary/`: tests of the boundary; none yet.
 
-The `tests (unittest)` workflow runs the check on every pull request. Its `base check (unittest)` job also runs the base branch's copy of `checks/all.sh` against the pull request's files, so a pull request cannot pass by weakening the script, and lists in the job summary any guard files (changed, added or deleted; a moved file shows as deleted from its old path) the pull request changes (`checks/`, `.githooks/`, `.github/`, `tests/hostile/`, `pyproject.toml`, `requirements-dev.txt`, and the tests that are rules or loop an attack list: `tests/by_value/test_rules.py`, `test_check_helpers.py` (it pins the guard list), `test_name_functions.py`, `test_names_table.py`, `tests/command/test_hostile_tables.py`, `test_fix_mode.py`). It does not cover the workflow file or the lint configuration, which still come from the pull request; the summary is how a reviewer sees them.
+The `tests (unittest)` workflow runs the check on every pull request. Its `base check (unittest)` job also runs the base branch's copy of `checks/all.sh` against the pull request's files, so a pull request cannot pass by weakening the script, and lists in the job summary any guard files (changed, added or deleted; a moved file shows as deleted from its old path) the pull request changes (`checks/`, `.githooks/`, `.github/`, `.claude/agents/`, `tests/hostile/`, `pyproject.toml`, `requirements-dev.txt`, and the tests that are rules or loop an attack list: `tests/by_value/test_rules.py`, `test_check_helpers.py` (it pins the guard list), `test_name_functions.py`, `test_names_table.py`, `tests/command/test_hostile_tables.py`, `test_fix_mode.py`, `test_agent_documents.py`), and the documents that steer agents (`AGENTS.md`, `CLAUDE.md`, `CODING_STANDARDS.md`, `docs/process.md`). It does not cover the workflow file or the lint configuration, which still come from the pull request; the summary is how a reviewer sees them.
 
 ## Hostile-case tables
 
@@ -90,6 +90,6 @@ Prints, as Markdown, what a run of the suite looks like before a reviewer looks:
 - A line, or the block it opens, that is left untested on purpose ends with `# not tested: <reason>`. The report lists each with its file, line and reason; a marker with an empty reason fails the rule test, and so does the marker text inside a string or docstring (coverage would exclude that line without listing it; the report also shows a visible line if the two ever disagree). Lines without a marker are simply reported as never run.
 - The hosted `tests (unittest)` job runs it after the check (a second run of the suite, which never changes whether the job passes), appends it to the job summary and keeps the same Markdown as the build artifact `report`. The `base check (unittest)` job keeps its guard file listing as the artifact `guard-files`. Download either with `gh run download <run id> -n report` (or `-n guard-files`).
 
-## Contributing
+## Working on Shuttle
 
-Issues and pull requests are open to collaborators only for now.
+Issues and pull requests are open to collaborators only for now. Start with `AGENTS.md`. How a change goes from brief to merge is in `docs/process.md`.

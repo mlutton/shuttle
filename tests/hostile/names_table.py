@@ -198,6 +198,36 @@ NAMES = (
         "path": True,
         "holdable": True,
     },
+    {
+        "label": "a document that steers agents, one level down",
+        "name": "docs/CLAUDE.md",
+        "path": True,
+        "holdable": True,
+    },
+    {
+        "label": "a document that steers agents, one level down, with a suffix",
+        "name": "docs/AGENTS.md.bak",
+        "path": True,
+        "holdable": True,
+    },
+    {
+        "label": "a document that steers agents, with a second suffix",
+        "name": "docs/process.md.orig",
+        "path": True,
+        "holdable": True,
+    },
+    {
+        "label": "a look-alike of the agent definitions folder",
+        "name": "agents/y",
+        "path": True,
+        "holdable": True,
+    },
+    {
+        "label": "a look-alike of the agent definitions folder, with a suffix",
+        "name": ".claude/agentsx/y",
+        "path": True,
+        "holdable": True,
+    },
     {"label": "a guard folder name as a file", "name": "checks", "path": False, "holdable": True},
     {
         "label": "an empty path component",
