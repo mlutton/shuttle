@@ -11,17 +11,35 @@
 # own output goes to standard error), then a last line on standard output:
 #   check: passed
 #   check: failed: <stage>
-# The format stage adds how to fix it: "check: failed: format; fix it with: ruff format ."
+# The format stage adds how to fix it: "check: failed: format; fix it with: ./checks/all.sh --fix"
 # A tests stage ended by its time budget says so: "check: failed: tests (timed out after 20 seconds)".
 #   check: could not run: <tool> is not installed; install the tools with: <command>
 #
+# ./checks/all.sh --fix applies what ruff can change mechanically and says what changed:
+#   ruff check --fix (safe fixes only, never --unsafe-fixes), then ruff format.
+# It adds no ignore comment, edits no configuration and touches only files ruff itself
+# checks. It prints one line per file changed ("changed: <path>"), then a last line:
+#   fix: changed <N> files ("1 file" for one); now run ./checks/all.sh
+#   fix: nothing to change
+#   fix: failed; ruff could not finish (its output is on standard error)
+# It does not run types or tests and does not say the change is sound. Lint findings it
+# cannot fix are left in place and shown on standard error; the check still fails on them.
+#
 # Exit codes:
-#   0  every stage passed
-#   1  a stage failed (the last line names it)
+#   0  every stage passed; or, with --fix, it finished (whether or not it changed anything)
+#   1  a stage failed (the last line names it); or, with --fix, ruff could not finish
 #   2  the check could not run: a tool is missing (the last line names it and the command)
+#   3  the argument was not recognised (one line on standard error names the two forms)
 #
 # PYTHON names the interpreter that has the tools. By default it is .venv/bin/python
 # when that exists, else python3. There are no retries: a failed stage stays failed.
+
+mode=check
+[ "$#" -eq 1 ] && [ "$1" = --fix ] && mode=fix
+if [ "$#" -gt 0 ] && [ "$mode" = check ]; then
+    echo "usage: ./checks/all.sh   or   ./checks/all.sh --fix" >&2
+    exit 3
+fi
 
 root=$(cd "$(dirname "$0")/.." && pwd) || exit 2
 cd "$root" || exit 2
@@ -39,7 +57,38 @@ for tool in ruff mypy; do
 done
 
 output=$(mktemp) || exit 2
-trap 'rm -f "$output"' EXIT
+trap 'rm -f "$output" "$output.before" "$output.after"' EXIT
+
+# Fix mode. Files are compared by checksum before and after, over the files ruff checks.
+fingerprint() {
+    "$PYTHON" -m ruff check --show-files . 2>/dev/null | while IFS= read -r file; do
+        cksum "$file"
+    done | sort -k3
+}
+
+fix() {
+    fingerprint >"$output.before"
+    "$PYTHON" -m ruff check --fix --exit-zero . >&2 && "$PYTHON" -m ruff format . >&2 || {
+        echo "fix: failed; ruff could not finish (its output is on standard error)"
+        exit 1
+    }
+    fingerprint >"$output.after"
+    changed=$(diff "$output.before" "$output.after" | sed -n 's/^> [0-9]* [0-9]* //p')
+    if [ -z "$changed" ]; then
+        echo "fix: nothing to change"
+        exit 0
+    fi
+    count=0
+    for file in $changed; do
+        echo "changed: ${file#"$root"/}"
+        count=$((count + 1))
+    done
+    noun=files
+    [ "$count" -eq 1 ] && noun=file
+    echo "fix: changed $count $noun; now run ./checks/all.sh"
+    exit 0
+}
+[ "$mode" = fix ] && fix
 
 stage() {
     name=$1
@@ -53,7 +102,7 @@ stage() {
     echo "$name: failed"
     cat "$output" >&2
     case "$name" in
-        format) echo "check: failed: format; fix it with: $PYTHON -m ruff format ." ;;
+        format) echo "check: failed: format; fix it with: ./checks/all.sh --fix" ;;
         tests)
             if [ "$code" -eq 124 ]; then
                 echo "check: failed: tests (timed out after 20 seconds)"

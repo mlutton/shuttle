@@ -69,9 +69,7 @@ class CheckScriptTest(unittest.TestCase):
 
     def test_a_failing_format_stage_names_the_command_that_fixes_it(self):
         last = self.last_line(self.check(FAIL_STAGE="format"))
-        self.assertEqual(
-            last, f"check: failed: format; fix it with: {self.stand_in} -m ruff format ."
-        )
+        self.assertEqual(last, "check: failed: format; fix it with: ./checks/all.sh --fix")
 
     def test_a_tests_stage_ended_by_its_budget_says_it_timed_out(self):
         result = self.check(FAIL_STAGE="tests", FAIL_CODE="124")

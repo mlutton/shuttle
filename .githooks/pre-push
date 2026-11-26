@@ -7,10 +7,18 @@
 root=$(git rev-parse --show-toplevel) || exit 1
 zero=0000000000000000000000000000000000000000
 
-# The tools live in the clone's virtual environment, which the copy does not have.
-if [ -z "${PYTHON:-}" ] && [ -x "$root/.venv/bin/python" ]; then
-    PYTHON="$root/.venv/bin/python"
-    export PYTHON
+# The tools live in a virtual environment the copy does not have: this working tree's, else
+# the main working tree's (a linked worktree has none of its own). PYTHON, if set, wins.
+if [ -z "${PYTHON:-}" ]; then
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    main=
+    [ "$(basename "$common")" = .git ] && main=$(dirname "$common")
+    for candidate in "$root" "$main"; do
+        [ -n "$candidate" ] && [ -x "$candidate/.venv/bin/python" ] || continue
+        PYTHON="$candidate/.venv/bin/python"
+        export PYTHON
+        break
+    done
 fi
 
 scratch=$(mktemp -d) || exit 1
