@@ -1,6 +1,6 @@
 # Coding standards
 
-Read at review, not while building. These are judgement rules: what a machine enforces here (lint, format, types, nesting depth, the core and shell import rules, lint-ignore comments, the suite's time budget, the report) is not repeated. The reviewer answers every rule once and cites it by its bold name.
+Read in full at review; a builder reads the rules its definition names. A machine enforces lint, format, types, nesting depth, the import rules between the package's folders, ignore comments for the import ban and the suite's time budget; those are not repeated here. The rules below are judgement: the reviewer answers each once and cites it by its bold name.
 
 ## Design
 - **Functional core.** Every decision is a pure function: arguments in, a value out. Files, the clock, the environment and processes belong to the shell.
@@ -21,5 +21,5 @@ Read at review, not while building. These are judgement rules: what a machine en
 ## The review
 - **Hunt the wrong answer.** The reviewer names the inputs and states tried, including those that held.
 - **Findings are typed.** Each finding is a defect (a concrete input or state and the wrong result), a new use case, or a note. For each, the reviewer says whether a machine could have caught it and whether an agent could reach it by accident with the repository as it stands.
-- **Rounds.** Round one: any defect holds the merge. From round two: only a critical defect holds. A finding is critical only if (a) its result is a wrong verdict, a lost run, data written where it must not be, a false statement in a report, or a guard that passes what it must refuse, and (b) an agent could reach it by accident with the repository as it stands. A route that needs a deliberate odd set-up or a configuration change is a note. The same class of defect twice in one change sends that part back to design, starting from a table of the cases.
+- **Rounds.** Round one: any defect holds the merge. From round two: only a critical defect holds. A finding is critical only if (a) its result is a wrong verdict, a lost run, data written where it must not be, a false statement in a report, a false statement in a document an agent reads, an instruction that, followed literally, produces a wrong action, or a guard that passes what it must refuse, and (b) an agent could reach it by accident with the repository as it stands. A route that needs a deliberate odd set-up or a configuration change is a note. The same class of defect twice in one change sends that part back to design, starting from a table of the cases.
 - **One verdict.** "ready to merge" or "not ready: <reason>", for the exact commit read. The reviewer does not leave the call to the reader.

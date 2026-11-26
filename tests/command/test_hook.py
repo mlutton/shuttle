@@ -12,6 +12,7 @@ import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 HOOK = os.path.join(REPO, ".githooks", "pre-push")
+INTERPRETER = os.path.join(REPO, "checks", "interpreter.sh")
 
 GIT_ENV = {
     "PATH": os.environ["PATH"],
@@ -36,6 +37,7 @@ class PrePushHookTest(unittest.TestCase):
         os.makedirs(os.path.join(self.work, ".githooks"))
         os.makedirs(os.path.join(self.work, "checks"))
         shutil.copy(HOOK, os.path.join(self.work, ".githooks", "pre-push"))
+        shutil.copy(INTERPRETER, os.path.join(self.work, "checks", "interpreter.sh"))
         self.git("config", "core.hooksPath", ".githooks", cwd=self.work)
         self.git("remote", "add", "origin", self.remote, cwd=self.work)
         with open(os.path.join(self.work, "file.txt"), "w") as f:
@@ -198,6 +200,13 @@ class PrePushHookTest(unittest.TestCase):
         self.commit_python_reporting_check()
         _, output = self.push_feature(self.linked_worktree())
         self.assertIn("python=none", output)
+
+    def test_a_missing_interpreter_lookup_refuses_the_push_and_says_why(self):
+        self.commit_python_reporting_check()
+        os.remove(os.path.join(self.work, "checks", "interpreter.sh"))
+        result = self.git("push", "origin", "main", cwd=self.work)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("push refused: checks/interpreter.sh is missing", result.stderr)
 
     def test_a_push_from_the_main_working_tree_still_uses_its_own_environment(self):
         self.commit_python_reporting_check()

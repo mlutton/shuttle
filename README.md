@@ -41,7 +41,7 @@ Run the check:
 ./checks/all.sh
 ```
 
-It prints one line per stage and a last line, `check: passed` or `check: failed: <stage>`. Exit code 0 means passed, 1 means a stage failed, 2 means the check could not run (a tool is missing; the last line names it and the install command), 3 means the argument was not recognised. The script uses the clone's `.venv/bin/python` when it exists (in a linked worktree, the main working tree's when the worktree has none), else `python3`; set `PYTHON` to use another interpreter. Nothing is retried.
+It prints one line per stage and a last line, `check: passed` or `check: failed: <stage>`. Exit code 0 means passed, 1 means a stage failed, 2 means the check could not run (a tool is missing; the last line names it and the install command), 3 means the argument was not recognised. The script uses the clone's `.venv/bin/python` when it exists (in a linked worktree, the main working tree's when the worktree has none; `checks/interpreter.sh` is the one lookup, shared with the hook), else `python3`; set `PYTHON` to use another interpreter. Nothing is retried.
 
 `./checks/all.sh --fix` applies what ruff can change mechanically (safe lint fixes and the formatter, never an ignore comment or a configuration edit) and needs ruff only. It lists each file it changed (`changed: <path>`) and each file ruff could not parse or write (`failed: <path>`), then ends `fix: changed N files; now run ./checks/all.sh`, `fix: nothing to change` or `fix: failed; ...` (exit 1). It runs no types or tests; run the check afterwards. File names in this output and in the guard listing are shown escaped (a newline, a backslash, a control or direction character, or a byte that is not valid UTF-8 appears as an escape such as `\n` or `\xff`), one per line.
 
@@ -92,4 +92,4 @@ Prints, as Markdown, what a run of the suite looks like before a reviewer looks:
 
 ## Working on Shuttle
 
-Start with `AGENTS.md`. How a change goes from brief to merge is in `docs/process.md`.
+Issues and pull requests are open to collaborators only for now. Start with `AGENTS.md`. How a change goes from brief to merge is in `docs/process.md`.

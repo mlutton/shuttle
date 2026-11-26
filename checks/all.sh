@@ -36,8 +36,8 @@
 #   2  the check could not run: a tool is missing (the last line names it and the command)
 #   3  the argument was not recognised (one line on standard error names the two forms)
 #
-# PYTHON names the interpreter that has the tools. By default it is this tree's
-# .venv/bin/python, else the main working tree's (for a linked worktree), else python3. There are no retries: a failed stage stays failed.
+# PYTHON names the interpreter that has the tools. By default checks/interpreter.sh picks this
+# tree's .venv/bin/python, else the main working tree's (for a linked worktree), else python3. There are no retries: a failed stage stays failed.
 
 mode=check
 [ "$#" -eq 1 ] && [ "$1" = --fix ] && mode=fix
@@ -49,18 +49,14 @@ fi
 root=$(cd "$(dirname "$0")/.." && pwd) || exit 2
 cd "$root" || exit 2
 
-# Same lookup as .githooks/pre-push (keep the two identical): this tree's .venv, else the main
-# working tree's (a linked worktree has none of its own), else python3.
 if [ -z "${PYTHON:-}" ]; then
-    PYTHON=python3
-    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-    main=
-    [ "$(basename "$common")" = .git ] && main=$(dirname "$common")
-    for candidate in "$root" "$main"; do
-        [ -n "$candidate" ] && [ -x "$candidate/.venv/bin/python" ] || continue
-        PYTHON="$candidate/.venv/bin/python"
-        break
-    done
+    if [ ! -r checks/interpreter.sh ]; then
+        echo "check: could not run: checks/interpreter.sh is missing; set PYTHON or restore the file"
+        exit 2
+    fi
+    . checks/interpreter.sh
+    PYTHON=$(choose_python "$root")
+    : "${PYTHON:=python3}"
 fi
 
 INSTALL="python3 -m pip install -r requirements-dev.txt"

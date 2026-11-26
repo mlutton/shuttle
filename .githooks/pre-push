@@ -7,19 +7,16 @@
 root=$(git rev-parse --show-toplevel) || exit 1
 zero=0000000000000000000000000000000000000000
 
-# The tools live in a virtual environment the copy does not have: this working tree's, else
-# the main working tree's (a linked worktree has none of its own). PYTHON, if set, wins.
-# checks/all.sh makes the same lookup (keep the two identical).
+# The tools live in a virtual environment the copy does not have; checks/interpreter.sh finds
+# it (this working tree's, else the main working tree's). PYTHON, if set, wins.
 if [ -z "${PYTHON:-}" ]; then
-    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-    main=
-    [ "$(basename "$common")" = .git ] && main=$(dirname "$common")
-    for candidate in "$root" "$main"; do
-        [ -n "$candidate" ] && [ -x "$candidate/.venv/bin/python" ] || continue
-        PYTHON="$candidate/.venv/bin/python"
-        export PYTHON
-        break
-    done
+    [ -r "$root/checks/interpreter.sh" ] || {
+        echo "push refused: checks/interpreter.sh is missing; set PYTHON or restore the file" >&2
+        exit 1
+    }
+    . "$root/checks/interpreter.sh"
+    found=$(choose_python "$root")
+    [ -n "$found" ] && PYTHON=$found && export PYTHON
 fi
 
 scratch=$(mktemp -d) || exit 1

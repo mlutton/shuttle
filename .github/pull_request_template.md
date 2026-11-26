@@ -1,18 +1,16 @@
 *Opened by an AI agent (Claude); the repository owner reviews and merges.*
 
-<!-- Name the builder session's role; the reviewer must be someone other than the builder. -->
-
 ## Summary
 <!-- What changes and why, in a few lines. -->
 
 ## Evidence
-<!-- Before and after, as real output. Every number was printed by a command: say which, and where it ran. -->
+<!-- Before and after, as real output; each number with the command that printed it and where it ran. -->
 
 ## Criteria
 <!-- Each criterion from the brief: met or not, and where its evidence is seen. -->
 
 ## Red first
-<!-- For each new test of changed behaviour: how it was shown to fail on the base commit. Tests that pin unchanged behaviour: say so. -->
+<!-- For each new test of changed behaviour: how it was shown to fail on the base commit. A test that pins unchanged behaviour: say so. -->
 
 ## Decisions I made
 <!-- Choices the brief left open, and why. -->
@@ -26,6 +24,4 @@
 ## Merge danger
 <!-- The door: what can reach this change in use. The blast radius: what breaks, and for whom, if it is wrong. -->
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-<!-- Session link goes here. -->
+<!-- Closing lines: the attribution your tool supplies. -->
