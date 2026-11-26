@@ -1,6 +1,7 @@
 """Step 13, move kept files: the statement the executor left, kept exactly as written.
 
-The file at the statement location is copied, byte for byte, to a name beside the records (which
+Only a regular file at the statement location is a statement: a link (never followed), a pipe,
+a device, a socket or a folder reads wrong_shape and nothing is copied. The file is copied, byte for byte, to a name beside the records (which
 the executor cannot write) and the copy is what is hashed and judged, so the hash and the shape
 are those of the file kept. Nothing here rewrites, completes or tidies the statement, and the
 claim is passed on as the word the statement holds. Only the statement is kept so far; the
@@ -12,7 +13,7 @@ A result key left out reads as "cannot tell" in the receipt; an empty text reads
 from typing import Any
 
 from shuttle.core import decisions, statement
-from shuttle.core.shapes import HeaderSource, Operations, RunState, StepResult
+from shuttle.core.shapes import HeaderSource, NotARegularFile, Operations, RunState, StepResult
 from shuttle.shell import statement_schema
 
 # Looked, and there is nothing. A plain command has no session file of its own to keep.
@@ -50,7 +51,10 @@ def keep_statement(world: Operations, source: HeaderSource, location: str | None
     try:
         world.files.copy(location, kept)
         return {"session_file": "", **_judged(world, kept)}
-    except IsADirectoryError:  # something is there that is not a file: it is not a statement
+    except (
+        IsADirectoryError,
+        NotARegularFile,
+    ):  # a folder, a link, a pipe, a device: not a statement
         return {**NOTHING, "statement_state": statement.WRONG_SHAPE}
     except OSError:
         return {"session_file": ""}  # looked and could not keep it: the four fields cannot tell

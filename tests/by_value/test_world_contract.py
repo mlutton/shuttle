@@ -56,6 +56,18 @@ class SimulatedHarness:
     def make_a_name_that_leads_nowhere(self, path):
         self.world.put_a_name_that_leads_nowhere(path)
 
+    def make_a_link(self, path, leads_to):
+        self.world.put_link(path, leads_to)
+        return path
+
+    def make_a_pipe(self, path):
+        self.world.put_pipe(path)
+        return path
+
+    def a_device(self):
+        self.world.put_device("/dev/zero")
+        return "/dev/zero"
+
     def host_name(self):
         return self.world.host
 

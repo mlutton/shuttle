@@ -112,6 +112,31 @@ class TheKeptStatement(unittest.TestCase):
         for field in ("statement_hash", "statement_location", "claim"):
             self.assertEqual(got[field], {"state": "none", "value": None}, field)
 
+    def test_a_link_a_pipe_or_a_device_at_the_location_is_wrong_shape_and_nothing_is_kept(self):
+        things = {
+            "a link to a file": lambda w: (
+                w.put_file("/out/other", "secret"),
+                w.put_link(LOCATION, "/out/other"),
+            ),
+            "a link to a missing name": lambda w: w.put_link(LOCATION, "/out/absent"),
+            "a named pipe": lambda w: w.put_pipe(LOCATION),
+            "a link to a device": lambda w: (
+                w.put_device("/dev/zero"),
+                w.put_link(LOCATION, "/dev/zero"),
+            ),
+        }
+        for label, leave in things.items():
+            with self.subTest(label):
+                world = scenes.scene(document())
+                world.make_folder("/out")
+                world.on_call("processes.start", lambda w=world, f=leave: f(w))
+                scenes.run_in(world)
+                got = pairs(world)
+                self.assertEqual(got["statement_state"], {"state": "value", "value": "wrong_shape"})
+                for field in ("statement_hash", "statement_location", "claim"):
+                    self.assertEqual(got[field], {"state": "none", "value": None}, field)
+                self.assertNotIn(KEPT, world.files)
+
     def test_the_kept_copy_is_made_and_read_through_the_operations_and_the_original_stays(self):
         world = self.run_with(UNTIDY)
         self.assertEqual(world.calls("files.copy"), [((LOCATION, KEPT), 0.0)])

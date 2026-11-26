@@ -13,6 +13,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+locations_table = importlib.import_module("hostile.statement_locations_table")
 flat = importlib.import_module("rehearsal.receipts").flat
 real_run = importlib.import_module("rehearsal.real_run")
 
@@ -129,6 +130,45 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
         self.assertEqual((got["statement_state"], got["claim"]), ("wrong_shape", "none"))
 
 
+# argv 1 is the statement location, argv 2 a file that is not a statement; argv 3 the row's line.
+LEAVES_WHAT_IS_NOT_A_FILE = """
+import os, sys
+location, given = sys.argv[1], sys.argv[2]
+exec(sys.argv[3])
+"""
+
+
+class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
+    def test_every_such_thing_ends_the_run_keeps_nothing_and_reads_wrong_shape(self):
+        for index, row in enumerate(locations_table.LOCATIONS):
+            with self.subTest(row["label"]):
+                request_id = f"loc-{index}"
+                location = os.path.join(self.root, f"statement-{index}")
+                given = os.path.join(self.root, f"given-{index}")
+                with open(given, "wb") as f:
+                    f.write(b"-----BEGIN PRIVATE KEY-----\n")
+                script = self.script(f"leaves-{index}.py", LEAVES_WHAT_IS_NOT_A_FILE)
+                doc = self.document(script, [location, given, row["leaves"]], request_id=request_id)
+                doc["kind"], doc["statement_location"] = "judge", location
+                # `communicate` has a limit, so a run that waits on the thing fails, not hangs.
+                code, lines, err = self.run_to_the_end(doc)
+                self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
+                got = flat(self.outcome(request_id)["receipt"])["executor"]
+                self.assertEqual(
+                    got,
+                    {
+                        "statement_state": "wrong_shape",
+                        "statement_hash": "none",
+                        "statement_location": "none",
+                        "claim": "none",
+                    },
+                )
+                self.assertEqual(
+                    [n for n in os.listdir(self.records) if n.endswith(".statement.kept")], []
+                )
+                self.assertEqual([u for u in self.units_left() if request_id in u], [])
+
+
 class AReferenceCannotBeChangedByTheExecutor(real_run.RealRun):
     # Names a path can hold: a space, `$`, `%`, a newline, a leading dash, a backslash.
     NAME = "ref $HOME ${X} 100%\nline -dash \\back"
@@ -161,3 +201,33 @@ class AReferenceCannotBeChangedByTheExecutor(real_run.RealRun):
         self.assertNotIn(self.NAME + ".moved", os.listdir(self.root))
         held = flat(self.outcome()["receipt"])["execution"]["reference_hashes"]
         self.assertEqual(held, {"runbook": sha(b"the runbook")})
+
+
+class AReferenceThatIsNotAFileCannotMakeTheCheckWait(real_run.RealRun):
+    def reference(self, path):
+        return {"name": "r", "path": path, "hash": sha(b"x"), "size": 1, "hash_source": "caller"}
+
+    def run_with(self, path, request_id):
+        doc = self.document(self.script("noop.py", LEAVES_NOTHING), request_id=request_id)
+        doc["references"] = [self.reference(path)]
+        code, lines, err = self.run_to_the_end(doc)  # `communicate` has a limit: a wait fails
+        return code, err, lines[-1], flat(self.outcome(request_id)["receipt"])
+
+    def test_a_pipe_and_a_link_to_a_device_are_refused_as_missing_and_end_at_once(self):
+        pipe = self.pipe("pipe")
+        device = os.path.join(self.root, "zero")
+        os.symlink("/dev/zero", device)
+        for index, path in enumerate((pipe, device)):
+            with self.subTest(path):
+                code, err, last, receipt = self.run_with(path, f"ref-{index}")
+                self.assertEqual((code, err, last), (0, "", "could_not_start"))
+                self.assertEqual(receipt["ending"]["reason"], "reference_missing")
+
+    def test_a_link_to_a_regular_file_is_followed_as_before(self):
+        target, link = os.path.join(self.root, "target"), os.path.join(self.root, "link")
+        with open(target, "wb") as f:
+            f.write(b"x")
+        os.symlink(target, link)
+        code, err, last, receipt = self.run_with(link, "ref-link")
+        self.assertEqual((code, err, last), (0, "", "ended_by_itself"))
+        self.assertEqual(receipt["execution"]["reference_hashes"], {"r": sha(b"x")})

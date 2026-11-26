@@ -46,6 +46,7 @@ GUARD_FILES = (
     "tests/by_value/test_report.py",
     "tests/command/test_report.py",
     "tests/boundary/test_arguments.py",
+    "tests/boundary/test_statement.py",
 )
 # The attack lists: table name, file, the variable holding the rows, and (for tables whose rows
 # are tuples) the fields of a row in order.

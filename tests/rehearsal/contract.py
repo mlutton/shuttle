@@ -18,6 +18,8 @@ import os
 import re
 import sys
 
+from shuttle.core.shapes import NotARegularFile
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NAMES = importlib.import_module("hostile.names_table").NAMES
 
@@ -162,11 +164,58 @@ class ContractCases:
         self.assertRaisesExactly(IsADirectoryError, self.world.files.copy, folder, f"{other}/new")
         self.assertEqual(self.harness.names_in(other), [])
 
-    def test_a_copy_of_a_name_that_leads_nowhere_raises_file_not_found_and_makes_nothing(self):
+    def test_a_copy_of_a_name_that_leads_nowhere_raises_not_a_regular_file_and_makes_nothing(self):
         path, other = self.fresh("dangling"), self.fresh("other")
         self.harness.make_a_name_that_leads_nowhere(path)
-        self.assertRaisesExactly(FileNotFoundError, self.world.files.copy, path, other)
+        self.assertRaisesExactly(NotARegularFile, self.world.files.copy, path, other)
         self.assertFalse(self.world.files.exists(other))
+
+    def not_regular_things(self):
+        """One of each thing that is not a regular file, as (label, name). The harness makes
+        each so that a call that waits on it or reads it without end fails instead of hanging."""
+        target, folder = self.fresh("target"), self.harness.folder()
+        self.world.files.write_new(target, TEXT)
+        things = {
+            "a link to a file": (self.harness.make_a_link, target),
+            "a link to a folder": (self.harness.make_a_link, folder),
+            "a link to a missing name": (self.harness.make_a_link, self.fresh("missing")),
+            "a link to a link to a file": (
+                self.harness.make_a_link,
+                self.harness.make_a_link(self.fresh("inner"), target),
+            ),
+            "a link to a device": (self.harness.make_a_link, self.harness.a_device()),
+            "a link to a named pipe": (
+                self.harness.make_a_link,
+                self.harness.make_a_pipe(self.fresh("target-pipe")),
+            ),
+        }
+        made = []
+        for label, (make, leads_to) in things.items():
+            made.append((label, make(self.fresh("thing"), leads_to)))
+        made.append(("a named pipe", self.harness.make_a_pipe(self.fresh("pipe"))))
+        made.append(("a device", self.harness.a_device()))
+        return made
+
+    def test_copying_a_link_a_pipe_or_a_device_raises_not_a_regular_file_and_makes_nothing(self):
+        for label, path in self.not_regular_things():
+            with self.subTest(label):
+                new = self.fresh("new")
+                self.assertRaisesExactly(NotARegularFile, self.world.files.copy, path, new)
+                self.assertFalse(self.world.files.exists(new))
+
+    def test_reading_or_hashing_a_pipe_or_a_device_raises_not_a_regular_file(self):
+        things = dict(self.not_regular_things())
+        for label in ("a named pipe", "a device", "a link to a device", "a link to a named pipe"):
+            for operation in (self.world.files.read, self.world.files.hash):
+                with self.subTest(label, operation=operation):
+                    self.assertRaisesExactly(NotARegularFile, operation, things[label])
+
+    def test_reading_and_hashing_a_link_to_a_file_follow_it(self):
+        target, link = self.fresh("target"), self.fresh("link")
+        self.world.files.write_new(target, TEXT)
+        self.harness.make_a_link(link, target)
+        self.assertEqual(self.world.files.read(link), TEXT.encode("utf-8"))
+        self.assertEqual(self.world.files.hash(link), self.world.files.hash(target))
 
     def test_a_file_put_in_place_under_every_name_the_filesystem_will_hold_copies_and_hashes(self):
         folder = self.harness.folder()

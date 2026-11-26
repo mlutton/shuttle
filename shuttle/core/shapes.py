@@ -282,18 +282,28 @@ class RunState(TypedDict, total=False):
 Process = Any  # a handle the process operations made and understand; nothing else looks inside
 
 
+class NotARegularFile(OSError):
+    """The name holds a link, a named pipe, a device, a socket or anything else that is not a
+    regular file (a folder raises IsADirectoryError instead). Both worlds raise it, by this
+    class, so the shell can tell "not a file" from a look that failed."""
+
+
 class FileOperations(NamedTuple):
     """Files, by name. Text is UTF-8."""
 
-    read: Callable[[str], bytes]  # raises OSError (FileNotFoundError, IsADirectoryError, ...)
+    read: Callable[[str], bytes]  # a regular file, or a link to one; raises OSError
+    # (FileNotFoundError, IsADirectoryError, NotARegularFile for a pipe, a device, a socket, a
+    # link to one of those), and never waits on what is there
     exists: Callable[[str], bool]  # a name is there, even if it leads nowhere
     write_new: Callable[[str, str], None]  # create, write, flush to disk; FileExistsError if there
     link: Callable[[str, str], None]  # (existing name, new name); FileExistsError if new is there
     copy: Callable[
         [str, str], None
     ]  # (existing name, new name): the same bytes, flushed; FileExistsError if new is there,
-    # FileNotFoundError if existing is not, IsADirectoryError if existing is a folder; nothing
-    # is left under the new name when it raises
+    # FileNotFoundError if existing is not, IsADirectoryError if existing is a folder,
+    # NotARegularFile if existing is a link (to anything, a missing name too), a pipe, a device
+    # or a socket: a link is never followed and nothing waits on what is there. At most the
+    # size seen when it opened is copied. Nothing is left under the new name when it raises
     hash: Callable[
         [str], str
     ]  # the sha256 of the file's bytes, as 64 lower-case hex digits; raises as read
