@@ -492,10 +492,10 @@ def _executor_refusal(executor: object) -> tuple[str, str] | None:
 
 def _document_refusal(raw: Document) -> tuple[str, str] | None:
     """(reason, problem) when a document whose header can be formed is refused, else None."""
-    if not _plain_int(raw.get("format_version")) or raw["format_version"] != fixed.FORMAT_VERSION:
+    if not _plain_int(raw.get("format_version")) or raw["format_version"] != fixed.INPUT_VERSION:
         return (
             "unknown_format_version",
-            f"format_version must be the integer {fixed.FORMAT_VERSION}",
+            f"format_version must be the integer {fixed.INPUT_VERSION}",
         )
     unknown = _unknown_names(raw, _DOCUMENT_FIELDS)
     if unknown:
@@ -625,7 +625,7 @@ def build_header(
         "asked_by": header_source["asked_by"],
         "kind": header_source["kind"],
         "executor_name": header_source["executor_name"],
-        "format_version": fixed.FORMAT_VERSION,
+        "record_version": fixed.RECORD_VERSION,
     }
 
 

@@ -56,7 +56,7 @@ class RecordHeader(TypedDict):
     asked_by: str
     kind: str
     executor_name: str
-    format_version: int
+    record_version: int
 
 
 # Functional form: the key is called "input", a name the core may not mention in code.

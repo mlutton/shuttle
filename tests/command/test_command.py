@@ -123,7 +123,7 @@ class CommandSeam(unittest.TestCase):
         outcome = self.read("req-1.outcome.json")
         self.assertEqual(outcome["header"]["record_type"], "outcome")
         self.assertEqual(outcome["header"]["request_id"], "req-1")
-        self.assertEqual(outcome["header"]["format_version"], 1)
+        self.assertEqual(outcome["header"]["record_version"], fixed.RECORD_VERSION)
         for field, value in (
             ("thread", "thread-1"),
             ("round", 1),

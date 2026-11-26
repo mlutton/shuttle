@@ -348,7 +348,7 @@ class Header(unittest.TestCase):
                 "asked_by": "none",
                 "kind": "plain",
                 "executor_name": "command",
-                "format_version": fixed.FORMAT_VERSION,
+                "record_version": fixed.RECORD_VERSION,
             },
         )
 

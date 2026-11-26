@@ -1,11 +1,14 @@
 """The fixed values: the one list the writer and any checker both read.
 
-Adding a value here is a format version change.
+Adding a value here changes the record version, and for a value the input document may name, the input version.
 """
 
 from typing import Final
 
-FORMAT_VERSION = 1
+# Two version numbers, each checked on its own. The input document carries one (its key is
+# `format_version`); the records carry the other (the header's `record_version`).
+INPUT_VERSION = 1
+RECORD_VERSION = 2
 
 # The four states of a receipt field, in the one list. A field is a pair of a state and a value.
 VALUE = "value"  # looked, and found this
