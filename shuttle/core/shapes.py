@@ -1,4 +1,4 @@
-"""The shapes of the plain data that passes between the core and the shell.
+"""The shapes of the plain data that passes between the core and the shell, and of the operations.
 
 Types only; nothing here runs. Where a shape is known it is a typed record.
 Where it still varies (the facts of a run, the receipt, the shell's state) it is a

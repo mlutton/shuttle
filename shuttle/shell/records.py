@@ -1,4 +1,4 @@
-"""Records: the shell that reads and writes the two JSON records.
+"""Records: the shell code that puts the two JSON records in place and reads them.
 
 Each record is built in memory, written under a temporary name, flushed and then
 linked into place, which fails if the name exists. So a record is whole or absent,

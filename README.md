@@ -24,7 +24,7 @@ Early build. It is not usable yet, and it may not be for a while. The first incr
 
 ## Checking a change
 
-One script decides whether a change is sound: lint (ruff, including a limit of three nested blocks and a ban on anything under `shuttle/core/` importing `shuttle/shell/` or a library that reaches the world), format check (ruff), strict types (mypy, over `shuttle/`) and the tests (under a 20 second budget). The pre-push hook and the hosted `tests (unittest)` job both run it and nothing else.
+One script decides whether a change is sound: lint (ruff, including a limit of three nested blocks and a ban on importing any library that reaches the world anywhere under `shuttle/` except `shuttle/world/`, and on the core importing the entry file; the other import rules between the folders are the rule test's, in the tests), format check (ruff), strict types (mypy, over `shuttle/`) and the tests (under a 20 second budget). The pre-push hook and the hosted `tests (unittest)` job both run it and nothing else.
 
 Shuttle needs Python 3.12 or newer: 3.12 is the lowest version on which the whole suite passes (one command test fails on 3.11), and it is the version the hosted job uses.
 
