@@ -97,4 +97,4 @@ ban-relative-imports = "all"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["shuttle"]
+files = ["shuttle", "checks"]

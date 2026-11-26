@@ -43,9 +43,14 @@ class PrePushHookTest(unittest.TestCase):
         self.git("add", "-A", cwd=self.work)
         self.git("commit", "-q", "-m", "first", cwd=self.work)
 
-    def git(self, *args, cwd):
+    def git(self, *args, cwd, **env):
         return subprocess.run(
-            ["git", *args], cwd=cwd, env=GIT_ENV, capture_output=True, text=True, timeout=60
+            ["git", *args],
+            cwd=cwd,
+            env={**GIT_ENV, **env},
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
 
     def commit_check(self, exit_code):
@@ -138,6 +143,67 @@ class PrePushHookTest(unittest.TestCase):
         self.commit_check(0)
         result = self.git("push", "origin", "main", cwd=self.work)
         self.assertIn("check ran", result.stdout + result.stderr)
+
+    def commit_python_reporting_check(self):
+        """Commit a check script that reports which PYTHON the hook handed it."""
+        path = os.path.join(self.work, "checks", "all.sh")
+        with open(path, "w") as f:
+            f.write('#!/bin/sh\necho "python=${PYTHON:-none}"\n')
+        os.chmod(path, 0o755)
+        self.commit_all("check")
+
+    def make_environment(self, folder):
+        """A stand-in virtual environment: only its path matters to the hook."""
+        python = os.path.join(folder, ".venv", "bin", "python")
+        os.makedirs(os.path.dirname(python))
+        with open(python, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(python, 0o755)
+        return os.path.realpath(python)
+
+    def linked_worktree(self):
+        path = os.path.join(os.path.dirname(self.work), "linked")
+        result = self.git("worktree", "add", "-q", "-b", "feature", path, cwd=self.work)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return path
+
+    def push_feature(self, worktree, **env):
+        result = self.git("push", "origin", "feature", cwd=worktree, **env)
+        return result, result.stdout + result.stderr
+
+    def test_a_push_from_a_linked_worktree_uses_the_main_working_trees_environment(self):
+        self.commit_python_reporting_check()
+        main_python = self.make_environment(self.work)
+        result, output = self.push_feature(self.linked_worktree())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"python={main_python}", output)
+
+    def test_an_explicit_python_wins_over_any_environment_found(self):
+        self.commit_python_reporting_check()
+        self.make_environment(self.work)
+        worktree = self.linked_worktree()
+        self.make_environment(worktree)
+        _, output = self.push_feature(worktree, PYTHON="/explicit/python")
+        self.assertIn("python=/explicit/python", output)
+
+    def test_a_worktree_with_its_own_environment_uses_its_own(self):
+        self.commit_python_reporting_check()
+        self.make_environment(self.work)
+        worktree = self.linked_worktree()
+        own_python = self.make_environment(worktree)
+        _, output = self.push_feature(worktree)
+        self.assertIn(f"python={own_python}", output)
+
+    def test_with_no_environment_anywhere_python_is_left_unset(self):
+        self.commit_python_reporting_check()
+        _, output = self.push_feature(self.linked_worktree())
+        self.assertIn("python=none", output)
+
+    def test_a_push_from_the_main_working_tree_still_uses_its_own_environment(self):
+        self.commit_python_reporting_check()
+        python = self.make_environment(self.work)
+        result = self.git("push", "origin", "main", cwd=self.work)
+        self.assertIn(f"python={python}", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

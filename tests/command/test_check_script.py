@@ -22,6 +22,7 @@ case "$*" in
   "-m ruff format"*)    stage=format ;;
   "-m mypy"*)           stage=types ;;
   "-m unittest"*)       stage=tests ;;
+  *fixmode.py)          echo "fix: stand-in"; exit 0 ;;
   *) echo "unexpected call: $*" >&2; exit 99 ;;
 esac
 echo "$stage: tool output"
@@ -40,9 +41,12 @@ class CheckScriptTest(unittest.TestCase):
         os.chmod(self.stand_in, os.stat(self.stand_in).st_mode | stat.S_IXUSR)
 
     def check(self, **env):
+        return self.check_args(**env)
+
+    def check_args(self, *args, **env):
         full = {"PATH": os.environ["PATH"], "PYTHON": self.stand_in, **env}
         return subprocess.run(
-            [SCRIPT], capture_output=True, text=True, env=full, cwd=REPO, timeout=60
+            [SCRIPT, *args], capture_output=True, text=True, env=full, cwd=REPO, timeout=60
         )
 
     def last_line(self, result):
@@ -69,9 +73,7 @@ class CheckScriptTest(unittest.TestCase):
 
     def test_a_failing_format_stage_names_the_command_that_fixes_it(self):
         last = self.last_line(self.check(FAIL_STAGE="format"))
-        self.assertEqual(
-            last, f"check: failed: format; fix it with: {self.stand_in} -m ruff format ."
-        )
+        self.assertEqual(last, "check: failed: format; fix it with: ./checks/all.sh --fix")
 
     def test_a_tests_stage_ended_by_its_budget_says_it_timed_out(self):
         result = self.check(FAIL_STAGE="tests", FAIL_CODE="124")
@@ -97,6 +99,16 @@ class CheckScriptTest(unittest.TestCase):
                 self.assertTrue(last.startswith("check: could not run: "), last)
                 self.assertIn(tool, last)
                 self.assertIn("python3 -m pip install -r requirements-dev.txt", last)
+
+    def test_fix_mode_needs_ruff_only_so_a_missing_mypy_does_not_stop_it(self):
+        result = self.check_args("--fix", MISSING="mypy")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "fix: stand-in\n")
+
+    def test_fix_mode_without_ruff_could_not_run_exit_2(self):
+        result = self.check_args("--fix", MISSING="ruff")
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(self.last_line(result).startswith("check: could not run: ruff"))
 
     def test_a_missing_tool_runs_no_stage(self):
         result = self.check(MISSING="mypy")

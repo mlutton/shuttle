@@ -5,23 +5,44 @@
 # Runs, in order, and stops at the first stage that fails:
 #   lint    ruff check .
 #   format  ruff format --check .
-#   types   mypy (strict, over shuttle/; see pyproject.toml)
+#   types   mypy (strict, over shuttle/ and checks/; see pyproject.toml)
 #   tests   python -m unittest discover -s tests, under a 20 second budget
 # Prints one line per stage ("<stage>: passed" or "<stage>: failed"; a failed stage's
 # own output goes to standard error), then a last line on standard output:
 #   check: passed
 #   check: failed: <stage>
-# The format stage adds how to fix it: "check: failed: format; fix it with: ruff format ."
+# The format stage adds how to fix it: "check: failed: format; fix it with: ./checks/all.sh --fix"
 # A tests stage ended by its time budget says so: "check: failed: tests (timed out after 20 seconds)".
 #   check: could not run: <tool> is not installed; install the tools with: <command>
 #
+# ./checks/all.sh --fix applies what ruff can change mechanically and says what changed:
+#   ruff check --fix --no-unsafe-fixes, then ruff format (checks/fixmode.py does the work).
+# It adds no ignore comment, edits no configuration and only ruff touches files. It needs
+# ruff only, not mypy. It prints one line per file changed ("changed: <path>", a name's
+# control characters shown as escapes), a line "failed: <path>" for each file ruff could not
+# parse or write, then a last line:
+#   fix: changed <N> files ("1 file" for one); now run ./checks/all.sh
+#   fix: nothing to change
+#   fix: failed; ruff could not finish (its output is on standard error)
+# It does not run types or tests and does not say the change is sound. Lint findings it
+# cannot fix are left in place and shown on standard error; the check still fails on them.
+#
 # Exit codes:
-#   0  every stage passed
-#   1  a stage failed (the last line names it)
+#   0  every stage passed; or, with --fix, it finished (whether or not it changed anything)
+#   1  a stage failed (the last line names it); or, with --fix, ruff could not finish
+#      (a file it could not parse or write, or ruff ending abnormally)
 #   2  the check could not run: a tool is missing (the last line names it and the command)
+#   3  the argument was not recognised (one line on standard error names the two forms)
 #
 # PYTHON names the interpreter that has the tools. By default it is .venv/bin/python
 # when that exists, else python3. There are no retries: a failed stage stays failed.
+
+mode=check
+[ "$#" -eq 1 ] && [ "$1" = --fix ] && mode=fix
+if [ "$#" -gt 0 ] && [ "$mode" = check ]; then
+    echo "usage: ./checks/all.sh   or   ./checks/all.sh --fix" >&2
+    exit 3
+fi
 
 root=$(cd "$(dirname "$0")/.." && pwd) || exit 2
 cd "$root" || exit 2
@@ -31,12 +52,19 @@ if [ -z "${PYTHON:-}" ]; then
 fi
 
 INSTALL="python3 -m pip install -r requirements-dev.txt"
-for tool in ruff mypy; do
+tools="ruff mypy"
+[ "$mode" = fix ] && tools=ruff
+for tool in $tools; do
     if ! "$PYTHON" -m "$tool" --version >/dev/null 2>&1; then
         echo "check: could not run: $tool is not installed; install the tools with: $INSTALL"
         exit 2
     fi
 done
+
+if [ "$mode" = fix ]; then
+    "$PYTHON" checks/fixmode.py
+    exit $?
+fi
 
 output=$(mktemp) || exit 2
 trap 'rm -f "$output"' EXIT
@@ -53,7 +81,7 @@ stage() {
     echo "$name: failed"
     cat "$output" >&2
     case "$name" in
-        format) echo "check: failed: format; fix it with: $PYTHON -m ruff format ." ;;
+        format) echo "check: failed: format; fix it with: ./checks/all.sh --fix" ;;
         tests)
             if [ "$code" -eq 124 ]; then
                 echo "check: failed: tests (timed out after 20 seconds)"

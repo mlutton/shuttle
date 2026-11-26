@@ -41,7 +41,9 @@ Run the check:
 ./checks/all.sh
 ```
 
-It prints one line per stage and a last line, `check: passed` or `check: failed: <stage>`. Exit code 0 means passed, 1 means a stage failed, 2 means the check could not run (a tool is missing; the last line names it and the install command). The script uses `.venv/bin/python` when it exists, else `python3`; set `PYTHON` to use another interpreter. Nothing is retried.
+It prints one line per stage and a last line, `check: passed` or `check: failed: <stage>`. Exit code 0 means passed, 1 means a stage failed, 2 means the check could not run (a tool is missing; the last line names it and the install command), 3 means the argument was not recognised. The script uses `.venv/bin/python` when it exists, else `python3`; set `PYTHON` to use another interpreter. Nothing is retried.
+
+`./checks/all.sh --fix` applies what ruff can change mechanically (safe lint fixes and the formatter, never an ignore comment or a configuration edit) and needs ruff only. It lists each file it changed (`changed: <path>`) and each file ruff could not parse or write (`failed: <path>`), then ends `fix: changed N files; now run ./checks/all.sh`, `fix: nothing to change` or `fix: failed; ...` (exit 1). It runs no types or tests; run the check afterwards. File names in this output and in the guard listing are shown escaped (a newline, a backslash, a control or direction character, or a byte that is not valid UTF-8 appears as an escape such as `\n` or `\xff`), one per line.
 
 Switch on the pre-push hook, once per clone:
 
@@ -49,7 +51,7 @@ Switch on the pre-push hook, once per clone:
 git config core.hooksPath .githooks
 ```
 
-A push is then refused unless `./checks/all.sh` passes on each commit being pushed. The hook checks out that commit into a temporary folder and runs the script there, so uncommitted changes in your folder neither pass nor fail a push.
+A push is then refused unless `./checks/all.sh` passes on each commit being pushed. The hook checks out that commit into a temporary folder and runs the script there, so uncommitted changes in your folder neither pass nor fail a push. From a linked worktree the hook uses the worktree's own `.venv` if it has one, else the main working tree's.
 
 ## Tests
 
@@ -63,7 +65,7 @@ The tests are sorted by seam, all run by that one command:
 - `tests/command/`: the real command, the check script and the hook, run as child processes or against a temporary folder.
 - `tests/boundary/`: tests of the boundary; none yet.
 
-The `tests (unittest)` workflow runs the check on every pull request.
+The `tests (unittest)` workflow runs the check on every pull request. Its `base check (unittest)` job also runs the base branch's copy of `checks/all.sh` against the pull request's files, so a pull request cannot pass by weakening the script, and lists in the job summary any guard files (changed, added or deleted; a moved file shows as deleted from its old path) the pull request changes (`checks/`, `.githooks/`, `.github/`, `pyproject.toml`, `requirements-dev.txt`, `tests/by_value/test_rules.py`). It does not cover the workflow file or the lint configuration, which still come from the pull request; the summary is how a reviewer sees them.
 
 ## Contributing
 
