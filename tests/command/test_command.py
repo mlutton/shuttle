@@ -11,13 +11,13 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 
 from shuttle.core import fixed
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 flat = importlib.import_module("rehearsal.receipts").flat
+the_boundary = importlib.import_module("rehearsal.the_boundary")
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,6 +32,7 @@ sys.exit(code)
 
 class CommandSeam(unittest.TestCase):
     def setUp(self):
+        the_boundary.require(self)  # a run starts its executor in the real boundary
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = self._tmp.name
@@ -159,7 +160,8 @@ class CommandSeam(unittest.TestCase):
         )
         saw = receipt["execution"]
         self.assertEqual(saw["exit_code"], 0)
-        self.assertEqual(saw["signal"], "none")
+        # The box's own tool ended; a signal that killed the script is not read from its status.
+        self.assertEqual(saw["signal"], "cannot tell")
         self.assertEqual(len(saw["input_hash"]), 64)
         self.assertEqual(receipt["executor_driver"]["executor_driver_name"], "command")
         self.assertEqual(saw["observed_runtime"], "not built")
@@ -176,10 +178,10 @@ class CommandSeam(unittest.TestCase):
             ("execution", "delivered"),
             ("execution", "teardown_failure"),
             ("execution", "peak_memory_bytes"),
-            ("ending", "everything_stopped"),
             ("executor", "claim"),
         ]:
             self.assertEqual(receipt[group][field], {"state": "not built", "value": None}, field)
+        self.assertEqual(receipt["ending"]["everything_stopped"], {"state": "value", "value": True})
         # Both states in one receipt: the command driver cannot look at its tool's own commits.
         driver = receipt["executor_driver"]
         self.assertEqual(driver["tool_made_own_commits"], {"state": "cannot tell", "value": None})
@@ -349,46 +351,33 @@ class CommandSeam(unittest.TestCase):
             text=True,
         )
 
-    def wait_for_file(self, path, seconds=20):
-        end = time.time() + seconds
-        while time.time() < end:
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                return
-            time.sleep(0.05)
-        self.fail(f"{path} never appeared")
-
-    def assert_process_gone(self, pid):
-        end = time.time() + 5
-        while time.time() < end:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                return
-            time.sleep(0.05)
-        self.fail(f"process {pid} is still running")
-
-    def sleeper(self):
-        with open(self.script, "w") as f:
-            f.write(
-                "import os, sys, time\nopen(sys.argv[1], 'w').write(str(os.getpid()))\ntime.sleep(60)\n"
-            )
-
     def sleeping_document(self, **extra):
-        self.sleeper()
-        pid_file = os.path.join(self.root, "pid.txt")
+        """A script that says it is running (through a pipe, which the test reads: no polling)
+        and then sleeps."""
+        ready = os.path.join(self.root, "ready")
+        os.mkfifo(ready)
+        with open(self.script, "w") as f:
+            f.write("import sys, time\nopen(sys.argv[1], 'w').write('up')\ntime.sleep(60)\n")
         doc = self.document(**extra)
-        doc["executor"]["settings"]["arguments"] = [self.script, pid_file]
-        return doc, pid_file
+        doc["executor"]["settings"]["arguments"] = [self.script, ready]
+        return doc, ready
+
+    def scope_is_gone(self, request_id="req-1"):
+        done = subprocess.run(
+            ["systemctl", "--user", "is-active", f"shuttle-run-{request_id}.scope"],
+            capture_output=True,
+            text=True,
+        )
+        return done.stdout.strip() != "active"
 
     def test_a_terminate_sent_to_the_real_command_ends_the_script_and_still_writes_the_outcome_record(
         self,
     ):
         """The one real-process signal test; the other signals and the order of events are by value in test_waiting.py."""
-        doc, pid_file = self.sleeping_document()
+        doc, ready = self.sleeping_document()
         proc = self.spawn(doc)
-        self.wait_for_file(pid_file)
-        with open(pid_file) as f:
-            script_pid = int(f.read())
+        with open(ready) as f:
+            f.read()  # blocks until the script is running
         proc.send_signal(signal.SIGTERM)
         stdout, stderr = proc.communicate(timeout=30)
         self.assertEqual(proc.returncode, 0, stderr)
@@ -398,17 +387,21 @@ class CommandSeam(unittest.TestCase):
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("stopped_from_outside", "signal", "none"),
         )
-        self.assert_process_gone(script_pid)
+        self.assertTrue(self.scope_is_gone())
+        self.assertEqual(
+            flat(self.read("req-1.outcome.json")["receipt"])["ending"]["everything_stopped"], True
+        )
 
     def test_the_reader_of_standard_output_going_away_before_the_end_still_exits_zero_with_the_record_written(
         self,
     ):
         """The one real-process test of a closed reader: the exit code 120 comes from the
         interpreter's own flush at exit, which only a real process has."""
-        doc, pid_file = self.sleeping_document()
+        doc, ready = self.sleeping_document()
         proc = self.spawn(doc)
         proc.stdout.readline()  # the request id, printed at the start
-        self.wait_for_file(pid_file)
+        with open(ready) as f:
+            f.read()  # blocks until the script is running
         proc.stdout.close()  # the reader goes away
         proc.send_signal(signal.SIGTERM)
         _, stderr = proc.communicate(timeout=30)
@@ -550,20 +543,31 @@ class CommandSeam(unittest.TestCase):
     def test_a_failed_outcome_write_prints_the_receipt_then_the_ending_and_exits_non_zero(self):
         if os.geteuid() == 0:
             self.skipTest("a read-only folder does not stop the superuser")
+        # The script cannot change the records (the boundary protects them), so the test does it
+        # while the script waits: the script says it is running, the test makes the records
+        # folder read-only, and the script is let go.
+        ready, go = (os.path.join(self.root, n) for n in ("ready", "go"))
+        os.mkfifo(ready)
+        os.mkfifo(go)
         with open(self.script, "w") as f:
-            f.write(
-                "import os, sys\nos.chmod(sys.argv[1], 0o500)\n"
-            )  # the script makes the records folder read-only
-        self.addCleanup(os.chmod, self.records, 0o700)
+            f.write("import sys\nopen(sys.argv[1], 'w').write('up')\nopen(sys.argv[2]).read()\n")
         doc = self.document()
-        doc["executor"]["settings"]["arguments"] = [self.script, self.records]
-        done, lines = self.run_command(doc)
-        self.assertNotEqual(done.returncode, 0)
+        doc["executor"]["settings"]["arguments"] = [self.script, ready, go]
+        proc = self.spawn(doc)
+        self.addCleanup(os.chmod, self.records, 0o700)
+        with open(ready) as f:
+            f.read()
+        os.chmod(self.records, 0o500)
+        with open(go, "w") as f:
+            f.write("go")
+        stdout, stderr = proc.communicate(timeout=60)
+        lines = stdout.splitlines()
+        self.assertNotEqual(proc.returncode, 0)
         self.assertEqual(lines[0], "req-1")
         self.assertEqual(lines[-1], "ended_by_itself")
         printed = flat(json.loads("\n".join(lines[1:-1])))
         self.assertEqual(printed["ending"]["ending"], "ended_by_itself")
-        self.assertIn("not written", done.stderr)
+        self.assertIn("not written", stderr)
         self.assertEqual(os.listdir(self.records), ["req-1.request.json"])
 
 

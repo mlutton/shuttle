@@ -1,67 +1,61 @@
 """The gates: named checks run before the executor starts.
 
-A gate is a command with its own short limit. It is read-only by its nature: it is started with
-PATH only in its environment and answers by its exit code (0 yes, 1 no, anything else, a limit
-passed or a start that failed: failed). Each answer is decided by `refusals.gate_answer`; the
+A gate is a command with its own limit. It is read-only by its nature: it is started with PATH
+only in its environment and answers by its exit code (0 yes, 1 no, anything else, a limit passed
+or a start that failed: failed). Each runs in a scope of its own (shuttle.core.boundary) with its
+limit on the scope: nothing here times it. After it ends, when it reported that it started, the scope is stopped by name and seen
+empty, and why it ended is read from the scope; `boundary.gate_answer` decides the answer, and the
 first that is not a yes refuses the run, naming the gate and its answer.
 """
 
-import contextlib
-
-from shuttle.core import decisions, refusals
+from shuttle.core import boundary, decisions, refusals
 from shuttle.core.refusals import Found
-from shuttle.core.shapes import Document, Operations, Process, StepResult
+from shuttle.core.shapes import Document, Operations, StepResult
+from shuttle.shell import stop_and_confirm_empty
 
-_POLL_SECONDS = 0.05
-_GRACE_SECONDS = 1.0  # as of 2026-11-26: after the limit, how long a gate has to end when asked
-
-
-def _wait_for_exit(world: Operations, process: Process, seconds: float) -> bool:
-    deadline = world.clock.now() + seconds
-    while world.processes.poll(process) is None:
-        if world.clock.now() >= deadline:
-            return False
-        world.clock.wait(_POLL_SECONDS)
-    return True
+POLL_SECONDS = 0.05  # how often the wait for a gate's exit looks again; it is not a deadline
 
 
-def _end(world: Operations, process: Process) -> None:
-    with contextlib.suppress(OSError):
-        world.processes.ask_to_end(process)
-    if not _wait_for_exit(world, process, _GRACE_SECONDS):
-        with contextlib.suppress(OSError):
-            world.processes.kill(process)
-        _wait_for_exit(world, process, _GRACE_SECONDS)
-
-
-def ask_gate(world: Operations, gate: Document, environment: dict[str, str]) -> str:
-    """Start one gate, wait up to its limit, and return its answer: yes, no or failed."""
+def ask_gate(world: Operations, gate: Document, environment: dict[str, str], name: str) -> str:
+    """Run one gate in its scope, wait for it to end, and return its answer: yes, no or failed."""
     try:
-        process = world.processes.start([gate["command"], *gate["arguments"]], environment)
+        report = world.processes.open_report()
+        argv = boundary.gate_argv(
+            name, float(gate["limit_seconds"]), [gate["command"], *gate["arguments"]], report
+        )
+        process = world.processes.start(argv, environment, report)
     except (OSError, ValueError):
         return refusals.gate_answer(False, None, False)
-    try:
-        timed_out = not _wait_for_exit(world, process, float(gate["limit_seconds"]))
-        if timed_out:
-            _end(world, process)
-    finally:
-        if world.processes.poll(process) is None:
-            _end(world, process)
-    returncode = world.processes.poll(process)
-    exit_code = returncode if returncode is not None and returncode >= 0 else None
-    return refusals.gate_answer(True, exit_code, timed_out)
+    while (returncode := world.processes.wait(process, POLL_SECONDS)) is None:
+        pass  # the scope ends the gate when its limit runs out
+    said = world.processes.read_report(process)
+    if not boundary.gate_started(said):
+        # This run did not make a scope of that name (the name may be somebody else's): it is
+        # not stopped, and the gate failed.
+        return refusals.gate_answer(False, None, False)
+    why = boundary.why_ended(stop_and_confirm_empty.stop_boundary(world, name))
+    return boundary.gate_answer(said, why, returncode)
 
 
-def run_gates(world: Operations, gates: list[Document]) -> tuple[Found | None, StepResult]:
+def run_gates(
+    world: Operations, request_id: str, gates: list[Document]
+) -> tuple[Found | None, StepResult]:
     """Ask every gate in order, stopping at the first that does not say yes.
 
     Returns the refusal (or None) and the step's result: the time the gates took.
     """
     environment = decisions.build_environment([], _path_only(world))
+    for (
+        variable
+    ) in boundary.BUS_VARIABLES:  # to reach the user's systemd; the gate is not given them
+        value = world.environment.read_variable(variable)
+        if value is not None:
+            environment[variable] = value
     started = world.clock.now()
     answers: list[tuple[str, str]] = []
-    for gate in gates:
-        answers.append((gate["name"], ask_gate(world, gate, environment)))
+    for index, gate in enumerate(gates):
+        name = boundary.gate_scope_name(request_id, index)
+        answers.append((gate["name"], ask_gate(world, gate, environment, name)))
         if answers[-1][1] != "yes":
             break
     return refusals.check_gates(answers), {"duration_seconds": world.clock.now() - started}

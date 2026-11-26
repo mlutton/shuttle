@@ -146,6 +146,16 @@ TABLE = [
         d(EF, "stop_not_confirmed", "stop_not_confirmed"),
     ),
     (
+        "step 9: stop not confirmed beats a cause that cannot be told",
+        facts(wait="cannot_tell", stop="not_confirmed", closing_freeze=None, delivery=None),
+        d(EF, "stop_not_confirmed", "stop_not_confirmed"),
+    ),
+    (
+        "step 9: stop confirmed but why the scope ended cannot be read",
+        facts(wait="cannot_tell", stop="confirmed", closing_freeze=None, delivery=None),
+        d(EF, "execution_error", fixed.CANNOT_TELL),
+    ),
+    (
         "step 11: closing freeze fails",
         facts(closing_freeze="failed", delivery=None),
         d(EF, "closing_freeze_failed", "closing_freeze"),

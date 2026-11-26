@@ -71,7 +71,9 @@ def _every_check(state: RunState) -> list[Found | None]:
     reason, text = run.driver_check(world, raw)
     if reason:
         found.append({"reason": reason, "step": "executor_driver_check", "problem": text or ""})
-    gate_refusal, _ = gates.run_gates(world, raw.get("gates", []))
+    gate_refusal, _ = gates.run_gates(
+        world, run.header_source_of(state)["request_id"], raw.get("gates", [])
+    )
     return [*found, gate_refusal]
 
 

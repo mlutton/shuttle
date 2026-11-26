@@ -1,8 +1,8 @@
 """A world held in memory, to pass in where the real operations would be.
 
 `SimulatedWorld().operations` is an `Operations` (shuttle.core.shapes) whose functions act on
-dictionaries and a clock that moves only when something waits. Nothing here touches the real
-disk, a real process or real time.
+dictionaries and a clock that does not move. Nothing here touches the real disk, a real process,
+the real boundary or real time.
 
 It can fail any operation at any point, so a fault that would need a full disk, a process that
 will not end or a signal at an awkward moment is a line in a test:
@@ -11,7 +11,7 @@ will not end or a signal at an awkward moment is a line in a test:
     world.will_raise("files.write_new", OSError("full"), nth=2)    # the second call raises
     world.will_stop_half_way("files.write_new")                    # half the text is there, then it raises
     world.will_stop_half_way("files.write_new", how="unflushed")   # all of it, never flushed, then it raises
-    world.program("tool", obeys=())                                # a process that will not end
+    world.program("tool", hangs=True, survives_stop=True)          # a boundary that will not empty
     world.on_call("processes.poll", nth=3, do=lambda: world.deliver("SIGINT"))  # a signal, there
 
 It is held to the real operations by the contract cases in contract.py.
@@ -21,7 +21,9 @@ import datetime
 import os
 import signal
 
+from shuttle.core import boundary
 from shuttle.core.shapes import (
+    BoundaryOperations,
     ClockOperations,
     EnvironmentOperations,
     FileOperations,
@@ -36,11 +38,18 @@ EPOCH = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
 
 class _Child:
-    def __init__(self, argv, behaviour, started_at):
+    def __init__(self, argv, behaviour, unit):
         self.argv = list(argv)
         self.behaviour = behaviour
-        self.started_at = started_at
+        self.unit = unit
         self.returncode = None
+        self.report = ""
+
+
+_GONE = {"LoadState": "not-found", "ActiveState": "inactive", "Result": "success"}
+_STILL_THERE = {"LoadState": "loaded", "ActiveState": "active", "Result": "success"}
+_TIMED_OUT = {"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout"}
+WAITS_BEFORE_GIVING_UP = 1000  # a wait that would never end is a failure of the test
 
 
 def _shipped(name):
@@ -53,7 +62,7 @@ def _shipped(name):
 
 class SimulatedWorld:
     def __init__(self, host="sim-host", environment=None):
-        self.t = 0.0  # seconds on the simulated clock
+        self.t = 0.0  # seconds on the simulated clock, which does not move
         self.host = host
         self.pid = 4242  # what the simulated process is numbered
         self.variables = dict(environment or {})
@@ -67,7 +76,9 @@ class SimulatedWorld:
         self.log = []  # (operation, arguments, time) of every call, in order
         self._plan = []
         self._hooks = []
-        self._events = []  # (time, function) run when the clock reaches them
+        self.units = {}  # unit name -> its properties; a unit not here is gone
+        self._waits = 0
+        self._reports = 0
         self._handlers = []
         self._ids = 0
         self.operations = Operations(
@@ -83,10 +94,14 @@ class SimulatedWorld:
                 find_program=self._find_program,
                 start=self._start,
                 poll=self._poll,
-                ask_to_end=self._ask_to_end,
-                kill=self._kill,
+                wait=self._wait_for_exit,
+                open_report=self._open_report,
+                read_report=self._read_report,
             ),
-            clock=ClockOperations(now=self._now, timestamp=self._timestamp, wait=self._wait),
+            boundary=BoundaryOperations(
+                show=self._show, stop=self._stop, forget=self._forget, resolve=self._resolve
+            ),
+            clock=ClockOperations(now=self._now, timestamp=self._timestamp),
             signals=SignalOperations(install=self._install, name_of=self._name_of),
             environment=EnvironmentOperations(read_variable=self._read_variable),
             identity=IdentityOperations(
@@ -127,22 +142,32 @@ class SimulatedWorld:
         return sorted(n[len(prefix) :] for n in self.files if n.startswith(prefix))
 
     def program(
-        self, command, exits_after=None, exit_code=0, obeys=("ask_to_end", "kill"), creates=()
+        self,
+        command,
+        hangs=False,
+        times_out=False,
+        survives_stop=False,
+        exit_code=0,
+        creates=(),
+        fails_to_start=False,
+        report=None,
     ):
-        """Say what starting `command` makes: a child that exits by itself `exits_after` seconds
-        after it starts (never, if None) with `exit_code`, ends when asked or killed only if
-        `obeys` says so, and creates the named files as it starts."""
+        """Say what starting `command` in the boundary makes: a child that exits at once with
+        `exit_code`; or, with `hangs`, one that runs until the boundary is stopped; or, with
+        `times_out`, one the boundary's timer ends (its scope fails with the result "timeout")
+        the first time it is looked at. With `survives_stop` stopping the boundary does nothing.
+        The child creates the named files as it starts. A child started in the boundary reports
+        that it started, unless `fails_to_start` (the boundary's own tool exits with `exit_code`
+        before the executor runs); `report` is the text a child writes to the report it was given."""
         self.programs[command] = {
-            "exits_after": exits_after,
+            "hangs": hangs or times_out or survives_stop,
+            "times_out": times_out,
+            "survives_stop": survives_stop,
             "exit_code": exit_code,
-            "obeys": tuple(obeys),
             "creates": tuple(creates),
+            "fails_to_start": fails_to_start,
+            "report": report,
         }
-
-    def at(self, seconds, do):
-        """Run `do` when the clock reaches `seconds` (while something waits)."""
-        self._events.append((seconds, do))
-        self._events.sort(key=lambda pair: pair[0])
 
     # ------------------------------------------------------------ making things fail
 
@@ -256,40 +281,95 @@ class SimulatedWorld:
         self._enter("processes.find_program", command)
         return command in self.programs
 
-    def _start(self, argv, environment):
+    def _open_report(self):
+        self._enter("processes.open_report")
+        self._reports += 1
+        return 2 + self._reports
+
+    def _what_runs(self, argv):
+        """(the program and its arguments, the scope's unit or None, whether it is a gate)."""
+        if not argv or argv[0] != "systemd-run":
+            return list(argv), None, False
+        unit = next(p.split("=", 1)[1] for p in argv if p.startswith("--unit=")) + ".scope"
+        # the scope tool turns each "$$" back into "$" before it starts the command
+        inside = [p.replace("$$", "$") for p in list(argv)[list(argv).index("--") + 1 :]]
+        if inside[:3] == ["sh", "-c", boundary.GATE_SCRIPT]:  # sh, its report descriptor, the gate
+            return inside[5:], unit, True
+        if inside[:1] == ["bwrap"]:  # the box, then the executor
+            return inside[inside.index("--") + 1 :], unit, False
+        return inside, unit, False
+
+    def _start(self, argv, environment, report=None):
         self._enter("processes.start", list(argv), dict(environment))
         if any("\0" in part for part in argv):
             raise ValueError("embedded null byte")
-        if not argv or argv[0] not in self.programs:
-            raise FileNotFoundError(argv[0] if argv else "")
-        behaviour = self.programs[argv[0]]
+        executor, unit, gate = self._what_runs(argv)
+        if not executor or executor[0] not in self.programs:
+            raise FileNotFoundError(executor[0] if executor else "")
+        behaviour = self.programs[executor[0]]
         for name in behaviour["creates"]:
             self.files[name] = bytearray(b"1")
         self.started.append((list(argv), dict(environment)))
-        child = _Child(argv, behaviour, self.t)
+        child = _Child(executor, behaviour, unit)
+        if not behaviour["hangs"]:
+            child.returncode = behaviour["exit_code"]
+        if report is not None:
+            if gate:
+                child.report = "" if behaviour["fails_to_start"] else boundary.GATE_STARTED + "\n"
+            elif behaviour["report"] is not None:
+                child.report = behaviour["report"]
+            elif not behaviour["fails_to_start"]:
+                child.report = '{"child-pid": 2}\n'
+        if unit:
+            self.units[unit] = dict(_STILL_THERE)
         self.children.append(child)
         return child
 
+    def _read_report(self, child):
+        self._enter("processes.read_report", child.argv)
+        return child.report
+
     def _status(self, child):
-        due = child.behaviour["exits_after"]
-        if child.returncode is None and due is not None and self.t >= child.started_at + due:
-            child.returncode = child.behaviour["exit_code"]
         return child.returncode
 
     def _poll(self, child):
         self._enter("processes.poll", child.argv)
+        return self._status_after_the_timer(child)
+
+    def _status_after_the_timer(self, child):
+        if child.returncode is None and child.behaviour["times_out"]:
+            child.returncode = -signal.SIGTERM
+            self.units[child.unit] = dict(_TIMED_OUT)
         return self._status(child)
 
-    def _request(self, operation, child, request, number):
-        self._enter(operation, child.argv)
-        if self._status(child) is None and request in child.behaviour["obeys"]:
-            child.returncode = -number
+    def _wait_for_exit(self, child, seconds):
+        self._enter("processes.wait", child.argv, seconds)
+        self._waits += 1
+        assert self._waits < WAITS_BEFORE_GIVING_UP, "the run would wait forever"
+        return self._status_after_the_timer(child)
 
-    def _ask_to_end(self, child):
-        self._request("processes.ask_to_end", child, "ask_to_end", signal.SIGTERM)
+    def _show(self, unit, properties):
+        self._enter("boundary.show", unit, tuple(properties))
+        held = self.units.get(unit, _GONE)
+        return {name: held[name] for name in properties if name in held}
 
-    def _kill(self, child):
-        self._request("processes.kill", child, "kill", signal.SIGKILL)
+    def _stop(self, unit):
+        self._enter("boundary.stop", unit)
+        for child in self.children:
+            if child.unit == unit and not child.behaviour["survives_stop"]:
+                if child.returncode is None:
+                    child.returncode = -signal.SIGTERM
+                if self.units.get(unit, _GONE)["ActiveState"] == "active":
+                    self.units.pop(unit, None)
+
+    def _forget(self, unit):
+        self._enter("boundary.forget", unit)
+        if self.units.get(unit, _GONE)["ActiveState"] == "failed":
+            self.units.pop(unit, None)
+
+    def _resolve(self, path):
+        self._enter("boundary.resolve", path)
+        return path
 
     def _now(self):
         self._enter("clock.now")
@@ -298,14 +378,6 @@ class SimulatedWorld:
     def _timestamp(self):
         self._enter("clock.timestamp")
         return (EPOCH + datetime.timedelta(seconds=self.t)).isoformat(timespec="milliseconds")
-
-    def _wait(self, seconds):
-        self._enter("clock.wait", seconds)
-        if seconds < 0:
-            raise ValueError("sleep length must be non-negative")
-        self.t += seconds
-        while self._events and self._events[0][0] <= self.t:
-            self._events.pop(0)[1]()
 
     def _install(self, on_signal):
         self._enter("signals.install")

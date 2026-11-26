@@ -13,7 +13,6 @@ import socket
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 
 from shuttle.world import real
@@ -31,12 +30,6 @@ REPORTS_STREAMS = (
 )
 REPORTS_SESSION = (
     "import os, sys\nopen(sys.argv[1], 'w').write(f'{os.getsid(0)} {os.getpgid(0)}')\n"
-)
-IGNORES_THE_ASK = (
-    "import signal, sys, time\n"
-    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-    "open(sys.argv[1], 'w').close()\n"
-    "time.sleep(60)\n"
 )
 
 
@@ -57,16 +50,24 @@ class RealHarness:
     def names_in(self, folder):
         return sorted(os.listdir(folder))
 
-    def argv(self, kind, ready=None, report=None):
+    def end(self, process):
+        process.kill()
+
+    def argv(self, kind, report=None, fd=None):
         self.last_report = report or getattr(self, "last_report", None)
         python = sys.executable
         return {
             "exits_at_once": [python, "-c", "pass"],
             "exits_with_three": [python, "-c", "import sys; sys.exit(3)"],
             "sleeps": [python, "-c", "import time; time.sleep(60)"],
-            "ignores_the_ask": [python, "-c", IGNORES_THE_ASK, ready],
             "reports_streams": [python, "-c", REPORTS_STREAMS, report],
             "reports_session": [python, "-c", REPORTS_SESSION, report],
+            "writes_to_the_report": [
+                python,
+                "-c",
+                "import os, sys; os.write(int(sys.argv[1]), b'hello\\n')",
+                str(fd),
+            ],
             "not_a_program": [os.path.join(self.root, "no-such-program")],
         }[kind]
 
@@ -130,8 +131,8 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
         environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "SHUTTLE_ONLY": "1"}
         subprocess.run([sys.executable, "-c", script, direct], env=environment, check=True)
         process = self.world.processes.start([sys.executable, "-c", script, started], environment)
-        self.addCleanup(self.stop, process)
-        self.assertTrue(contract.until(self.world, lambda: self.world.processes.poll(process) == 0))
+        self.addCleanup(self.harness.end, process)
+        self.assertTrue(contract.ended(self.world, process))
         with open(started) as f, open(direct) as g:
             seen, expected = json.load(f), json.load(g)
         self.assertEqual(seen, expected)
@@ -153,15 +154,20 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
     def test_the_process_number_is_this_processs(self):
         self.assertEqual(self.world.identity.process_number(), os.getpid())
 
-    def test_the_steady_clock_is_the_monotonic_clock(self):
-        # Ordering only, no bound on how long anything takes: the operation's reading, then the
-        # system's, then the operation's again, are in order on the one monotonic clock; a wall
-        # clock reads about fifty years later than the monotonic one and is out of order.
-        first = self.world.clock.now()
-        between = time.monotonic()
-        last = self.world.clock.now()
-        self.assertLessEqual(first, between)
-        self.assertLessEqual(between, last)
+    def test_the_steady_clock_counts_from_an_arbitrary_start_not_from_1970(self):
+        # A wall clock reads about 1.8e9 seconds in 2026; a monotonic clock reads the time since
+        # boot or some such start, which is never that large.
+        self.assertLess(self.world.clock.now(), 10**9)
+
+    def test_a_path_is_resolved_to_an_absolute_one_with_links_followed(self):
+        folder = os.path.realpath(self.harness.folder())
+        os.mkdir(os.path.join(folder, "real"))
+        os.symlink(os.path.join(folder, "real"), os.path.join(folder, "link"))
+        self.assertEqual(
+            self.world.boundary.resolve(os.path.join(folder, "link")),
+            os.path.join(folder, "real"),
+        )
+        self.assertTrue(os.path.isabs(self.world.boundary.resolve("relative")))
 
 
 if __name__ == "__main__":

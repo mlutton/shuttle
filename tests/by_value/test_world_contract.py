@@ -27,14 +27,19 @@ class SimulatedHarness:
     def names_in(self, folder):
         return self.world.names_in(folder)
 
-    def argv(self, kind, ready=None, report=None):
+    def end(self, process):
+        """Kill the child, as the real half does."""
+        if process.returncode is None:
+            process.returncode = -9
+
+    def argv(self, kind, report=None, fd=None):
         behaviours = {
-            "exits_at_once": {"exits_after": 0},
-            "exits_with_three": {"exits_after": 0, "exit_code": 3},
-            "sleeps": {},
-            "reports_streams": {"exits_after": 0},
-            "reports_session": {"exits_after": 0},
-            "ignores_the_ask": {"obeys": ("kill",), "creates": (ready,) if ready else ()},
+            "exits_at_once": {},
+            "exits_with_three": {"exit_code": 3},
+            "sleeps": {"hangs": True},
+            "reports_streams": {},
+            "reports_session": {},
+            "writes_to_the_report": {"report": "hello\n"},
         }
         if kind in behaviours:
             self.world.program(kind, **behaviours[kind])
@@ -72,13 +77,6 @@ class SimulatedWorldHoldsTheContract(contract.ContractCases, unittest.TestCase):
         self.simulated = simulated.SimulatedWorld()
         self.world = self.simulated.operations
         self.harness = SimulatedHarness(self.simulated)
-
-    def test_waiting_moves_the_clock_by_exactly_the_time_asked(self):
-        for seconds in (0.01, 0.1, 3):
-            with self.subTest(seconds=seconds):
-                before = self.world.clock.now()
-                self.world.clock.wait(seconds)
-                self.assertAlmostEqual(self.world.clock.now() - before, seconds, places=9)
 
     def test_a_signal_that_is_not_one_of_the_handled_is_not_handed_to_the_handler(self):
         # the real half shows that only the handled ones are installed (it cannot send the others)

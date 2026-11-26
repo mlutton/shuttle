@@ -14,8 +14,4 @@ def timestamp() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat(timespec="milliseconds")
 
 
-def wait(seconds: float) -> None:
-    time.sleep(seconds)
-
-
-CLOCK = ClockOperations(now=now, timestamp=timestamp, wait=wait)
+CLOCK = ClockOperations(now=now, timestamp=timestamp)

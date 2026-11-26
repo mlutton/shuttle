@@ -25,6 +25,8 @@ from names import escape_name, fenced
 GUARD_FOLDERS = ("checks/", ".githooks/", ".github/", ".claude/agents/", "tests/hostile/")
 GUARD_FILES = (
     "pyproject.toml",
+    "tests/ruff.toml",
+    "tests/command/test_lint_bans.py",
     "requirements-dev.txt",
     "tests/by_value/test_rules.py",
     "AGENTS.md",
@@ -43,6 +45,7 @@ GUARD_FILES = (
     "tests/command/test_hook.py",
     "tests/by_value/test_report.py",
     "tests/command/test_report.py",
+    "tests/boundary/test_arguments.py",
 )
 # The attack lists: table name, file, the variable holding the rows, and (for tables whose rows
 # are tuples) the fields of a row in order.

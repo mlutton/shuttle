@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from typing import TextIO
 
 from shuttle.core.shapes import Operations
+from shuttle.world.boundary import BOUNDARY
 from shuttle.world.clock import CLOCK
 from shuttle.world.environment import ENVIRONMENT
 from shuttle.world.files import FILES
@@ -17,6 +18,7 @@ from shuttle.world.signals import SIGNALS
 OPERATIONS = Operations(
     files=FILES,
     processes=PROCESSES,
+    boundary=BOUNDARY,
     clock=CLOCK,
     signals=SIGNALS,
     environment=ENVIRONMENT,

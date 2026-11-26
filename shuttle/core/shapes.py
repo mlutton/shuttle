@@ -7,7 +7,7 @@ until the validation code has looked at it) and what `records.read_record` reads
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, TextIO, TypedDict
+from typing import Any, NamedTuple, Protocol, TextIO, TypedDict
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 
@@ -99,6 +99,9 @@ class StepResult(TypedDict, total=False):
     stand_in: str
     process: Any  # the handle the process operations made; nothing else looks inside
     ok: bool
+    everything_stopped: bool
+    stop_reason: str
+    stop_asker: str
     duration_seconds: float  # a real step that took time says how much
 
 
@@ -252,6 +255,8 @@ class RunState(TypedDict, total=False):
     started_at: str
     ended_at: str
     clock_start: float
+    boundary_name: str
+    boundary_process: Any
     executor_duration: float
     executor_driver_observations: ExecutorDriverGroup
     conclusion: Conclusion
@@ -282,26 +287,49 @@ class FileOperations(NamedTuple):
     ]  # a folder a new name can be made in; looks, writes nothing
 
 
+class Starter(Protocol):
+    def __call__(
+        self, argv: Sequence[str], environment: Mapping[str, str], report: int | None = None
+    ) -> Process: ...
+
+
 class ProcessOperations(NamedTuple):
     """Child processes. The handle is whatever `start` returns."""
 
     find_program: Callable[[str], bool]  # whether a command can be found and run
-    start: Callable[
-        [Sequence[str], Mapping[str, str]], Process
-    ]  # argv, environment; OSError, ValueError
+    start: Starter  # argv, environment, the number `open_report` gave or None; OSError, ValueError
     poll: Callable[[Process], int | None]  # None while running; negative: ended by that signal
-    ask_to_end: Callable[
-        [Process], None
-    ]  # the polite request (SIGTERM); OSError if it cannot be sent
-    kill: Callable[[Process], None]  # the one that cannot be ignored; OSError if it cannot be sent
+    wait: Callable[
+        [Process, float], int | None
+    ]  # blocks up to that many seconds for the exit; the status, or None if still running
+    open_report: Callable[
+        [], int
+    ]  # a report channel for one start: the number the child sees its write end as; OSError
+    read_report: Callable[
+        [Process], str
+    ]  # what the child wrote to its report so far (nothing if it had none); never waits
+
+
+class BoundaryOperations(NamedTuple):
+    """The boundary's scope, by its unit name (shuttle.core.boundary.unit_of)."""
+
+    show: Callable[
+        [str, Sequence[str]], Mapping[str, str]
+    ]  # the named properties of the unit; OSError when they cannot be read
+    stop: Callable[
+        [str], None
+    ]  # stop the unit and everything in it; OSError when it cannot be asked
+    forget: Callable[[str], None]  # clear a failed unit's record; OSError when it cannot be asked
+    resolve: Callable[
+        [str], str
+    ]  # a path made absolute with links resolved, as the boundary sees it
 
 
 class ClockOperations(NamedTuple):
-    """Time: a steady count of seconds, a stamp for records, and waiting."""
+    """Time: a steady count of seconds for durations, and a stamp for records."""
 
     now: Callable[[], float]  # seconds on a clock that only goes forward
     timestamp: Callable[[], str]  # UTC, ISO 8601, milliseconds, for records
-    wait: Callable[[float], None]  # let that many seconds pass
 
 
 class SignalOperations(NamedTuple):
@@ -328,6 +356,7 @@ class Operations(NamedTuple):
 
     files: FileOperations
     processes: ProcessOperations
+    boundary: BoundaryOperations
     clock: ClockOperations
     signals: SignalOperations
     environment: EnvironmentOperations

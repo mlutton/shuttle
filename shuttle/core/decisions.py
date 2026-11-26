@@ -3,10 +3,9 @@
 Nothing here touches a file, the clock, the environment or a process.
 """
 
-import math
 from collections.abc import Iterable, Mapping, Sequence
 
-from shuttle.core import fixed, pairs, refusals
+from shuttle.core import boundary, fixed, pairs, refusals
 from shuttle.core.drivers import command as command_driver
 from shuttle.core.shapes import (
     CommandSettings,
@@ -127,10 +126,10 @@ def _decide_before_launch(f: Mapping[str, object]) -> Decision | None:
 
 def _decide_after_launch(f: Mapping[str, object]) -> Decision:
     wait = f.get("wait")
-    if wait not in _WAIT:
-        return _after_launch_error()
     if wait == "error" or f.get("stop") == "not_confirmed":
         return _decision(_EF, "stop_not_confirmed", "stop_not_confirmed")
+    if wait not in _WAIT:
+        return _after_launch_error()
     if f.get("stop") != "confirmed":
         return _after_launch_error()
     for step, failed_reason in (
@@ -269,17 +268,6 @@ def facts_after_signal(facts: Facts, signal_name: str | None) -> Facts:
     return {}
 
 
-def wait_cause(child_exited: bool, deadline_passed: bool, signal_name: str | None) -> str | None:
-    """What ends the wait, or None to keep waiting. The first cause seen wins."""
-    if child_exited:
-        return "exited"
-    if signal_name:
-        return "signal"
-    if deadline_passed:
-        return "time_limit"
-    return None
-
-
 def _failed_before_launch(f: Mapping[str, object]) -> bool:
     return bool(
         f.get("input_check")
@@ -308,11 +296,13 @@ def step_runs(step: str, facts: Mapping[str, object]) -> bool:
         return facts.get("header_source") is not None
     if facts.get("header_source") is None or _failed_before_launch(facts):
         return False
-    stop_failed = facts.get("stop") == "not_confirmed" or facts.get("wait") == "error"
+    # Nothing is frozen or delivered unless the stop is confirmed: until then something may still
+    # be writing the place.
+    stop_confirmed = facts.get("stop") == "confirmed" and facts.get("wait") != "error"
     if step == "take_closing_freeze":
-        return not stop_failed
+        return stop_confirmed
     if step == "deliver":
-        return not stop_failed and facts.get("closing_freeze") != "failed"
+        return stop_confirmed and facts.get("closing_freeze") != "failed"
     return True
 
 
@@ -413,18 +403,9 @@ def _text(value: object) -> bool:
     return isinstance(value, str) and bool(value)
 
 
-_LONGEST_TIME_LIMIT_SECONDS = 10**9
-
-
 def _usable_time_limit(value: object) -> bool:
-    """A finite number above zero that the clock can use."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    try:
-        seconds = float(value)
-    except OverflowError:
-        return False
-    return math.isfinite(seconds) and 0 < seconds <= _LONGEST_TIME_LIMIT_SECONDS
+    """A number the boundary's own timer can take (shuttle.core.boundary)."""
+    return boundary.usable_time_limit(value)
 
 
 def _refusal(reason: str, problem: str, header_source: HeaderSource) -> DocumentCheck:
@@ -516,8 +497,8 @@ def _document_refusal(raw: Document) -> tuple[str, str] | None:
     if not _usable_time_limit(raw.get("time_limit_seconds")):
         return (
             "no_time_limit",
-            "time_limit_seconds is required and must be a number above zero and at most "
-            f"{_LONGEST_TIME_LIMIT_SECONDS}",
+            "time_limit_seconds is required and must be a number from "
+            f"{boundary.SHORTEST_LIMIT_SECONDS:g} to {boundary.LONGEST_LIMIT_SECONDS} seconds",
         )
     env = refusals.check_environment_entries(raw.get("environment", []))
     if env:
@@ -892,7 +873,9 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "delivery_branch": _from_step(steps.get("delivery"), "branch"),
         "delivery_branch_reason": _from_step(steps.get("delivery"), "branch_reason"),
         "exit_code": pairs.observed(facts["exit_code"]),
-        "signal": pairs.observed(facts["signal"]),
+        "signal": pairs.cannot_tell()
+        if facts["signal"] == fixed.CANNOT_TELL
+        else pairs.observed(facts["signal"]),
         "peak_memory_bytes": _from_step(boundary, "peak_memory_bytes") if launched else unlooked,
         "processor_time_seconds": _from_step(boundary, "processor_time_seconds")
         if launched

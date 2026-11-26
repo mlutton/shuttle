@@ -1,0 +1,25 @@
+# The lint settings for everything under tests/. They are the project's (pyproject.toml), with
+# one change: the tests may not sleep or read the clock. The boundary owns the time limit, so a
+# test that needs either is a sign that timing has leaked back into the command; wait on the
+# thing waited for (a pipe, a process) instead. A script a test writes out as text may sleep: it
+# runs in the boundary, and the linter does not read it.
+extend = "../pyproject.toml"
+
+[lint.flake8-tidy-imports.banned-api]
+"time.sleep".msg = "No test sleeps: wait on the thing waited for (a pipe, a process's end). See tests/ruff.toml."
+"time.time".msg = "No test reads the clock. See tests/ruff.toml."
+"time.time_ns".msg = "No test reads the clock. See tests/ruff.toml."
+"time.monotonic".msg = "No test reads the clock. See tests/ruff.toml."
+"time.monotonic_ns".msg = "No test reads the clock. See tests/ruff.toml."
+"time.perf_counter".msg = "No test reads the clock. See tests/ruff.toml."
+"time.perf_counter_ns".msg = "No test reads the clock. See tests/ruff.toml."
+"time.process_time".msg = "No test reads the clock. See tests/ruff.toml."
+"datetime.datetime.now".msg = "No test reads the clock. See tests/ruff.toml."
+"datetime.datetime.utcnow".msg = "No test reads the clock. See tests/ruff.toml."
+"datetime.date.today".msg = "No test reads the clock. See tests/ruff.toml."
+"asyncio.sleep".msg = "No test sleeps. See tests/ruff.toml."
+
+[lint.per-file-ignores]
+# Nothing is ignored here: the project's own exemption of the tests from the import ban (pyproject.toml) is
+# replaced, and the ban list above is the tests' own.
+"__never__" = []

@@ -118,6 +118,17 @@ class BuildReceipt(unittest.TestCase):
             pair("value", "command"),
         )
 
+    def test_a_signal_that_cannot_be_told_says_cannot_tell_and_a_named_one_is_a_value(self):
+        for given, expected in (
+            (fixed.CANNOT_TELL, pair(fixed.CANNOT_TELL)),
+            ("SIGTERM", pair("value", "SIGTERM")),
+            (None, pair(fixed.NONE)),
+        ):
+            with self.subTest(given=given):
+                receipt = core.build_receipt(ENDED, ran_facts(signal=given))
+                self.assertEqual(receipt["execution"]["signal"], expected)
+                self.assertEqual(core.check_receipt(receipt), [])
+
     def test_a_field_whose_source_is_a_stand_in_says_not_built_and_never_cannot_tell(self):
         receipt = core.build_receipt(ENDED, ran_facts())
         saw = receipt["execution"]
