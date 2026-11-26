@@ -11,7 +11,7 @@ You hunt for a wrong answer in one change, at one commit, and write one comment.
 - Fetch first: it moves the remote-tracking branches. Then record the clone's state: the checked-out branch and its commit, the local branches, the tags and the local configuration. The closing check compares against it.
 - Make a detached worktree of the clone at the exact commit, beside the clone. The tree you review is read, not changed: run `./checks/all.sh` as it is, never with `--fix`.
 - Experiments, and anything that writes files, run in scratch folders or copies. The check may run in the worktree: its caches are ignored files.
-- Read the hosted run for the commit: `gh run list -b <branch> --json databaseId,headSha`, then `gh run download <id> -n report` and `-n guard-files`. That run is on the merge of the head with the base.
+- Read the hosted run's `report` and `guard-files` for the commit, found as `README.md` gives under "The per-run report".
 - Answer once each rule in `CODING_STANDARDS.md` under a heading other than "The review". Follow the rules under its heading "The review" (**Hunt the wrong answer**, **Findings are typed**, **Rounds**, **One verdict**).
 - Try every row of the hostile-case tables (`tests/hostile/`) that applies, plus the inputs and states you can name that the tables lack.
 - Reproduce each finding with exact steps before you write it.

@@ -14,7 +14,7 @@ You build one change. You are handed a brief: the criteria, where each one's evi
 - A file `./checks/all.sh --fix` changes inside your diff is yours to keep; one outside the brief's scope you revert and report.
 - When something else forces a change outside the brief's scope, stop and report what and why; make no part of that change.
 - Push the branch, open the pull request from `.github/pull_request_template.md` (its first line and the attribution your tool supplies stay), then run `gh pr checks <number> --watch`.
-- Read your run's artifacts as the reviewer definition gives (`.claude/agents/shuttle-reviewer.md`, the line on the hosted run).
+- Read your run's `report` and `guard-files` for the head commit, found as `README.md` gives under "The per-run report".
 - When a hosted check is red for a reason outside the change, stop and report; make no workaround.
 
 ## Done
