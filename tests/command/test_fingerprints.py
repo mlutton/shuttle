@@ -589,53 +589,33 @@ class FilterDrivers(FingerprintCase):
                 os.remove(os.path.join(self.records, "r-1.outcome.json"))
                 os.remove(os.path.join(self.records, "r-1.request.json"))
 
-    def run_a_script_that_adds_a_driver(self, kind):
+    def test_drivers_added_by_the_script_during_the_run_are_never_run(self):
+        # a clean driver named by .gitattributes and a process driver named by info/attributes,
+        # both written, with their configuration, by the script
         script = (
             "import os, sys\n"
             "place, config, command = sys.argv[1], sys.argv[3], sys.argv[4]\n"
-            "open(config, 'a').write('[filter \"x\"]\\n\\t' + sys.argv[5] + ' = ' + command + '\\n')\n"
+            "open(config, 'a').write('[filter \"x\"]\\n\\tclean = ' + command + '; cat\\n')\n"
+            "open(config, 'a').write('[filter \"p\"]\\n\\tprocess = ' + command + '\\n')\n"
             "open(os.path.join(place, '.gitattributes'), 'w').write('*.txt filter=x\\n')\n"
-            "open(os.path.join(place, 'new.txt'), 'w').write('as written\\n')\n"
-        )
-        command = f"touch '{self.marker}'; sed 's/^/FILTERED:/'"
-        if kind == "process":
-            command = f"touch '{self.marker}'"
-        doc = self.document_for(script, [os.path.join(self.main, ".git", "config"), command, kind])
-        self.finished(doc)
-        saw = outcome_fields(self)["execution"]
-        self.assertEqual(
-            (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (2, 0, 0)
-        )
-        self.assertFalse(os.path.exists(self.marker), "a driver ran")
-        self.assertEqual(
-            self.git("show", f"{saw['fingerprint_after']}:new.txt"), "as written"
-        )  # the bytes on disk
-        self.assertEqual(sorted(os.listdir(self.records)), ["r-1.outcome.json", "r-1.request.json"])
-
-    def test_a_clean_driver_added_by_the_script_during_the_run_is_never_run(self):
-        self.run_a_script_that_adds_a_driver("clean")
-
-    def test_a_process_driver_added_by_the_script_during_the_run_is_never_run(self):
-        self.run_a_script_that_adds_a_driver("process")
-
-    def test_an_info_attributes_file_written_by_the_script_never_runs_a_driver_either(self):
-        script = (
-            "import os, sys\n"
-            "config = sys.argv[3]\n"
-            "open(config, 'a').write('[filter \"x\"]\\n\\tclean = ' + sys.argv[4] + '\\n')\n"
             "info = os.path.join(os.path.dirname(config), 'info')\n"
             "os.makedirs(info, exist_ok=True)\n"
-            "open(os.path.join(info, 'attributes'), 'w').write('*.txt filter=x\\n')\n"
-            "open(os.path.join(sys.argv[1], 'new.txt'), 'w').write('as written\\n')\n"
+            "open(os.path.join(info, 'attributes'), 'w').write('*.dat filter=p\\n')\n"
+            "open(os.path.join(place, 'new.txt'), 'w').write('as written\\n')\n"
+            "open(os.path.join(place, 'new.dat'), 'w').write('as written\\n')\n"
         )
         doc = self.document_for(
-            script,
-            [os.path.join(self.main, ".git", "config"), f"touch '{self.marker}'; cat"],
+            script, [os.path.join(self.main, ".git", "config"), f"touch '{self.marker}'"]
         )
         self.finished(doc)
-        self.assertFalse(os.path.exists(self.marker), "a driver ran")
         saw = outcome_fields(self)["execution"]
-        self.assertEqual(saw["files_added"], 1)
+        self.assertEqual(
+            (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (3, 0, 0)
+        )
+        self.assertFalse(os.path.exists(self.marker), "a driver ran")
+        for name in ("new.txt", "new.dat"):  # the bytes on disk
+            self.assertEqual(self.git("show", f"{saw['fingerprint_after']}:{name}"), "as written")
+        self.assertEqual(sorted(os.listdir(self.records)), ["r-1.outcome.json", "r-1.request.json"])
 
 
 PRINTS_ITS_WORKING_DIRECTORY = """
