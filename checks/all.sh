@@ -6,11 +6,16 @@
 #   lint    ruff check .
 #   format  ruff format --check .
 #   types   mypy (strict, over shuttle/ and checks/; see pyproject.toml)
-#   tests   python -m unittest discover -s tests/by_value, under a 20 second budget: the tests
-#           that start no real process
+#   tests   python -m unittest discover -s tests/by_value: the tests that start no real
+#           process, under TESTS_SECONDS (below)
 #   real    python -m unittest discover, over tests/command and then tests/boundary: the tests
-#           that start real processes, with no time budget of their own (no test sleeps or reads
-#           the clock, and each runs under the resource limits of tests/rehearsal/real_run.py)
+#           that start real processes, under REAL_SECONDS (below), for the two folders together.
+#           It stops at the first folder that fails, so a failure in tests/command means
+#           tests/boundary did not run. The real-process tests are bounded in time by that
+#           budget; the tests that hand the command an input without an end run under the
+#           resource limits of tests/rehearsal/real_run.py.
+# The budgets, each written once below the header: TESTS_SECONDS keeps the logic tests fast;
+# REAL_SECONDS ends a real-process test that never returns, and does not police speed.
 # Every folder under tests/ that holds tests is in exactly one of the two (a test pins it);
 # tests/rehearsal and tests/hostile hold helpers and tables, not tests.
 # Prints one line per stage ("<stage>: passed" or "<stage>: failed"; a failed stage's
@@ -18,7 +23,9 @@
 #   check: passed
 #   check: failed: <stage>
 # The format stage adds how to fix it: "check: failed: format; fix it with: ./checks/all.sh --fix"
-# The tests stage ended by its time budget says so: "check: failed: tests (timed out after 20 seconds)".
+# A tests or real stage ended by its time budget says so, with that budget's number:
+#   check: failed: tests (timed out after 20 seconds)
+#   check: failed: real (timed out after 120 seconds)
 #   check: could not run: <tool> is not installed (ruff, mypy or, for the tests, coverage); install the tools with: <command>
 #
 # ./checks/all.sh --fix applies what ruff can change mechanically and says what changed:
@@ -44,6 +51,9 @@
 #
 # PYTHON names the interpreter that has the tools. By default checks/interpreter.sh picks this
 # tree's .venv/bin/python, else the main working tree's (for a linked worktree), else python3. There are no retries: a failed stage stays failed.
+
+TESTS_SECONDS=20
+REAL_SECONDS=120
 
 mode=check
 [ "$#" -eq 1 ] && [ "$1" = --fix ] && mode=fix
@@ -95,7 +105,8 @@ trap 'rm -f "$output"' EXIT
 
 stage() {
     name=$1
-    shift
+    budget=$2
+    shift 2
     "$@" >"$output" 2>&1
     code=$?
     if [ "$code" -eq 0 ]; then
@@ -106,11 +117,11 @@ stage() {
     cat "$output" >&2
     case "$name" in
         format) echo "check: failed: format; fix it with: ./checks/all.sh --fix" ;;
-        tests)
+        tests | real)
             if [ "$code" -eq 124 ]; then
-                echo "check: failed: tests (timed out after 20 seconds)"
+                echo "check: failed: $name (timed out after $budget seconds)"
             else
-                echo "check: failed: tests"
+                echo "check: failed: $name"
             fi
             ;;
         *) echo "check: failed: $name" ;;
@@ -118,17 +129,14 @@ stage() {
     exit 1
 }
 
-stage lint "$PYTHON" -m ruff check .
-stage format "$PYTHON" -m ruff format --check .
-stage types "$PYTHON" -m mypy
-# The tests that start real processes: one stage, one folder after the other.
-real_tests() {
-    "$PYTHON" -m unittest discover -s tests/command -t tests &&
-        "$PYTHON" -m unittest discover -s tests/boundary -t tests
-}
-
+stage lint 0 "$PYTHON" -m ruff check .
+stage format 0 "$PYTHON" -m ruff format --check .
+stage types 0 "$PYTHON" -m mypy
 # As of 2026-11-26 the by-value tests take about 3 seconds; a run past 20 is a wait that crept
-# back in. The real-process tests have no budget here: their cost grows with every real command.
-stage tests timeout 20 "$PYTHON" -m unittest discover -s tests/by_value -t tests
-stage real real_tests
+# back in. The real-process tests take about 10 seconds; 120 is far past that, so only a test that
+# never returns reaches it. The two folders run in one command, so the one budget covers both.
+stage tests "$TESTS_SECONDS" timeout "$TESTS_SECONDS" "$PYTHON" -m unittest discover -s tests/by_value -t tests
+stage real "$REAL_SECONDS" timeout "$REAL_SECONDS" sh -c \
+    '"$0" -m unittest discover -s tests/command -t tests && "$0" -m unittest discover -s tests/boundary -t tests' \
+    "$PYTHON"
 echo "check: passed"

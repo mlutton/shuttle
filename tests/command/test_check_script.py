@@ -99,8 +99,15 @@ class CheckScriptTest(unittest.TestCase):
         result = self.check(FAIL_STAGE="tests", FAIL_CODE="3")
         self.assertEqual(self.last_line(result), "check: failed: tests")
 
-    def test_the_real_process_stage_has_no_time_budget_of_its_own(self):
+    def test_a_real_stage_ended_by_its_budget_says_it_timed_out(self):
         result = self.check(FAIL_STAGE="real", FAIL_CODE="124")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            self.last_line(result), "check: failed: real (timed out after 120 seconds)"
+        )
+
+    def test_a_real_stage_that_fails_for_another_reason_does_not_say_timed_out(self):
+        result = self.check(FAIL_STAGE="real", FAIL_CODE="3")
         self.assertEqual(self.last_line(result), "check: failed: real")
 
     def test_every_folder_of_tests_is_run_by_exactly_one_stage(self):
