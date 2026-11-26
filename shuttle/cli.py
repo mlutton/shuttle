@@ -4,12 +4,15 @@ Exit codes:
   0  an outcome record was written (whatever the ending, "could not start" included)
   1  no outcome record was written; one line on standard error says why
 """
+
 import sys
+from collections.abc import Sequence
+from typing import TextIO
 
 from shuttle import core, run
 
 
-def main(argv, out=None, err=None):
+def main(argv: Sequence[str], out: TextIO | None = None, err: TextIO | None = None) -> int:
     out = out or sys.stdout
     err = err or sys.stderr
     parsed = core.parse_command_line(argv)

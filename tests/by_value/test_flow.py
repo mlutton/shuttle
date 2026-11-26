@@ -1,13 +1,25 @@
 """By value: which steps run, what an error in a step means, and what is printed."""
+
 import unittest
 
 from shuttle import core, run
 
 ORDER = [
-    "read_and_validate_document", "claim_request_id", "run_input_checks_and_executor_driver_check",
-    "run_gates", "set_up_run_area", "take_opening_fingerprint", "launch_executor", "wait_for_the_end",
-    "stop_everything_and_confirm_empty", "observe", "take_closing_freeze", "deliver",
-    "move_kept_files", "tear_down", "write_outcome_record",
+    "read_and_validate_document",
+    "claim_request_id",
+    "run_input_checks_and_executor_driver_check",
+    "run_gates",
+    "set_up_run_area",
+    "take_opening_fingerprint",
+    "launch_executor",
+    "wait_for_the_end",
+    "stop_everything_and_confirm_empty",
+    "observe",
+    "take_closing_freeze",
+    "deliver",
+    "move_kept_files",
+    "tear_down",
+    "write_outcome_record",
 ]
 
 LAUNCHED = {"header_source": {}, "launch": "ok", "wait": "exited", "stop": "confirmed"}
@@ -32,7 +44,9 @@ class StepsRun(unittest.TestCase):
     def test_a_used_request_id_or_unusable_records_location_runs_only_the_last_step(self):
         for claim in ("used", "unusable"):
             with self.subTest(claim):
-                self.assertEqual(runs({"header_source": {}, "id_claim": claim}), ["write_outcome_record"])
+                self.assertEqual(
+                    runs({"header_source": {}, "id_claim": claim}), ["write_outcome_record"]
+                )
 
     def test_a_refusal_before_launch_still_claims_the_id_and_writes_the_record(self):
         for facts in (
@@ -68,7 +82,9 @@ class ErrorsAndInterrupts(unittest.TestCase):
     def test_an_error_in_a_step_becomes_the_fact_that_step_reports(self):
         expected = {
             "claim_request_id": {"id_claim": "unusable"},
-            "run_input_checks_and_executor_driver_check": {"executor_driver_check": "execution_error"},
+            "run_input_checks_and_executor_driver_check": {
+                "executor_driver_check": "execution_error"
+            },
             "run_gates": {"gates": "failed"},
             "set_up_run_area": {"setup": "failed"},
             "take_opening_fingerprint": {"opening_freeze": "failed"},
@@ -84,7 +100,9 @@ class ErrorsAndInterrupts(unittest.TestCase):
                 self.assertEqual(core.facts_after_error(name), expected.get(name, {}))
 
     def test_a_signal_before_launch_is_a_stop_before_launch(self):
-        self.assertEqual(core.facts_after_signal({"header_source": {}}, "SIGINT"), {"launch": "stopped_before"})
+        self.assertEqual(
+            core.facts_after_signal({"header_source": {}}, "SIGINT"), {"launch": "stopped_before"}
+        )
 
     def test_a_signal_after_launch_adds_no_fact_here_the_wait_sees_it(self):
         self.assertEqual(core.facts_after_signal(LAUNCHED, "SIGINT"), {})
@@ -123,16 +141,37 @@ class WhatIsPrinted(unittest.TestCase):
 
     def test_rows(self):
         cases = [
-            ("record written", {"kind": "written", "decision": self.ENDED, "path": "/r/x.outcome.json"},
-             {"stdout": ["/r/x.outcome.json", "ended_by_itself"], "stderr": [], "exit": 0}),
-            ("unreadable document", {"kind": "unreadable", "problem": "bad"},
-             {"stdout": ["none"], "stderr": ["shuttle: bad"], "exit": 1}),
-            ("refused with nothing written", {"kind": "not_recorded", "decision": self.USED, "problem": "used"},
-             {"stdout": ["could_not_start"], "stderr": ["shuttle: used"], "exit": 1}),
-            ("record could not be written", {"kind": "write_failed", "decision": self.ENDED, "receipt_text": "{}", "problem": "OSError"},
-             {"stdout": ["{}", "ended_by_itself"],
-              "stderr": ["shuttle: the outcome record was not written (OSError); the receipt is printed below and the ending stands"],
-              "exit": 1}),
+            (
+                "record written",
+                {"kind": "written", "decision": self.ENDED, "path": "/r/x.outcome.json"},
+                {"stdout": ["/r/x.outcome.json", "ended_by_itself"], "stderr": [], "exit": 0},
+            ),
+            (
+                "unreadable document",
+                {"kind": "unreadable", "problem": "bad"},
+                {"stdout": ["none"], "stderr": ["shuttle: bad"], "exit": 1},
+            ),
+            (
+                "refused with nothing written",
+                {"kind": "not_recorded", "decision": self.USED, "problem": "used"},
+                {"stdout": ["could_not_start"], "stderr": ["shuttle: used"], "exit": 1},
+            ),
+            (
+                "record could not be written",
+                {
+                    "kind": "write_failed",
+                    "decision": self.ENDED,
+                    "receipt_text": "{}",
+                    "problem": "OSError",
+                },
+                {
+                    "stdout": ["{}", "ended_by_itself"],
+                    "stderr": [
+                        "shuttle: the outcome record was not written (OSError); the receipt is printed below and the ending stands"
+                    ],
+                    "exit": 1,
+                },
+            ),
         ]
         for name, given, expected in cases:
             with self.subTest(name):
@@ -140,13 +179,17 @@ class WhatIsPrinted(unittest.TestCase):
 
     def test_exit_zero_only_when_a_record_was_written(self):
         for kind in ("unreadable", "not_recorded", "write_failed"):
-            got = core.conclude({"kind": kind, "decision": self.ENDED, "problem": "p", "receipt_text": "{}"})
+            got = core.conclude(
+                {"kind": kind, "decision": self.ENDED, "problem": "p", "receipt_text": "{}"}
+            )
             self.assertNotEqual(got["exit"], 0)
 
 
 class Environment(unittest.TestCase):
     def test_a_missing_variable_has_its_own_reason_text(self):
-        reason, text = core.executor_driver_check("tool", ["NAMED", "OTHER"], {"PATH": "/bin"}, tool_found=True)
+        reason, text = core.executor_driver_check(
+            "tool", ["NAMED", "OTHER"], {"PATH": "/bin"}, tool_found=True
+        )
         self.assertEqual(reason, "missing_setting")
         self.assertIn("NAMED", text)
         self.assertIn("OTHER", text)
@@ -158,7 +201,9 @@ class Environment(unittest.TestCase):
         self.assertIn("tool", text)
 
     def test_nothing_missing_is_no_refusal(self):
-        self.assertEqual(core.executor_driver_check("tool", ["A"], {"A": "1"}, tool_found=True), (None, None))
+        self.assertEqual(
+            core.executor_driver_check("tool", ["A"], {"A": "1"}, tool_found=True), (None, None)
+        )
 
     def test_the_executor_gets_path_and_the_named_variables_only(self):
         caller = {"PATH": "/bin", "HOME": "/h", "TOKEN": "s3", "NAMED": "v"}

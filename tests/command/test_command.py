@@ -3,6 +3,7 @@
 Each test makes its own temporary root holding the records location and the
 small scripts. Nothing outside it is read or written.
 """
+
 import json
 import os
 import signal
@@ -14,7 +15,7 @@ import unittest
 
 from shuttle import fixed
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ENDS_BY_ITSELF = """
 import os, sys
@@ -50,8 +51,12 @@ class CommandSeam(unittest.TestCase):
                 "name": "command",
                 "settings": {
                     "command": sys.executable,
-                    "arguments": [self.script, self.witness,
-                                  os.path.join(self.records, "%s.request.json" % request_id), str(exit_code)],
+                    "arguments": [
+                        self.script,
+                        self.witness,
+                        os.path.join(self.records, f"{request_id}.request.json"),
+                        str(exit_code),
+                    ],
                 },
             },
         }
@@ -67,7 +72,12 @@ class CommandSeam(unittest.TestCase):
                 json.dump(doc, f)
         done = subprocess.run(
             [sys.executable, "-m", "shuttle"] + (argv if argv is not None else ["run", path]),
-            cwd=REPO, capture_output=True, text=True, timeout=60, env=env)
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
         return done, done.stdout.splitlines()
 
     def snapshot(self):
@@ -84,7 +94,9 @@ class CommandSeam(unittest.TestCase):
     def test_a_script_that_ends_by_itself_prints_id_then_path_then_ending_and_exits_zero(self):
         done, lines = self.run_command(self.document())
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(lines, ["req-1", os.path.join(self.records, "req-1.outcome.json"), "ended_by_itself"])
+        self.assertEqual(
+            lines, ["req-1", os.path.join(self.records, "req-1.outcome.json"), "ended_by_itself"]
+        )
         self.assertEqual(done.stderr, "")
 
     def test_the_request_record_exists_before_the_script_starts(self):
@@ -108,25 +120,44 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(outcome["header"]["record_type"], "outcome")
         self.assertEqual(outcome["header"]["request_id"], "req-1")
         self.assertEqual(outcome["header"]["format_version"], 1)
-        for field, value in (("thread", "thread-1"), ("round", 1), ("kind", "plain"),
-                             ("parent_session", "none"), ("asked_by", "none"), ("executor_name", "command")):
+        for field, value in (
+            ("thread", "thread-1"),
+            ("round", 1),
+            ("kind", "plain"),
+            ("parent_session", "none"),
+            ("asked_by", "none"),
+            ("executor_name", "command"),
+        ):
             self.assertEqual(outcome["header"][field], value, field)
         receipt = outcome["receipt"]
-        self.assertEqual(sorted(receipt), sorted([
-            "the_ending", "what_execution_saw", "what_the_executor_driver_observed", "what_the_executor_said"]))
+        self.assertEqual(
+            sorted(receipt),
+            sorted(
+                [
+                    "the_ending",
+                    "what_execution_saw",
+                    "what_the_executor_driver_observed",
+                    "what_the_executor_said",
+                ]
+            ),
+        )
         for group, names in fixed.RECEIPT_GROUPS.items():
             self.assertEqual(sorted(receipt[group]), sorted(names), group)
             for name in names:
                 value = receipt[group][name]
-                self.assertNotIn(value, (None, "", [], {}), "%s.%s" % (group, name))
+                self.assertNotIn(value, (None, "", [], {}), f"{group}.{name}")
         ending = receipt["the_ending"]
-        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]),
-                         ("ended_by_itself", "none", "none"))
+        self.assertEqual(
+            (ending["ending"], ending["reason"], ending["failed_step"]),
+            ("ended_by_itself", "none", "none"),
+        )
         saw = receipt["what_execution_saw"]
         self.assertEqual(saw["exit_code"], 0)
         self.assertEqual(saw["signal"], "none")
         self.assertEqual(len(saw["input_hash"]), 64)
-        self.assertEqual(receipt["what_the_executor_driver_observed"]["executor_driver_name"], "command")
+        self.assertEqual(
+            receipt["what_the_executor_driver_observed"]["executor_driver_name"], "command"
+        )
         self.assertEqual(saw["observed_runtime"], "cannot tell")
 
     def test_what_is_a_stand_in_says_cannot_tell(self):
@@ -152,7 +183,9 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(receipt["what_execution_saw"]["exit_code"], 7)
         self.assertEqual(receipt["the_ending"]["ending"], "ended_by_itself")
 
-    def test_a_second_run_with_the_same_request_id_is_refused_and_leaves_the_first_records_untouched(self):
+    def test_a_second_run_with_the_same_request_id_is_refused_and_leaves_the_first_records_untouched(
+        self,
+    ):
         self.run_command(self.document())
         before = self.snapshot()
         os.remove(self.witness)
@@ -168,10 +201,14 @@ class CommandSeam(unittest.TestCase):
     def test_a_document_with_an_unknown_field_is_refused_and_recorded(self):
         done, lines = self.run_command(self.document(surprise=True))
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(lines, ["req-1", os.path.join(self.records, "req-1.outcome.json"), "could_not_start"])
+        self.assertEqual(
+            lines, ["req-1", os.path.join(self.records, "req-1.outcome.json"), "could_not_start"]
+        )
         ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]),
-                         ("could_not_start", "unknown_field", "input_check"))
+        self.assertEqual(
+            (ending["ending"], ending["reason"], ending["failed_step"]),
+            ("could_not_start", "unknown_field", "input_check"),
+        )
         self.assertIn("surprise", ending["reason_text"])
         self.assertFalse(os.path.exists(self.witness), "the script must not run")
         self.assertTrue(os.path.exists(os.path.join(self.records, "req-1.request.json")))
@@ -187,31 +224,55 @@ class CommandSeam(unittest.TestCase):
             return True
         return False
 
-    def test_a_request_record_cut_short_by_a_file_size_limit_leaves_no_record_and_the_id_works_afterwards(self):
+    def test_a_request_record_cut_short_by_a_file_size_limit_leaves_no_record_and_the_id_works_afterwards(
+        self,
+    ):
         import resource
+
         text = json.dumps(self.document())[:-1] + ', "note": "%s"}' % ("x" * 200000)
-        limit = lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (100000, 100000))
+
+        def limit():
+            return resource.setrlimit(resource.RLIMIT_FSIZE, (100000, 100000))
+
         path = os.path.join(self.root, "big.json")
         with open(path, "w") as f:
             f.write(text.replace('"note"', '"surprise"'))
-        done = subprocess.run([sys.executable, "-m", "shuttle", "run", path], cwd=REPO, capture_output=True,
-                              text=True, timeout=60, preexec_fn=limit)
+        done = subprocess.run(
+            [sys.executable, "-m", "shuttle", "run", path],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            preexec_fn=limit,
+        )
         self.assertNotEqual(done.returncode, 0)
         self.assertEqual(done.stdout.splitlines()[-1], "could_not_start")
         self.assertIn("NOT spent", done.stderr)
-        self.assertEqual(os.listdir(self.records), [], "a record cut short must leave nothing behind")
+        self.assertEqual(
+            os.listdir(self.records), [], "a record cut short must leave nothing behind"
+        )
         path = os.path.join(self.root, "fixed.json")
         with open(path, "w") as f:
             json.dump(self.document(), f)
-        done = subprocess.run([sys.executable, "-m", "shuttle", "run", path], cwd=REPO, capture_output=True,
-                              text=True, timeout=60, preexec_fn=limit)
+        done = subprocess.run(
+            [sys.executable, "-m", "shuttle", "run", path],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            preexec_fn=limit,
+        )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"])
+        self.assertEqual(
+            sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"]
+        )
 
-    def test_a_document_whose_request_record_cannot_be_built_leaves_no_record_and_the_id_works_afterwards(self):
+    def test_a_document_whose_request_record_cannot_be_built_leaves_no_record_and_the_id_works_afterwards(
+        self,
+    ):
         if not self.this_python_cannot_write_the_nesting():
             self.skipTest("this Python writes this nesting; the next test covers what happens then")
-        text = json.dumps(self.document())[:-1] + ', "surprise": %s}' % self.deep_nesting()
+        text = json.dumps(self.document())[:-1] + f', "surprise": {self.deep_nesting()}}}'
         done, lines = self.run_command(text)
         self.assertNotEqual(done.returncode, 0)
         self.assertEqual(lines[-1], "could_not_start")
@@ -224,36 +285,60 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
         self.assertEqual(self.read("req-1.outcome.json")["header"]["request_id"], "req-1")
 
-    def test_a_document_nested_deeper_than_old_pythons_could_write_gets_both_records_written_and_parseable(self):
+    def test_a_document_nested_deeper_than_old_pythons_could_write_gets_both_records_written_and_parseable(
+        self,
+    ):
         if self.this_python_cannot_write_the_nesting():
-            self.skipTest("this Python cannot write this nesting; the previous test covers what happens then")
-        text = json.dumps(self.document())[:-1] + ', "surprise": %s}' % self.deep_nesting()
+            self.skipTest(
+                "this Python cannot write this nesting; the previous test covers what happens then"
+            )
+        text = json.dumps(self.document())[:-1] + f', "surprise": {self.deep_nesting()}}}'
         done, lines = self.run_command(text)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(lines[-1], "could_not_start")   # the unknown field "surprise" is refused, and recorded
+        self.assertEqual(
+            lines[-1], "could_not_start"
+        )  # the unknown field "surprise" is refused, and recorded
         request = self.read("req-1.request.json")
         self.assertEqual(request["input"]["surprise"], json.loads(self.deep_nesting()))
-        self.assertEqual(self.read("req-1.outcome.json")["receipt"]["the_ending"]["reason"], "unknown_field")
-        self.assertEqual(sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"])
+        self.assertEqual(
+            self.read("req-1.outcome.json")["receipt"]["the_ending"]["reason"], "unknown_field"
+        )
+        self.assertEqual(
+            sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"]
+        )
 
-    def test_two_commands_started_together_with_one_request_id_exactly_one_claims_it_and_its_records_are_whole(self):
+    def test_two_commands_started_together_with_one_request_id_exactly_one_claims_it_and_its_records_are_whole(
+        self,
+    ):
         """Pins behaviour that held before the change too; a race cannot be made to fail on demand."""
         paths = []
         for n in range(2):
-            path = os.path.join(self.root, "in%d.json" % n)
+            path = os.path.join(self.root, f"in{n}.json")
             with open(path, "w") as f:
                 json.dump(self.document(exit_code=n), f)
             paths.append(path)
-        children = [subprocess.Popen([sys.executable, "-m", "shuttle", "run", p], cwd=REPO,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for p in paths]
+        children = [
+            subprocess.Popen(
+                [sys.executable, "-m", "shuttle", "run", p],
+                cwd=REPO,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for p in paths
+        ]
         results = [(c.communicate(timeout=60), c.returncode) for c in children]
         codes = sorted(code for _, code in results)
         self.assertEqual(codes, [0, 1])
         loser = next(out_err for out_err, code in results if code == 1)
         self.assertIn("already used", loser[1])
-        self.assertEqual(sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"])
+        self.assertEqual(
+            sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"]
+        )
         self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
-        self.assertEqual(self.read("req-1.outcome.json")["receipt"]["the_ending"]["ending"], "ended_by_itself")
+        self.assertEqual(
+            self.read("req-1.outcome.json")["receipt"]["the_ending"]["ending"], "ended_by_itself"
+        )
 
     def test_a_tool_that_is_not_installed_could_not_start_at_the_executor_driver_check(self):
         doc = self.document()
@@ -262,14 +347,23 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
         ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["reason"], ending["failed_step"]), ("tool_not_installed", "executor_driver_check"))
+        self.assertEqual(
+            (ending["reason"], ending["failed_step"]),
+            ("tool_not_installed", "executor_driver_check"),
+        )
 
     def spawn(self, doc, name="input.json", env=None):
         path = os.path.join(self.root, name)
         with open(path, "w") as f:
             json.dump(doc, f)
-        return subprocess.Popen([sys.executable, "-m", "shuttle", "run", path], cwd=REPO, env=env,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return subprocess.Popen(
+            [sys.executable, "-m", "shuttle", "run", path],
+            cwd=REPO,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
 
     def wait_for_file(self, path, seconds=20):
         end = time.time() + seconds
@@ -277,7 +371,7 @@ class CommandSeam(unittest.TestCase):
             if os.path.exists(path) and os.path.getsize(path) > 0:
                 return
             time.sleep(0.05)
-        self.fail("%s never appeared" % path)
+        self.fail(f"{path} never appeared")
 
     def assert_process_gone(self, pid):
         end = time.time() + 5
@@ -287,11 +381,13 @@ class CommandSeam(unittest.TestCase):
             except ProcessLookupError:
                 return
             time.sleep(0.05)
-        self.fail("process %d is still running" % pid)
+        self.fail(f"process {pid} is still running")
 
     def sleeper(self):
         with open(self.script, "w") as f:
-            f.write("import os, sys, time\nopen(sys.argv[1], 'w').write(str(os.getpid()))\ntime.sleep(60)\n")
+            f.write(
+                "import os, sys, time\nopen(sys.argv[1], 'w').write(str(os.getpid()))\ntime.sleep(60)\n"
+            )
 
     def sleeping_document(self, **extra):
         self.sleeper()
@@ -300,7 +396,9 @@ class CommandSeam(unittest.TestCase):
         doc["executor"]["settings"]["arguments"] = [self.script, pid_file]
         return doc, pid_file
 
-    def test_a_terminate_sent_to_the_real_command_ends_the_script_and_still_writes_the_outcome_record(self):
+    def test_a_terminate_sent_to_the_real_command_ends_the_script_and_still_writes_the_outcome_record(
+        self,
+    ):
         """The one real-process signal test; the other signals and the order of events are by value in test_waiting.py."""
         doc, pid_file = self.sleeping_document()
         proc = self.spawn(doc)
@@ -312,8 +410,10 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, stderr)
         self.assertEqual(stdout.splitlines()[-1], "stopped_from_outside")
         ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]),
-                         ("stopped_from_outside", "signal", "none"))
+        self.assertEqual(
+            (ending["ending"], ending["reason"], ending["failed_step"]),
+            ("stopped_from_outside", "signal", "none"),
+        )
         self.assert_process_gone(script_pid)
 
     def test_a_document_without_a_time_limit_is_refused_with_no_time_limit(self):
@@ -323,9 +423,13 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
         ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["reason"], ending["failed_step"]), ("no_time_limit", "input_check"))
+        self.assertEqual(
+            (ending["reason"], ending["failed_step"]), ("no_time_limit", "input_check")
+        )
 
-    def test_a_null_character_in_an_argument_is_a_failed_launch_and_the_record_is_still_written(self):
+    def test_a_null_character_in_an_argument_is_a_failed_launch_and_the_record_is_still_written(
+        self,
+    ):
         doc = self.document()
         doc["executor"]["settings"]["arguments"].append("a\u0000b")
         done, lines = self.run_command(doc)
@@ -333,8 +437,10 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(done.stderr, "")
         self.assertEqual(lines[-1], "could_not_start")
         ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["ending"], ending["reason"], ending["failed_step"]),
-                         ("could_not_start", "launch_failed", "launch"))
+        self.assertEqual(
+            (ending["ending"], ending["reason"], ending["failed_step"]),
+            ("could_not_start", "launch_failed", "launch"),
+        )
 
     def test_format_version_must_be_an_integer_that_is_not_a_boolean(self):
         for bad in (True, 1.0, "1", 2):
@@ -344,7 +450,10 @@ class CommandSeam(unittest.TestCase):
                 done, lines = self.run_command(self.document(format_version=bad))
                 self.assertEqual(lines[-1], "could_not_start")
                 ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-                self.assertEqual((ending["reason"], ending["failed_step"]), ("unknown_format_version", "input_check"))
+                self.assertEqual(
+                    (ending["reason"], ending["failed_step"]),
+                    ("unknown_format_version", "input_check"),
+                )
                 self.assertFalse(os.path.exists(self.witness))
 
     def test_an_outcome_file_already_present_means_the_request_id_is_used(self):
@@ -360,8 +469,10 @@ class CommandSeam(unittest.TestCase):
         self.assertFalse(os.path.exists(self.witness), "the script must not run")
 
     def test_a_records_location_that_cannot_be_used_prints_the_refusal_and_could_not_start(self):
-        for name, place in (("missing", os.path.join(self.root, "absent")),
-                            ("a file", self.script)):
+        for name, place in (
+            ("missing", os.path.join(self.root, "absent")),
+            ("a file", self.script),
+        ):
             with self.subTest(name):
                 doc = self.document()
                 doc["records_location"] = place
@@ -378,7 +489,9 @@ class CommandSeam(unittest.TestCase):
 
     def test_the_executor_gets_path_and_the_named_variables_and_no_values_are_recorded(self):
         self.environment_script()
-        env = dict(os.environ, SHUTTLE_TEST_NAMED="named-value-123", SHUTTLE_TEST_OTHER="other-value-456")
+        env = dict(
+            os.environ, SHUTTLE_TEST_NAMED="named-value-123", SHUTTLE_TEST_OTHER="other-value-456"
+        )
         doc = self.document(environment=["SHUTTLE_TEST_NAMED"])
         doc["executor"]["settings"]["arguments"] = [self.script, self.witness]
         done, lines = self.run_command(doc, env=env)
@@ -401,11 +514,16 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
         ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
-        self.assertEqual((ending["reason"], ending["failed_step"]), ("missing_setting", "executor_driver_check"))
+        self.assertEqual(
+            (ending["reason"], ending["failed_step"]), ("missing_setting", "executor_driver_check")
+        )
         self.assertFalse(os.path.exists(self.witness))
 
     def test_a_document_too_broken_to_form_a_header_spends_no_id_and_writes_nothing(self):
-        for name, text in [("not json", "{nope"), ("no request id", json.dumps({"format_version": 1}))]:
+        for name, text in [
+            ("not json", "{nope"),
+            ("no request id", json.dumps({"format_version": 1})),
+        ]:
             with self.subTest(name):
                 done, lines = self.run_command(text)
                 self.assertNotEqual(done.returncode, 0)
@@ -432,7 +550,9 @@ class CommandSeam(unittest.TestCase):
         if os.geteuid() == 0:
             self.skipTest("a read-only folder does not stop the superuser")
         with open(self.script, "w") as f:
-            f.write("import os, sys\nos.chmod(sys.argv[1], 0o500)\n")  # the script makes the records folder read-only
+            f.write(
+                "import os, sys\nos.chmod(sys.argv[1], 0o500)\n"
+            )  # the script makes the records folder read-only
         self.addCleanup(os.chmod, self.records, 0o700)
         doc = self.document()
         doc["executor"]["settings"]["arguments"] = [self.script, self.records]

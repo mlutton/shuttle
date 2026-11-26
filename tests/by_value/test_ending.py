@@ -4,6 +4,7 @@ Facts go in; (ending, reason, failed step) comes out. Reason, step and ending
 must agree with the fixed list, and the core refuses a pairing the list does
 not allow.
 """
+
 import itertools
 import unittest
 
@@ -48,44 +49,112 @@ EF = "execution_failed"
 # (name, facts, expected decision)
 TABLE = [
     ("every step well, ended by itself", facts(), d("ended_by_itself")),
-    ("stand-in steps reporting success", facts(gates="ok", setup="ok", opening_freeze="ok",
-                                               stop="confirmed", closing_freeze="ok", delivery="ok"), d("ended_by_itself")),
+    (
+        "stand-in steps reporting success",
+        facts(
+            gates="ok",
+            setup="ok",
+            opening_freeze="ok",
+            stop="confirmed",
+            closing_freeze="ok",
+            delivery="ok",
+        ),
+        d("ended_by_itself"),
+    ),
     # The order of a run, each step failing in turn.
-    ("step 1/3: input check refuses", early(input_check="unknown_field"), d(CNS, "unknown_field", "input_check")),
-    ("step 1/3: no time limit", early(input_check="no_time_limit"), d(CNS, "no_time_limit", "input_check")),
+    (
+        "step 1/3: input check refuses",
+        early(input_check="unknown_field"),
+        d(CNS, "unknown_field", "input_check"),
+    ),
+    (
+        "step 1/3: no time limit",
+        early(input_check="no_time_limit"),
+        d(CNS, "no_time_limit", "input_check"),
+    ),
     ("step 2: request id used", {"id_claim": "used"}, d(CNS, "request_id_used", "id_claim")),
-    ("step 2: records location unusable", {"id_claim": "unusable"}, d(CNS, "records_location_unusable", "id_claim")),
-    ("step 3: executor driver check refuses", early(executor_driver_check="tool_not_installed"),
-     d(CNS, "tool_not_installed", "executor_driver_check")),
-    ("step 3: a missing setting found by the executor driver check", early(executor_driver_check="missing_setting"),
-     d(CNS, "missing_setting", "executor_driver_check")),
+    (
+        "step 2: records location unusable",
+        {"id_claim": "unusable"},
+        d(CNS, "records_location_unusable", "id_claim"),
+    ),
+    (
+        "step 3: executor driver check refuses",
+        early(executor_driver_check="tool_not_installed"),
+        d(CNS, "tool_not_installed", "executor_driver_check"),
+    ),
+    (
+        "step 3: a missing setting found by the executor driver check",
+        early(executor_driver_check="missing_setting"),
+        d(CNS, "missing_setting", "executor_driver_check"),
+    ),
     ("step 4: a gate says no", early(gates="no"), d(CNS, "gate_said_no", "gates")),
     ("step 4: a gate fails", early(gates="failed"), d(CNS, "gate_failed", "gates")),
     ("step 5: setup fails", early(gates="ok", setup="failed"), d(CNS, "setup_failed", "setup")),
-    ("step 6: opening freeze fails", early(gates="ok", setup="ok", opening_freeze="failed"),
-     d(CNS, "freeze_failed", "opening_freeze")),
-    ("step 7: launch fails", early(gates="ok", setup="ok", opening_freeze="ok", launch="failed"),
-     d(CNS, "launch_failed", "launch")),
-    ("step 7: launch raises an error of any kind (it is a failed launch)",
-     early(gates="ok", setup="ok", opening_freeze="ok", launch="failed", exit_code=None), d(CNS, "launch_failed", "launch")),
+    (
+        "step 6: opening freeze fails",
+        early(gates="ok", setup="ok", opening_freeze="failed"),
+        d(CNS, "freeze_failed", "opening_freeze"),
+    ),
+    (
+        "step 7: launch fails",
+        early(gates="ok", setup="ok", opening_freeze="ok", launch="failed"),
+        d(CNS, "launch_failed", "launch"),
+    ),
+    (
+        "step 7: launch raises an error of any kind (it is a failed launch)",
+        early(gates="ok", setup="ok", opening_freeze="ok", launch="failed", exit_code=None),
+        d(CNS, "launch_failed", "launch"),
+    ),
     ("an interrupt before launch", early(launch="stopped_before"), d(CNS, "stopped")),
-    ("step 8: the executor ends with exit code 0", facts(wait="exited", exit_code=0), d("ended_by_itself")),
-    ("step 8: the executor exits non-zero", facts(wait="exited", exit_code=3), d("ended_by_itself")),
-    ("step 8: the executor is killed by a signal", facts(wait="exited", exit_code=None, child_signal="SIGKILL"),
-     d("ended_by_itself")),
+    (
+        "step 8: the executor ends with exit code 0",
+        facts(wait="exited", exit_code=0),
+        d("ended_by_itself"),
+    ),
+    (
+        "step 8: the executor exits non-zero",
+        facts(wait="exited", exit_code=3),
+        d("ended_by_itself"),
+    ),
+    (
+        "step 8: the executor is killed by a signal",
+        facts(wait="exited", exit_code=None, child_signal="SIGKILL"),
+        d("ended_by_itself"),
+    ),
     ("step 8: the time limit is reached", facts(wait="time_limit"), d("time_limit", "time_limit")),
     ("step 8: a stop record", facts(wait="stop_record"), d("stopped_from_outside", "stop_record")),
-    ("step 8: an interrupt, terminate or hangup signal", facts(wait="signal"), d("stopped_from_outside", "signal")),
-    ("step 8: waiting itself fails", facts(wait="error", stop=None, closing_freeze=None, delivery=None),
-     d(EF, "stop_not_confirmed", "stop_not_confirmed")),
-    ("step 9: stop not confirmed", facts(stop="not_confirmed", closing_freeze=None, delivery=None),
-     d(EF, "stop_not_confirmed", "stop_not_confirmed")),
-    ("step 9: stop not confirmed beats a time limit", facts(wait="time_limit", stop="not_confirmed", closing_freeze=None, delivery=None),
-     d(EF, "stop_not_confirmed", "stop_not_confirmed")),
-    ("step 11: closing freeze fails", facts(closing_freeze="failed", delivery=None), d(EF, "closing_freeze_failed", "closing_freeze")),
+    (
+        "step 8: an interrupt, terminate or hangup signal",
+        facts(wait="signal"),
+        d("stopped_from_outside", "signal"),
+    ),
+    (
+        "step 8: waiting itself fails",
+        facts(wait="error", stop=None, closing_freeze=None, delivery=None),
+        d(EF, "stop_not_confirmed", "stop_not_confirmed"),
+    ),
+    (
+        "step 9: stop not confirmed",
+        facts(stop="not_confirmed", closing_freeze=None, delivery=None),
+        d(EF, "stop_not_confirmed", "stop_not_confirmed"),
+    ),
+    (
+        "step 9: stop not confirmed beats a time limit",
+        facts(wait="time_limit", stop="not_confirmed", closing_freeze=None, delivery=None),
+        d(EF, "stop_not_confirmed", "stop_not_confirmed"),
+    ),
+    (
+        "step 11: closing freeze fails",
+        facts(closing_freeze="failed", delivery=None),
+        d(EF, "closing_freeze_failed", "closing_freeze"),
+    ),
     ("step 12: delivery fails", facts(delivery="failed"), d(EF, "delivery_failed", "delivery")),
-    ("step 12: delivery fails after a time limit", facts(wait="time_limit", delivery="failed"),
-     d(EF, "delivery_failed", "delivery")),
+    (
+        "step 12: delivery fails after a time limit",
+        facts(wait="time_limit", delivery="failed"),
+        d(EF, "delivery_failed", "delivery"),
+    ),
 ]
 
 
@@ -96,7 +165,7 @@ class DecideEndingTable(unittest.TestCase):
                 self.assertEqual(core.decide_ending(given), expected)
 
     def test_every_row_is_consistent_with_the_fixed_list(self):
-        for name, given, expected in TABLE:
+        for name, _given, expected in TABLE:
             with self.subTest(name):
                 self.assertEqual(core.check_decision(expected), [])
 
@@ -107,7 +176,12 @@ class DecideEndingTable(unittest.TestCase):
                     self.assertEqual(core.decide_ending(dict(given, exit_code=code)), expected)
 
     def test_a_failure_in_a_later_step_never_changes_an_ending_already_known(self):
-        later = {"observe": "failed", "kept_files": "failed", "teardown": "failed", "record_written": False}
+        later = {
+            "observe": "failed",
+            "kept_files": "failed",
+            "teardown": "failed",
+            "record_written": False,
+        }
         for name, given, expected in TABLE:
             with self.subTest(name):
                 self.assertEqual(core.decide_ending(dict(given, **later)), expected)
@@ -125,13 +199,19 @@ class DecideEndingTable(unittest.TestCase):
 
     def test_facts_that_cannot_decide_are_an_execution_error_not_a_guess(self):
         for given, expected in (
-            (early(gates="ok", setup="ok", opening_freeze="ok"), d(CNS, "execution_error", "launch")),
+            (
+                early(gates="ok", setup="ok", opening_freeze="ok"),
+                d(CNS, "execution_error", "launch"),
+            ),
             (dict(facts(), wait=None), d(EF, "execution_error", fixed.CANNOT_TELL)),
             (dict(facts(), wait="vanished"), d(EF, "execution_error", fixed.CANNOT_TELL)),
             (dict(facts(), launch="maybe"), d(CNS, "execution_error", "launch")),
             (dict(facts(), stop=fixed.CANNOT_TELL), d(EF, "execution_error", fixed.CANNOT_TELL)),
             (dict(facts(), closing_freeze=None), d(EF, "execution_error", fixed.CANNOT_TELL)),
-            (dict(facts(), delivery=fixed.CANNOT_TELL), d(EF, "execution_error", fixed.CANNOT_TELL)),
+            (
+                dict(facts(), delivery=fixed.CANNOT_TELL),
+                d(EF, "execution_error", fixed.CANNOT_TELL),
+            ),
             (dict(facts(), gates=fixed.CANNOT_TELL), d(CNS, "execution_error", "gates")),
             ("not a dict", d(EF, "execution_error", fixed.CANNOT_TELL)),
         ):
@@ -156,10 +236,10 @@ class DecideEndingTable(unittest.TestCase):
         names = list(domain)
         count = 0
         for values in itertools.product(*(domain[n] for n in names)):
-            given = {n: v for n, v in zip(names, values) if v is not missing}
+            given = {n: v for n, v in zip(names, values, strict=True) if v is not missing}
             got = core.decide_ending(given)
             if core.check_decision(got):
-                self.fail("%r gave %r, which the list does not allow" % (given, got))
+                self.fail(f"{given!r} gave {got!r}, which the list does not allow")
             count += 1
         self.assertGreater(count, 100000)
 
@@ -212,8 +292,11 @@ class ReceiptEndingConflicts(unittest.TestCase):
 
     def test_a_receipt_whose_ending_changed_after_a_later_failure_is_rejected(self):
         known = d("ended_by_itself")
-        for changed in (d(EF, "delivery_failed", "delivery"), d("ended_by_itself", "lost"),
-                        d("ended_by_itself", fixed.NONE, "launch")):
+        for changed in (
+            d(EF, "delivery_failed", "delivery"),
+            d("ended_by_itself", "lost"),
+            d("ended_by_itself", fixed.NONE, "launch"),
+        ):
             with self.subTest(changed):
                 self.assertNotEqual(core.ending_conflicts(known, {"the_ending": dict(changed)}), [])
 

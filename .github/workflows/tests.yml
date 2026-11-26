@@ -8,10 +8,15 @@ jobs:
   unit:
     name: tests (unittest)
     runs-on: ubuntu-latest
+    # As of 2026-11-25 the check takes under a minute; a run past 10 minutes is a hang.
+    # The suite inside it has its own 20 second budget (see checks/all.sh).
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run the tests
-        run: timeout 20 python3 -m unittest discover -s tests   # a time budget: the suite takes about 3 s; it took 19 s before waits were put behind a seam
+      - name: Install the development tools
+        run: python3 -m pip install -r requirements-dev.txt
+      - name: Run the check
+        run: ./checks/all.sh

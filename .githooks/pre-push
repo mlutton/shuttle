@@ -1,0 +1,37 @@
+#!/bin/sh
+# Refuses a push unless the check script passes on each commit being pushed.
+# It runs checks/all.sh and nothing else, on a copy of that commit's files in a
+# temporary folder, so uncommitted changes in the working folder neither pass nor
+# fail a push. A deleted branch has nothing to check.
+# Switch it on, once per clone:  git config core.hooksPath .githooks
+root=$(git rev-parse --show-toplevel) || exit 1
+zero=0000000000000000000000000000000000000000
+
+# The tools live in the clone's virtual environment, which the copy does not have.
+if [ -z "${PYTHON:-}" ] && [ -x "$root/.venv/bin/python" ]; then
+    PYTHON="$root/.venv/bin/python"
+    export PYTHON
+fi
+
+scratch=$(mktemp -d) || exit 1
+trap 'rm -rf "$scratch"' EXIT
+
+refuse() {
+    echo "push refused: $1" >&2
+    exit 1
+}
+
+checked=" "
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue
+    case "$checked" in *" $local_sha "*) continue ;; esac
+    checked="$checked$local_sha "
+    folder="$scratch/$local_sha"
+    mkdir "$folder" || exit 1
+    git -C "$root" archive "$local_sha" | tar -x -C "$folder" ||
+        refuse "could not read the commit $local_sha ($local_ref); nothing was pushed"
+    [ -x "$folder/checks/all.sh" ] ||
+        refuse "checks/all.sh is missing or not executable in $local_sha ($local_ref); nothing was pushed"
+    "$folder/checks/all.sh" ||
+        refuse "the check did not pass on $local_sha ($local_ref); fix it, commit, and push again"
+done
