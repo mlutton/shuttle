@@ -137,11 +137,11 @@ class EndingGroup(TypedDict):
     reason_text: Pair
     receipt_id: Pair
     everything_stopped: Pair
-    execution_version: Pair
-    host: Pair
 
 
 class ExecutionGroup(TypedDict):
+    execution_version: Pair
+    host: Pair
     started_at: Pair
     ended_at: Pair
     observed_runtime: Pair
@@ -202,10 +202,10 @@ class ExecutorGroup(TypedDict):
 
 
 class Receipt(TypedDict):
-    the_ending: EndingGroup
-    what_execution_saw: ExecutionGroup
-    what_the_executor_driver_observed: ExecutorDriverGroup
-    what_the_executor_said: ExecutorGroup
+    ending: EndingGroup
+    execution: ExecutionGroup
+    executor_driver: ExecutorDriverGroup
+    executor: ExecutorGroup
 
 
 class ReceiptFacts(TypedDict):

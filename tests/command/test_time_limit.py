@@ -68,12 +68,12 @@ class FullFlowOfATimeLimit(unittest.TestCase):
             self.assertEqual(out.getvalue().splitlines()[-1], "time_limit")
             with open(os.path.join(records, "g-1.outcome.json")) as f:
                 receipt = flat(json.load(f)["receipt"])
-            ending = receipt["the_ending"]
+            ending = receipt["ending"]
             self.assertEqual(
                 (ending["ending"], ending["reason"], ending["failed_step"]),
                 ("time_limit", "time_limit", "none"),
             )
-            self.assertEqual(receipt["what_execution_saw"]["signal"], "SIGTERM")  # it was asked
+            self.assertEqual(receipt["execution"]["signal"], "SIGTERM")  # it was asked
             self.assertGreaterEqual(elapsed, LIMIT)
             with open(pid_file) as f:
                 pid = int(f.read())

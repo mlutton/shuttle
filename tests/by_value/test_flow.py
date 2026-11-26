@@ -133,9 +133,7 @@ class MinimalReceipt(unittest.TestCase):
         receipt = core.minimal_receipt(decision)
         self.assertEqual(core.check_receipt(receipt), [])
         self.assertEqual(core.ending_conflicts(decision, receipt), [])
-        self.assertEqual(
-            receipt["what_execution_saw"]["exit_code"], {"state": "cannot tell", "value": None}
-        )
+        self.assertEqual(receipt["execution"]["exit_code"], {"state": "cannot tell", "value": None})
 
 
 class WhatIsPrinted(unittest.TestCase):

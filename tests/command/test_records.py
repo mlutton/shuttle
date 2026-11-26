@@ -77,7 +77,7 @@ class RecordsFolder(unittest.TestCase):
                 decision = {"ending": ending, "reason": reason, "failed_step": step}
                 receipt, back = self.write_and_read(decision, f"e{i}")
                 self.assertEqual(back["receipt"], receipt)
-                self.assertEqual(flat(back["receipt"])["the_ending"]["ending"], ending)
+                self.assertEqual(flat(back["receipt"])["ending"]["ending"], ending)
                 self.assertEqual(core.check_receipt(back["receipt"]), [])
 
     def test_every_reason_can_be_written_and_read_back_with_its_ending(self):
@@ -95,7 +95,7 @@ class RecordsFolder(unittest.TestCase):
                     _, back = self.write_and_read(
                         decision, "r-{}-{}".format(ending, reason.replace("_", "-"))
                     )
-                    self.assertEqual(flat(back["receipt"])["the_ending"]["reason"], reason)
+                    self.assertEqual(flat(back["receipt"])["ending"]["reason"], reason)
                     self.assertEqual(core.check_receipt(back["receipt"]), [])
 
     def test_every_step_name_can_be_written_and_read_back_with_its_ending(self):
@@ -109,7 +109,7 @@ class RecordsFolder(unittest.TestCase):
                     )
                     decision = {"ending": ending, "reason": reason, "failed_step": step}
                     _, back = self.write_and_read(decision, "s-{}".format(step.replace("_", "-")))
-                    self.assertEqual(flat(back["receipt"])["the_ending"]["failed_step"], step)
+                    self.assertEqual(flat(back["receipt"])["ending"]["failed_step"], step)
                     self.assertEqual(core.check_receipt(back["receipt"]), [])
 
     def test_the_list_holds_what_the_amended_spec_says(self):

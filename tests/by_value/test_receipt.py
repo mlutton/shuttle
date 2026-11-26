@@ -73,9 +73,7 @@ class BuildReceipt(unittest.TestCase):
         )
         receipt = core.build_receipt(REFUSED, facts)
         self.assertEqual(core.check_receipt(receipt), [])
-        self.assertEqual(
-            receipt["the_ending"]["reason_text"], pair("value", "unknown field: surprise")
-        )
+        self.assertEqual(receipt["ending"]["reason_text"], pair("value", "unknown field: surprise"))
 
     def test_the_four_states_are_in_the_one_list(self):
         self.assertEqual(fixed.STATES, ("value", "none", "cannot tell", "not built"))
@@ -103,26 +101,26 @@ class BuildReceipt(unittest.TestCase):
 
     def test_a_value_that_is_the_word_none_is_not_mistaken_for_the_state(self):
         receipt = core.build_receipt(ENDED, ran_facts(host="none"))
-        self.assertEqual(receipt["the_ending"]["host"], pair("value", "none"))
+        self.assertEqual(receipt["execution"]["host"], pair("value", "none"))
         self.assertEqual(core.check_receipt(receipt), [])
 
     def test_fields_known_to_execution_hold_their_values(self):
         receipt = core.build_receipt(ENDED, ran_facts())
-        saw = receipt["what_execution_saw"]
-        self.assertEqual(receipt["the_ending"]["ending"], pair("value", "ended_by_itself"))
-        self.assertEqual(receipt["the_ending"]["receipt_id"], pair("value", "r-1"))
-        self.assertEqual(receipt["the_ending"]["host"], pair("value", "somehost"))
+        saw = receipt["execution"]
+        self.assertEqual(receipt["ending"]["ending"], pair("value", "ended_by_itself"))
+        self.assertEqual(receipt["ending"]["receipt_id"], pair("value", "r-1"))
+        self.assertEqual(receipt["execution"]["host"], pair("value", "somehost"))
         self.assertEqual(saw["exit_code"], pair("value", 3))
         self.assertEqual(saw["input_hash"], pair("value", "abc123"))
         self.assertEqual(saw["duration_executor_seconds"], pair("value", 0.9))
         self.assertEqual(
-            receipt["what_the_executor_driver_observed"]["executor_driver_name"],
+            receipt["executor_driver"]["executor_driver_name"],
             pair("value", "command"),
         )
 
     def test_a_field_whose_source_is_a_stand_in_says_not_built_and_never_cannot_tell(self):
         receipt = core.build_receipt(ENDED, ran_facts())
-        saw = receipt["what_execution_saw"]
+        saw = receipt["execution"]
         for field in (
             "fingerprint_before",
             "fingerprint_after",
@@ -135,13 +133,13 @@ class BuildReceipt(unittest.TestCase):
         ):
             with self.subTest(field):
                 self.assertEqual(saw[field], pair(fixed.NOT_BUILT))
-        self.assertEqual(receipt["the_ending"]["everything_stopped"], pair(fixed.NOT_BUILT))
-        self.assertEqual(receipt["what_the_executor_said"]["claim"], pair(fixed.NOT_BUILT))
+        self.assertEqual(receipt["ending"]["everything_stopped"], pair(fixed.NOT_BUILT))
+        self.assertEqual(receipt["executor"]["claim"], pair(fixed.NOT_BUILT))
 
     def test_not_built_and_cannot_tell_differ_in_one_receipt(self):
         receipt = core.build_receipt(ENDED, ran_facts())
-        self.assertEqual(receipt["what_execution_saw"]["delivered"]["state"], fixed.NOT_BUILT)
-        driver = receipt["what_the_executor_driver_observed"]
+        self.assertEqual(receipt["execution"]["delivered"]["state"], fixed.NOT_BUILT)
+        driver = receipt["executor_driver"]
         self.assertEqual(driver["tool_made_own_commits"]["state"], fixed.CANNOT_TELL)
 
     def test_what_a_run_never_reached_is_none_not_invented(self):
@@ -153,19 +151,19 @@ class BuildReceipt(unittest.TestCase):
             stand_ins={},
         )
         receipt = core.build_receipt(REFUSED, facts)
-        saw = receipt["what_execution_saw"]
+        saw = receipt["execution"]
         self.assertEqual(saw["exit_code"], pair(fixed.NONE))
         self.assertEqual(saw["fingerprint_before"], pair(fixed.NONE))
-        self.assertEqual(receipt["what_the_executor_driver_observed"]["tokens_in"], pair("none"))
+        self.assertEqual(receipt["executor_driver"]["tokens_in"], pair("none"))
 
     def test_a_driver_that_could_not_be_observed_is_cannot_tell_once_launched(self):
         receipt = core.build_receipt(ENDED, ran_facts(executor_driver_observations=None))
-        driver = receipt["what_the_executor_driver_observed"]
+        driver = receipt["executor_driver"]
         self.assertEqual({p["state"] for p in driver.values()}, {fixed.CANNOT_TELL})
 
     def test_the_observed_runtime_is_not_built_once_launched_and_none_before(self):
         ran = core.build_receipt(ENDED, ran_facts())
-        self.assertEqual(ran["what_execution_saw"]["observed_runtime"], pair(fixed.NOT_BUILT))
+        self.assertEqual(ran["execution"]["observed_runtime"], pair(fixed.NOT_BUILT))
         never = core.build_receipt(
             REFUSED,
             ran_facts(
@@ -176,7 +174,7 @@ class BuildReceipt(unittest.TestCase):
                 stand_ins={},
             ),
         )
-        self.assertEqual(never["what_execution_saw"]["observed_runtime"], pair(fixed.NONE))
+        self.assertEqual(never["execution"]["observed_runtime"], pair(fixed.NONE))
 
     def test_the_ending_group_copies_the_decision_unchanged(self):
         receipt = core.build_receipt(REFUSED, ran_facts())
@@ -184,16 +182,14 @@ class BuildReceipt(unittest.TestCase):
 
     def test_a_reason_that_is_none_and_a_failed_step_that_cannot_be_told_are_states(self):
         decision = {"ending": "execution_failed", "reason": "lost", "failed_step": "cannot tell"}
-        ending = core.build_receipt(decision, ran_facts())["the_ending"]
+        ending = core.build_receipt(decision, ran_facts())["ending"]
         self.assertEqual(ending["failed_step"], pair(fixed.CANNOT_TELL))
-        self.assertEqual(
-            core.build_receipt(ENDED, ran_facts())["the_ending"]["reason"], pair("none")
-        )
+        self.assertEqual(core.build_receipt(ENDED, ran_facts())["ending"]["reason"], pair("none"))
 
 
 # Every key that holds a quantity, with the unit in its name.
 QUANTITY_KEYS = {
-    "what_execution_saw": (
+    "execution": (
         "duration_gates_seconds",
         "duration_opening_freeze_seconds",
         "duration_executor_seconds",
@@ -206,6 +202,27 @@ QUANTITY_KEYS = {
 UNITS = ("_seconds", "_bytes")
 # Words in a key that say it holds an amount of time or memory.
 AMOUNT_WORDS = ("duration", "memory", "processor_time")
+
+
+class TheGroups(unittest.TestCase):
+    def test_the_four_group_keys_are_short(self):
+        receipt = core.build_receipt(ENDED, ran_facts())
+        self.assertEqual(
+            sorted(receipt), sorted(["ending", "execution", "executor_driver", "executor"])
+        )
+        self.assertEqual(sorted(fixed.RECEIPT_GROUPS), sorted(receipt))
+
+    def test_executor_driver_is_never_called_just_driver(self):
+        self.assertNotIn("driver", fixed.RECEIPT_GROUPS)
+
+    def test_the_versions_of_execution_and_the_host_are_what_execution_saw(self):
+        receipt = core.build_receipt(ENDED, ran_facts())
+        for field in ("execution_version", "host"):
+            with self.subTest(field):
+                self.assertIn(field, receipt["execution"])
+                self.assertNotIn(field, receipt["ending"])
+        self.assertEqual(receipt["execution"]["execution_version"], pair("value", "9.9.9"))
+        self.assertEqual(receipt["execution"]["host"], pair("value", "somehost"))
 
 
 class UnitsAreInTheKeyNames(unittest.TestCase):
@@ -238,7 +255,7 @@ class UnitsAreInTheKeyNames(unittest.TestCase):
                 self.assertNotIn(old, every)
 
     def test_the_executor_duration_is_a_value_in_seconds(self):
-        saw = core.build_receipt(ENDED, ran_facts())["what_execution_saw"]
+        saw = core.build_receipt(ENDED, ran_facts())["execution"]
         self.assertEqual(saw["duration_executor_seconds"], pair("value", 0.9))
 
 
@@ -264,7 +281,7 @@ class ARightFieldIsRefusedWhenItIsNotAPair(unittest.TestCase):
                 core.build_receipt(ENDED, ran_facts(executor_driver_observations=observed))
 
     def test_a_receipt_cannot_be_built_with_a_field_left_out(self):
-        for name in fixed.RECEIPT_GROUPS["what_the_executor_driver_observed"]:
+        for name in fixed.RECEIPT_GROUPS["executor_driver"]:
             observed = command.observe()
             del observed[name]
             with self.subTest(name), self.assertRaises(core.ReceiptNotBuilt):
@@ -277,31 +294,31 @@ class CheckReceipt(unittest.TestCase):
 
     def test_a_missing_field_is_a_problem(self):
         receipt = self.good()
-        del receipt["what_execution_saw"]["exit_code"]
+        del receipt["execution"]["exit_code"]
         self.assertNotEqual(core.check_receipt(receipt), [])
 
     def test_an_extra_field_is_a_problem(self):
         receipt = self.good()
-        receipt["what_execution_saw"]["invented"] = pair("value", 1)
+        receipt["execution"]["invented"] = pair("value", 1)
         self.assertNotEqual(core.check_receipt(receipt), [])
 
     def test_a_field_that_is_not_a_pair_is_a_problem(self):
         for bad in (None, "", "none", [], {}, 3):
             with self.subTest(bad):
                 receipt = self.good()
-                receipt["what_execution_saw"]["signal"] = bad
+                receipt["execution"]["signal"] = bad
                 self.assertNotEqual(core.check_receipt(receipt), [])
 
     def test_a_value_state_that_holds_nothing_is_a_problem(self):
         for bad in (None, "", [], {}):
             with self.subTest(bad):
                 receipt = self.good()
-                receipt["what_execution_saw"]["signal"] = pair("value", bad)
+                receipt["execution"]["signal"] = pair("value", bad)
                 self.assertNotEqual(core.check_receipt(receipt), [])
 
     def test_an_ending_off_the_list_is_a_problem(self):
         receipt = self.good()
-        receipt["the_ending"]["ending"] = pair("value", "record_failed")
+        receipt["ending"]["ending"] = pair("value", "record_failed")
         self.assertNotEqual(core.check_receipt(receipt), [])
 
 

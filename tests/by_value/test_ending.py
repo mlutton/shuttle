@@ -289,7 +289,7 @@ class PairingsTheListForbids(unittest.TestCase):
 class ReceiptEndingConflicts(unittest.TestCase):
     def test_a_receipt_that_keeps_the_known_ending_is_accepted(self):
         known = d("time_limit", "time_limit")
-        self.assertEqual(core.ending_conflicts(known, {"the_ending": dict(known)}), [])
+        self.assertEqual(core.ending_conflicts(known, {"ending": dict(known)}), [])
 
     def test_a_receipt_whose_ending_changed_after_a_later_failure_is_rejected(self):
         known = d("ended_by_itself")
@@ -299,7 +299,7 @@ class ReceiptEndingConflicts(unittest.TestCase):
             d("ended_by_itself", fixed.NONE, "launch"),
         ):
             with self.subTest(changed):
-                self.assertNotEqual(core.ending_conflicts(known, {"the_ending": dict(changed)}), [])
+                self.assertNotEqual(core.ending_conflicts(known, {"ending": dict(changed)}), [])
 
 
 if __name__ == "__main__":

@@ -138,10 +138,10 @@ class CommandSeam(unittest.TestCase):
             sorted(raw),
             sorted(
                 [
-                    "the_ending",
-                    "what_execution_saw",
-                    "what_the_executor_driver_observed",
-                    "what_the_executor_said",
+                    "ending",
+                    "execution",
+                    "executor_driver",
+                    "executor",
                 ]
             ),
         )
@@ -152,18 +152,16 @@ class CommandSeam(unittest.TestCase):
                 self.assertEqual(sorted(held), ["state", "value"], f"{group}.{name}")
                 self.assertIn(held["state"], fixed.STATES, f"{group}.{name}")
         receipt = flat(raw)
-        ending = receipt["the_ending"]
+        ending = receipt["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("ended_by_itself", "none", "none"),
         )
-        saw = receipt["what_execution_saw"]
+        saw = receipt["execution"]
         self.assertEqual(saw["exit_code"], 0)
         self.assertEqual(saw["signal"], "none")
         self.assertEqual(len(saw["input_hash"]), 64)
-        self.assertEqual(
-            receipt["what_the_executor_driver_observed"]["executor_driver_name"], "command"
-        )
+        self.assertEqual(receipt["executor_driver"]["executor_driver_name"], "command")
         self.assertEqual(saw["observed_runtime"], "not built")
 
     def test_what_is_a_stand_in_says_not_built_and_what_a_plain_command_cannot_say_is_cannot_tell(
@@ -172,18 +170,18 @@ class CommandSeam(unittest.TestCase):
         self.run_command(self.document())
         receipt = self.read("req-1.outcome.json")["receipt"]
         for group, field in [
-            ("what_execution_saw", "fingerprint_before"),
-            ("what_execution_saw", "fingerprint_after"),
-            ("what_execution_saw", "changed_nothing"),
-            ("what_execution_saw", "delivered"),
-            ("what_execution_saw", "teardown_failure"),
-            ("what_execution_saw", "peak_memory_bytes"),
-            ("the_ending", "everything_stopped"),
-            ("what_the_executor_said", "claim"),
+            ("execution", "fingerprint_before"),
+            ("execution", "fingerprint_after"),
+            ("execution", "changed_nothing"),
+            ("execution", "delivered"),
+            ("execution", "teardown_failure"),
+            ("execution", "peak_memory_bytes"),
+            ("ending", "everything_stopped"),
+            ("executor", "claim"),
         ]:
             self.assertEqual(receipt[group][field], {"state": "not built", "value": None}, field)
         # Both states in one receipt: the command driver cannot look at its tool's own commits.
-        driver = receipt["what_the_executor_driver_observed"]
+        driver = receipt["executor_driver"]
         self.assertEqual(driver["tool_made_own_commits"], {"state": "cannot tell", "value": None})
         states = {held["state"] for group in receipt.values() for held in group.values()}
         self.assertIn("not built", states)
@@ -194,8 +192,8 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "ended_by_itself")
         receipt = flat(self.read("req-1.outcome.json")["receipt"])
-        self.assertEqual(receipt["what_execution_saw"]["exit_code"], 7)
-        self.assertEqual(receipt["the_ending"]["ending"], "ended_by_itself")
+        self.assertEqual(receipt["execution"]["exit_code"], 7)
+        self.assertEqual(receipt["ending"]["ending"], "ended_by_itself")
 
     def test_a_second_run_with_the_same_request_id_is_refused_and_leaves_the_first_records_untouched(
         self,
@@ -218,7 +216,7 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(
             lines, ["req-1", os.path.join(self.records, "req-1.outcome.json"), "could_not_start"]
         )
-        ending = flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("could_not_start", "unknown_field", "input_check"),
@@ -315,7 +313,7 @@ class CommandSeam(unittest.TestCase):
         request = self.read("req-1.request.json")
         self.assertEqual(request["input"]["surprise"], json.loads(self.deep_nesting()))
         self.assertEqual(
-            flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]["reason"],
+            flat(self.read("req-1.outcome.json")["receipt"])["ending"]["reason"],
             "unknown_field",
         )
         self.assertEqual(
@@ -352,7 +350,7 @@ class CommandSeam(unittest.TestCase):
         )
         self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
         self.assertEqual(
-            flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]["ending"],
+            flat(self.read("req-1.outcome.json")["receipt"])["ending"]["ending"],
             "ended_by_itself",
         )
 
@@ -362,7 +360,7 @@ class CommandSeam(unittest.TestCase):
         done, lines = self.run_command(doc)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
-        ending = flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["reason"], ending["failed_step"]),
             ("tool_not_installed", "executor_driver_check"),
@@ -425,7 +423,7 @@ class CommandSeam(unittest.TestCase):
         stdout, stderr = proc.communicate(timeout=30)
         self.assertEqual(proc.returncode, 0, stderr)
         self.assertEqual(stdout.splitlines()[-1], "stopped_from_outside")
-        ending = flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("stopped_from_outside", "signal", "none"),
@@ -438,7 +436,7 @@ class CommandSeam(unittest.TestCase):
         done, lines = self.run_command(doc)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
-        ending = flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["reason"], ending["failed_step"]), ("no_time_limit", "input_check")
         )
@@ -452,7 +450,7 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stderr, "")
         self.assertEqual(lines[-1], "could_not_start")
-        ending = flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("could_not_start", "launch_failed", "launch"),
@@ -465,7 +463,7 @@ class CommandSeam(unittest.TestCase):
                     os.remove(os.path.join(self.records, name))
                 done, lines = self.run_command(self.document(format_version=bad))
                 self.assertEqual(lines[-1], "could_not_start")
-                ending = flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]
+                ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
                 self.assertEqual(
                     (ending["reason"], ending["failed_step"]),
                     ("unknown_format_version", "input_check"),
@@ -529,7 +527,7 @@ class CommandSeam(unittest.TestCase):
         done, lines = self.run_command(self.document(environment=["SHUTTLE_TEST_ABSENT"]), env=env)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
-        ending = flat(self.read("req-1.outcome.json")["receipt"])["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["reason"], ending["failed_step"]), ("missing_setting", "executor_driver_check")
         )
@@ -577,7 +575,7 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(lines[0], "req-1")
         self.assertEqual(lines[-1], "ended_by_itself")
         printed = flat(json.loads("\n".join(lines[1:-1])))
-        self.assertEqual(printed["the_ending"]["ending"], "ended_by_itself")
+        self.assertEqual(printed["ending"]["ending"], "ended_by_itself")
         self.assertIn("not written", done.stderr)
         self.assertEqual(os.listdir(self.records), ["req-1.request.json"])
 

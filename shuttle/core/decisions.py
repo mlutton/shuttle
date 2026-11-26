@@ -180,7 +180,7 @@ def check_decision(decision: Mapping[str, object]) -> list[str]:
 
 def ending_conflicts(known: Mapping[str, object], receipt: Mapping[str, object]) -> list[str]:
     """Problems when a receipt's ending differs from the ending already known."""
-    shown = receipt.get("the_ending", {})
+    shown = receipt.get("ending", {})
     if not isinstance(shown, Mapping):
         shown = {}
     return [
@@ -694,6 +694,8 @@ def _executor_group_all(value: Pair) -> ExecutorGroup:
 
 def _execution_group_of(value: Pair) -> ExecutionGroup:
     return {
+        "execution_version": value,
+        "host": value,
         "started_at": value,
         "ended_at": value,
         "observed_runtime": value,
@@ -777,10 +779,10 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "reason_text": pairs.of_text(reason),
         "receipt_id": pairs.value(facts["receipt_id"]),
         "everything_stopped": _from_step(steps.get("stop_confirmation"), "everything_stopped"),
-        "execution_version": pairs.value(facts["execution_version"]),
-        "host": pairs.value(facts["host"]),
     }
     saw: ExecutionGroup = {
+        "execution_version": pairs.value(facts["execution_version"]),
+        "host": pairs.value(facts["host"]),
         "started_at": pairs.of_known(facts["started_at"]),
         "ended_at": pairs.of_known(facts["ended_at"]),
         # The runtime is observed through the boundary, which is a stand-in.
@@ -825,10 +827,10 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         else _driver_group_of(pairs.cannot_tell() if launched else unlooked)
     )
     return {
-        "the_ending": ending,
-        "what_execution_saw": saw,
-        "what_the_executor_driver_observed": driver,
-        "what_the_executor_said": _executor_group_of(steps, launched),
+        "ending": ending,
+        "execution": saw,
+        "executor_driver": driver,
+        "executor": _executor_group_of(steps, launched),
     }
 
 
@@ -847,14 +849,12 @@ def minimal_receipt(decision: Mapping[str, object]) -> Receipt:
         "reason_text": unknown,
         "receipt_id": unknown,
         "everything_stopped": unknown,
-        "execution_version": unknown,
-        "host": unknown,
     }
     return {
-        "the_ending": ending,
-        "what_execution_saw": _execution_group_of(unknown),
-        "what_the_executor_driver_observed": _driver_group_of(unknown),
-        "what_the_executor_said": _executor_group_all(unknown),
+        "ending": ending,
+        "execution": _execution_group_of(unknown),
+        "executor_driver": _driver_group_of(unknown),
+        "executor": _executor_group_all(unknown),
     }
 
 
@@ -876,7 +876,7 @@ def check_receipt(receipt: Mapping[str, object]) -> list[str]:
             problem = pairs.problem_with(held[name]) if name in held else None
             if problem:
                 problems.append(f"{group}: field {name}: {problem}")
-    ending = receipt["the_ending"]
+    ending = receipt["ending"]
     if isinstance(ending, Mapping) and all(
         k in ending for k in ("ending", "reason", "failed_step")
     ):

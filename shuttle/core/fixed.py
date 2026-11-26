@@ -126,17 +126,17 @@ del _reason
 
 # The receipt: four groups, by who knows the fact.
 RECEIPT_GROUPS = {
-    "the_ending": (
+    "ending": (
         "ending",
         "reason",
         "failed_step",
         "reason_text",
         "receipt_id",
         "everything_stopped",
+    ),
+    "execution": (
         "execution_version",
         "host",
-    ),
-    "what_execution_saw": (
         "started_at",
         "ended_at",
         "observed_runtime",
@@ -166,7 +166,7 @@ RECEIPT_GROUPS = {
         "stop_reason",
         "stop_asker",
     ),
-    "what_the_executor_driver_observed": (
+    "executor_driver": (
         "executor_driver_name",
         "executor_driver_version",
         "tool_version",
@@ -187,7 +187,7 @@ RECEIPT_GROUPS = {
         "changed_self_loaded_file",
         "waiting_question",
     ),
-    "what_the_executor_said": (
+    "executor": (
         "statement_state",
         "statement_hash",
         "statement_location",

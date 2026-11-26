@@ -196,7 +196,7 @@ class EveryOperationFailingInTurn(unittest.TestCase):
 
 class Injection(unittest.TestCase):
     def ending_of(self, world):
-        ending = flat(scenes.outcome(world)["receipt"])["the_ending"]
+        ending = flat(scenes.outcome(world)["receipt"])["ending"]
         return ending["ending"], ending["reason"], ending["failed_step"]
 
     def assert_outcome(self, world, expected):
@@ -255,8 +255,8 @@ class Injection(unittest.TestCase):
         code, lines, err = scenes.run_in(world)
         self.assertEqual(code, 0, err)
         receipt = flat(scenes.outcome(world)["receipt"])
-        self.assertEqual(receipt["the_ending"]["ending"], "ended_by_itself")
-        self.assertEqual(receipt["what_execution_saw"]["exit_code"], "cannot tell")
+        self.assertEqual(receipt["ending"]["ending"], "ended_by_itself")
+        self.assertEqual(receipt["execution"]["exit_code"], "cannot tell")
         self.assertEqual(lines[-1], "ended_by_itself")
 
     def test_writing_the_record_failing_prints_the_receipt_then_the_ending_and_exits_non_zero(self):
@@ -269,7 +269,7 @@ class Injection(unittest.TestCase):
         self.assertEqual(lines[0], "inj-1")
         self.assertEqual(lines[-1], "ended_by_itself")
         self.assertEqual(
-            flat(json.loads("\n".join(lines[1:-1])))["the_ending"]["ending"],
+            flat(json.loads("\n".join(lines[1:-1])))["ending"]["ending"],
             "ended_by_itself",
         )
         self.assertIn("not written", err)
