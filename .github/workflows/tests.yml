@@ -24,8 +24,6 @@ jobs:
         run: python3 -m pip install -r requirements-dev.txt
       - name: Install bubblewrap
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
-      - name: Scope reason (temporary evidence)
-        run: ./checks/scope-reason.sh
       - name: Run the check
         run: ./checks/all.sh
       - name: Report tests, time, memory and coverage
