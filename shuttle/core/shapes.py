@@ -60,8 +60,9 @@ class RecordHeader(TypedDict):
 
 
 # Functional form: the key is called "input", a name the core may not mention in code.
+# The input is the exact text the caller gave, so its hash can be checked from the record alone.
 RequestRecord = TypedDict(  # noqa: UP013 (the class form would name a field `input`)
-    "RequestRecord", {"header": RecordHeader, "input": Document}
+    "RequestRecord", {"header": RecordHeader, "input": str}
 )
 
 
@@ -245,6 +246,7 @@ class RunState(TypedDict, total=False):
     problem: str
     signal: str | None
     raw: Document
+    input_text: str
     input_hash: str
     started_at: str
     ended_at: str

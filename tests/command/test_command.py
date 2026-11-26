@@ -111,7 +111,7 @@ class CommandSeam(unittest.TestCase):
         request = self.read("req-1.request.json")
         self.assertEqual(request["header"]["record_type"], "request")
         self.assertEqual(request["header"]["request_id"], "req-1")
-        self.assertEqual(request["input"], self.document())
+        self.assertEqual(json.loads(request["input"]), self.document())
         self.assertEqual(request["header"]["thread"], "thread-1")
         self.assertEqual(request["header"]["round"], 1)
         self.assertEqual(request["header"]["kind"], "plain")
@@ -311,7 +311,7 @@ class CommandSeam(unittest.TestCase):
             lines[-1], "could_not_start"
         )  # the unknown field "surprise" is refused, and recorded
         request = self.read("req-1.request.json")
-        self.assertEqual(request["input"]["surprise"], json.loads(self.deep_nesting()))
+        self.assertEqual(json.loads(request["input"])["surprise"], json.loads(self.deep_nesting()))
         self.assertEqual(
             flat(self.read("req-1.outcome.json")["receipt"])["ending"]["reason"],
             "unknown_field",

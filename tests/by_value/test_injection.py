@@ -302,15 +302,16 @@ class Injection(unittest.TestCase):
     def test_a_document_that_cannot_be_built_into_a_request_record_spends_no_id_and_writes_nothing(
         self,
     ):
-        # By value: JSON read from a file can be built into text on this Python, so the step
-        # that claims the id is given a document with a loop in it (the real command's test of
-        # this, test_command.py, skips where the Python can write the nesting it uses).
+        # By value: the input is kept as the text the caller gave, which can always be built into
+        # a record, so the step that claims the id is given something that cannot be (a loop)
+        # in the text's place (the real command's test of this, test_command.py, skips where the
+        # Python can write the nesting it uses).
         real = dict(run.STEPS)["claim_request_id"]
 
         def with_a_loop(state):
             loop = []
             loop.append(loop)
-            state["raw"] = dict(state["raw"], loop=loop)
+            state["input_text"] = loop
             real(state)
 
         world = scenes.scene()

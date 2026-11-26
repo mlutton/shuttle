@@ -110,7 +110,8 @@ def step_read_and_validate_document(state: RunState) -> None:
     facts = state["facts"]
     try:
         data = state["world"].files.read(state["document_path"])
-        raw = json.loads(data.decode("utf-8"))
+        text = data.decode("utf-8")
+        raw = json.loads(text)
     except (OSError, ValueError) as error:
         facts["unreadable"] = True
         state["problem"] = (
@@ -118,6 +119,7 @@ def step_read_and_validate_document(state: RunState) -> None:
         )
         return
     state["raw"] = raw
+    state["input_text"] = text
     state["input_hash"] = hashlib.sha256(data).hexdigest()
     checked = decisions.validate_document(raw)
     if checked["header_source"] is None:
@@ -152,7 +154,7 @@ def step_claim_request_id(state: RunState) -> None:
             state["world"],
             source["records_location"],
             source["request_id"],
-            {"header": header, "input": state["raw"]},
+            {"header": header, "input": state["input_text"]},
         )
     except records.RecordNotBuilt as error:
         facts["id_claim"] = "unusable"  # nothing is claimed; no record is written either way
