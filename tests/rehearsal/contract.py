@@ -33,13 +33,16 @@ TEXT = "line one\nline two \u00e9 \u2713\n"
 
 
 def until(world, done, seconds=5.0):
-    """Wait on the world's own clock until done() is true; False if the time ran out."""
+    """Wait on the world's own clock until done() is true; False if the time ran out. Bounded
+    by the number of waits too, so a clock that never moves ends the wait instead of hanging it."""
     end = world.clock.now() + seconds
-    while not done():
+    for _ in range(int(seconds / 0.01) + 1):
+        if done():
+            return True
         if world.clock.now() >= end:
             return False
         world.clock.wait(0.01)
-    return True
+    return done()
 
 
 class ContractCases:
