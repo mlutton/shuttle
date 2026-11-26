@@ -6,13 +6,19 @@
 #   lint    ruff check .
 #   format  ruff format --check .
 #   types   mypy (strict, over shuttle/ and checks/; see pyproject.toml)
-#   tests   python -m unittest discover -s tests, under a 20 second budget
+#   tests   python -m unittest discover -s tests/by_value, under a 20 second budget: the tests
+#           that start no real process
+#   real    python -m unittest discover, over tests/command and then tests/boundary: the tests
+#           that start real processes, with no time budget of their own (no test sleeps or reads
+#           the clock, and each runs under the resource limits of tests/rehearsal/real_run.py)
+# Every folder under tests/ that holds tests is in exactly one of the two (a test pins it);
+# tests/rehearsal and tests/hostile hold helpers and tables, not tests.
 # Prints one line per stage ("<stage>: passed" or "<stage>: failed"; a failed stage's
 # own output goes to standard error), then a last line on standard output:
 #   check: passed
 #   check: failed: <stage>
 # The format stage adds how to fix it: "check: failed: format; fix it with: ./checks/all.sh --fix"
-# A tests stage ended by its time budget says so: "check: failed: tests (timed out after 20 seconds)".
+# The tests stage ended by its time budget says so: "check: failed: tests (timed out after 20 seconds)".
 #   check: could not run: <tool> is not installed (ruff, mypy or, for the tests, coverage); install the tools with: <command>
 #
 # ./checks/all.sh --fix applies what ruff can change mechanically and says what changed:
@@ -115,6 +121,14 @@ stage() {
 stage lint "$PYTHON" -m ruff check .
 stage format "$PYTHON" -m ruff format --check .
 stage types "$PYTHON" -m mypy
-# As of 2026-11-25 the suite takes about 4 seconds; a run past 20 is a wait that crept back in.
-stage tests timeout 20 "$PYTHON" -m unittest discover -s tests
+# The tests that start real processes: one stage, one folder after the other.
+real_tests() {
+    "$PYTHON" -m unittest discover -s tests/command -t tests &&
+        "$PYTHON" -m unittest discover -s tests/boundary -t tests
+}
+
+# As of 2026-11-26 the by-value tests take about 3 seconds; a run past 20 is a wait that crept
+# back in. The real-process tests have no budget here: their cost grows with every real command.
+stage tests timeout 20 "$PYTHON" -m unittest discover -s tests/by_value -t tests
+stage real real_tests
 echo "check: passed"
