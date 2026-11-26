@@ -37,7 +37,7 @@ class StepsRun(unittest.TestCase):
 
     def test_a_good_run_runs_every_step_once_the_document_is_read(self):
         self.assertEqual(runs({}), ORDER[:1] + ["write_outcome_record"])
-        self.assertEqual(runs({"header_source": {}}), ORDER[1:])
+        self.assertEqual(runs(LAUNCHED), ORDER[1:])
 
     def test_an_unreadable_document_runs_only_the_last_step(self):
         self.assertEqual(runs({"unreadable": "x"}), ["write_outcome_record"])
@@ -69,8 +69,24 @@ class StepsRun(unittest.TestCase):
         self.assertIn("write_outcome_record", got)
         self.assertIn("tear_down", got)
 
+    def test_the_closing_freeze_and_delivery_run_only_when_the_stop_is_confirmed(self):
+        # A fingerprint taken before everything has stopped would be rejected by construction:
+        # the step that takes it does not run unless the stop is confirmed.
+        for stop in (None, "not_confirmed", "unknown"):
+            with self.subTest(stop=stop):
+                facts = dict(LAUNCHED)
+                if stop is None:
+                    del facts["stop"]
+                else:
+                    facts["stop"] = stop
+                got = runs(facts)
+                self.assertNotIn("take_closing_freeze", got)
+                self.assertNotIn("deliver", got)
+        self.assertIn("take_closing_freeze", runs(LAUNCHED))
+        self.assertIn("deliver", runs(LAUNCHED))
+
     def test_a_failed_wait_counts_as_a_stop_not_confirmed(self):
-        got = runs({"header_source": {}, "launch": "ok", "wait": "error"})
+        got = runs(dict(LAUNCHED, wait="error"))
         self.assertNotIn("take_closing_freeze", got)
 
     def test_a_failed_closing_freeze_delivers_nothing(self):
@@ -110,21 +126,6 @@ class ErrorsAndInterrupts(unittest.TestCase):
 
     def test_no_signal_adds_no_fact(self):
         self.assertEqual(core.facts_after_signal({"header_source": {}}, None), {})
-
-
-class WaitCause(unittest.TestCase):
-    def test_rows(self):
-        rows = [
-            ((False, False, None), None),
-            ((True, False, None), "exited"),
-            ((True, True, "SIGINT"), "exited"),
-            ((False, True, None), "time_limit"),
-            ((False, False, "SIGTERM"), "signal"),
-            ((False, True, "SIGHUP"), "signal"),
-        ]
-        for given, expected in rows:
-            with self.subTest(given):
-                self.assertEqual(core.wait_cause(*given), expected)
 
 
 class MinimalReceipt(unittest.TestCase):

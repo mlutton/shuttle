@@ -8,8 +8,8 @@ the simulated half is tests/by_value/test_world_contract.py. Both must pass ever
 case the simulated world cannot honestly model is a finding to report, not a case to drop.
 Where a case is not here for that reason, UNMODELLED says so.
 
-Each case's name says the invariant. The waits are on the operations' own clock, bounded, and
-end as soon as what is waited for has happened.
+Each case's name says the invariant. The waits are the processes' own, bounded by a count of
+tries, and end as soon as what is waited for has happened; no test reads a clock or sleeps.
 """
 
 import importlib
@@ -33,17 +33,13 @@ HANDLED_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2
 TEXT = "line one\nline two \u00e9 \u2713\n"
 
 
-def until(world, done, seconds=5.0):
-    """Wait on the world's own clock until done() is true; False if the time ran out. Bounded
-    by the number of waits too, so a clock that never moves ends the wait instead of hanging it."""
-    end = world.clock.now() + seconds
-    for _ in range(int(seconds / 0.01) + 1):
-        if done():
-            return True
-        if world.clock.now() >= end:
-            return False
-        world.clock.wait(0.01)
-    return done()
+TRIES = 200
+TRY_SECONDS = 0.05
+
+
+def ended(world, process):
+    """Wait on the process until it has ended; False if it had not after TRIES tries."""
+    return any(world.processes.wait(process, TRY_SECONDS) is not None for _ in range(TRIES))
 
 
 class ContractCases:
@@ -179,15 +175,11 @@ class ContractCases:
     def start(self, kind, **extra):
         argv = self.harness.argv(kind, **extra)
         process = self.world.processes.start(argv, self.harness.environment())
-        self.addCleanup(self.stop, process)
+        self.addCleanup(self.harness.end, process)
         return process
 
-    def stop(self, process):
-        self.world.processes.kill(process)
-        until(self.world, lambda: self.world.processes.poll(process) is not None)
-
     def ended(self, process):
-        return until(self.world, lambda: self.world.processes.poll(process) is not None)
+        return ended(self.world, process)
 
     def test_a_program_that_can_be_found_is_found_and_one_that_cannot_is_not(self):
         self.assertTrue(self.world.processes.find_program(self.harness.argv("exits_at_once")[0]))
@@ -219,31 +211,19 @@ class ContractCases:
             ValueError, self.world.processes.start, argv, self.harness.environment()
         )
 
-    def test_a_running_program_polls_none_and_ends_with_the_ask_by_the_terminate_signal(self):
+    def test_a_running_program_polls_none_and_waiting_for_it_gives_none_until_it_is_ended(self):
         process = self.start("sleeps")
         self.assertIsNone(self.world.processes.poll(process))
-        self.world.processes.ask_to_end(process)
-        self.assertTrue(self.ended(process))
-        self.assertEqual(self.world.processes.poll(process), -15)
-
-    def test_a_program_that_ignores_the_ask_is_still_there_until_it_is_killed(self):
-        ready = self.fresh("ready")
-        process = self.start("ignores_the_ask", ready=ready)
-        self.assertTrue(until(self.world, lambda: self.world.files.exists(ready)))
-        self.world.processes.ask_to_end(process)
-        self.assertFalse(
-            until(self.world, lambda: self.world.processes.poll(process) is not None, 0.1)
-        )
-        self.world.processes.kill(process)
+        self.assertIsNone(self.world.processes.wait(process, 0.01))
+        self.harness.end(process)
         self.assertTrue(self.ended(process))
         self.assertEqual(self.world.processes.poll(process), -9)
 
-    def test_asking_or_killing_a_program_that_has_ended_changes_nothing(self):
+    def test_waiting_for_a_program_that_has_ended_gives_its_status_every_time(self):
         process = self.start("exits_with_three")
         self.assertTrue(self.ended(process))
-        self.world.processes.ask_to_end(process)
-        self.world.processes.kill(process)
-        self.assertEqual(self.world.processes.poll(process), 3)
+        self.assertEqual(self.world.processes.wait(process, 0), 3)
+        self.assertEqual(self.world.processes.wait(process, 0.01), 3)
 
     def test_a_started_child_has_all_three_standard_streams_at_the_null_device(self):
         process = self.start("reports_streams", report=self.fresh("report"))
@@ -257,23 +237,9 @@ class ContractCases:
 
     # ------------------------------------------------------------------ clock
 
-    def test_the_clock_only_goes_forward_and_waiting_moves_it_by_at_least_the_wait(self):
-        before = self.world.clock.now()
-        self.world.clock.wait(0.02)
-        after = self.world.clock.now()
-        self.assertGreaterEqual(after - before, 0.02 - 0.001)
-        self.assertGreaterEqual(self.world.clock.now(), after)
-
-    def test_waiting_takes_at_least_the_time_asked(self):
-        # No upper bound: a paused or descheduled process takes as long as it likes. That a wait
-        # is not longer than asked is pinned on the simulated clock, which is exact
-        # (tests/by_value/test_world_contract.py); the real wait is one call of time.sleep.
-        before = self.world.clock.now()
-        self.world.clock.wait(0.1)
-        self.assertGreaterEqual(self.world.clock.now() - before, 0.1 - 0.001)
-
-    def test_waiting_a_negative_time_raises_value_error(self):
-        self.assertRaisesExactly(ValueError, self.world.clock.wait, -1)
+    def test_the_steady_clock_does_not_go_back(self):
+        first = self.world.clock.now()
+        self.assertGreaterEqual(self.world.clock.now(), first)
 
     def test_a_timestamp_is_utc_iso_with_milliseconds(self):
         self.assertRegex(
@@ -282,7 +248,6 @@ class ContractCases:
 
     def test_a_later_timestamp_is_not_before_an_earlier_one(self):
         first = self.world.clock.timestamp()
-        self.world.clock.wait(0.01)
         self.assertGreaterEqual(self.world.clock.timestamp(), first)
 
     # ---------------------------------------------------------------- signals

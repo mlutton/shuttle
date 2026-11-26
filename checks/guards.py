@@ -25,6 +25,8 @@ from names import escape_name, fenced
 GUARD_FOLDERS = ("checks/", ".githooks/", ".github/", ".claude/agents/", "tests/hostile/")
 GUARD_FILES = (
     "pyproject.toml",
+    "tests/ruff.toml",
+    "tests/command/test_lint_bans.py",
     "requirements-dev.txt",
     "tests/by_value/test_rules.py",
     "AGENTS.md",

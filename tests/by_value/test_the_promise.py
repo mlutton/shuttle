@@ -145,7 +145,7 @@ class TheOtherSignalsTheCommandCanCatch(unittest.TestCase):
     def test_each_ends_the_run_as_stopped_from_outside_and_ends_the_child(self):
         for name in ("SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGALRM"):
             with self.subTest(name):
-                world = scenes.scene(exits_after=None)
+                world = scenes.scene(hangs=True)
                 caught = []
                 self.assertIn(name, [s.name for s in signals.HANDLED])  # the real command's own set
                 world.on_call(

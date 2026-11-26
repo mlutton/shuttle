@@ -1,181 +1,222 @@
-"""By value: the waiting logic, on the simulated world. No real time passes, no real process runs.
+"""By value, with no clock: why the wait ended and why the boundary ended, and what each gives.
 
-Covers which cause ends the wait, what is ended and in what order (ask, wait the grace, kill),
-what facts each outcome gives, and that a later signal changes nothing. The one real wait is in
-tests/command/test_time_limit.py; signals sent to the real command are in test_command.py.
+The boundary owns the time limit, so nothing here keeps time. Covered: which of an exit or a
+signal ends the wait (a stop record joins them when the stop form is built), the map from why the
+boundary ended to a cause and then to an ending (including "cannot tell"), the limit the boundary's
+timer can take, and the facts the wait and stop steps leave on the simulated world. The one real
+wait is tests/boundary/test_end_to_end.py.
 """
 
 import importlib
-import inspect
 import os
 import sys
 import unittest
 
-from shuttle.core import decisions as core
-from shuttle.shell import run
+from shuttle.core import boundary, decisions
+from shuttle.shell import run, stop_and_confirm_empty, wait_for_the_end
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 simulated = importlib.import_module("rehearsal.simulated_world")
 
-POLL = run._POLL_SECONDS
-GRACE = run.END_GRACE_SECONDS
-
-
-def a_child(world, exits_at=None, obeys=("ask_to_end", "kill")):
-    """A running child on the world: it exits by itself `exits_at` seconds after it starts."""
-    world.program("tool", exits_after=exits_at, obeys=obeys)
-    return world.operations.processes.start(["tool"], {})
-
-
-def signal_from(world, at):
-    return lambda: "SIGINT" if at is not None and world.t >= at else None
-
-
-def requests(world):
-    """The asks and kills the world was given, in order, as (name, time on its clock)."""
-    return [
-        (op.split(".")[1], t)
-        for op, _, t in world.log
-        if op in ("processes.ask_to_end", "processes.kill")
-    ]
+TIMED_OUT = {"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout"}
+GONE = {"LoadState": "not-found", "ActiveState": "inactive", "Result": "success"}
+STILL_THERE = {"LoadState": "loaded", "ActiveState": "active", "Result": "success"}
 
 
 class WhichCauseEndsTheWait(unittest.TestCase):
-    def test_the_first_cause_seen_ends_the_wait(self):
-        # (exits_at, signal_at, limit, expected cause)
-        for exits_at, signal_at, limit, expected in (
-            (1, None, 10, "exited"),
-            (None, 1, 10, "signal"),
-            (None, None, 2, "time_limit"),
-            (1, 5, 10, "exited"),
-            (5, 1, 10, "signal"),
-            (None, 5, 2, "time_limit"),
-            (None, 2, 5, "signal"),
+    def test_rows(self):
+        for exited, signal_name, expected in (
+            (True, None, "exited"),
+            (False, "SIGINT", "signal"),
+            (True, "SIGINT", "exited"),
+            (False, None, None),
         ):
-            with self.subTest(exits_at=exits_at, signal_at=signal_at, limit=limit):
-                world = simulated.SimulatedWorld()
-                process = a_child(world, exits_at)
-                cause = run.wait_for_the_cause(
-                    world.operations, process, limit, signal_from(world, signal_at)
-                )
-                self.assertEqual(cause, expected)
-                self.assertLessEqual(world.t, limit + POLL)
-                self.assertEqual(requests(world), [])  # the wait only watches; ending is separate
+            with self.subTest(exited=exited, signal=signal_name):
+                self.assertEqual(boundary.wait_cause(exited, signal_name), expected)
 
 
-class WhatIsEndedAndInWhatOrder(unittest.TestCase):
-    def end(self, **child):
-        world = simulated.SimulatedWorld()
-        process = a_child(world, **child)
-        return world, run.end_child(world.operations, process)
+class WhyTheBoundaryEnded(unittest.TestCase):
+    def test_rows(self):
+        for properties, expected in (
+            (TIMED_OUT, "timed_out"),
+            (GONE, "ended"),
+            ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "success"}, "ended"),
+            ({"LoadState": "loaded", "ActiveState": "failed", "Result": "oom-kill"}, "ended"),
+            ({"LoadState": "loaded", "ActiveState": "failed", "Result": "signal"}, "ended"),
+            (STILL_THERE, "cannot_tell"),  # not ended
+            (
+                {"LoadState": "loaded", "ActiveState": "deactivating", "Result": "timeout"},
+                "cannot_tell",
+            ),
+            (
+                {"LoadState": "loaded", "ActiveState": "failed", "Result": "resources"},
+                "cannot_tell",
+            ),
+            ({"ActiveState": "inactive"}, "cannot_tell"),  # no Result
+            ({}, "cannot_tell"),
+            (None, "cannot_tell"),  # could not be read
+        ):
+            with self.subTest(properties=properties):
+                self.assertEqual(boundary.why_ended(properties), expected)
 
-    def test_a_child_that_obeys_the_ask_is_asked_once_and_not_killed(self):
-        world, result = self.end(obeys=("ask_to_end",))
-        self.assertEqual(result, "ended")
-        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end"])
-
-    def test_a_child_that_ignores_the_ask_is_killed_after_the_whole_grace(self):
-        world, result = self.end(obeys=("kill",))
-        self.assertEqual(result, "ended")
-        (first, asked), (name, killed) = requests(world)
-        self.assertEqual(first, "ask_to_end")
-        self.assertEqual(name, "kill")
-        self.assertGreaterEqual(killed - asked, GRACE)
-        self.assertLessEqual(killed - asked, GRACE + POLL)
-
-    def test_a_child_that_survives_the_kill_is_not_confirmed_after_a_second_grace(self):
-        world, result = self.end(obeys=())
-        self.assertEqual(result, "not_confirmed")
-        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end", "kill"])
-        self.assertGreaterEqual(world.t, 2 * GRACE)
-
-    def test_a_child_that_has_already_exited_is_not_asked_anything(self):
-        world, result = self.end(exits_at=0)
-        self.assertEqual(result, "ended")
-        self.assertEqual(requests(world), [])
-
-    def test_a_request_that_cannot_be_sent_is_not_an_error_and_the_child_is_still_ended(self):
-        world = simulated.SimulatedWorld()
-        process = a_child(world, obeys=("kill",))
-        world.will_raise("processes.ask_to_end", ProcessLookupError("gone"))
-        self.assertEqual(run.end_child(world.operations, process), "ended")
-
-    def test_the_grace_is_a_fixed_policy_and_the_run_takes_no_seam_for_it(self):
-        self.assertEqual(run.END_GRACE_SECONDS, 3)
-        self.assertEqual(
-            list(inspect.signature(run.run).parameters), ["document_path", "out", "err", "world"]
-        )
-        self.assertEqual(list(inspect.signature(run.end_child).parameters), ["world", "process"])
-        self.assertNotIn("clock", inspect.signature(run.wait_for_the_cause).parameters)
+    def test_only_a_settled_scope_is_empty(self):
+        for properties, expected in (
+            (TIMED_OUT, True),
+            (GONE, True),
+            (STILL_THERE, False),
+            ({"ActiveState": "deactivating"}, False),
+            ({}, False),
+            (None, False),
+        ):
+            with self.subTest(properties=properties):
+                self.assertEqual(boundary.is_empty(properties), expected)
 
 
-class TheWaitStepGivesTheseFacts(unittest.TestCase):
-    def step(self, limit, signal_at=None, exits_at=None, obeys=("ask_to_end", "kill")):
-        """Run the wait step on the world. `signal_at` is when a signal arrives, on its clock."""
-        world = simulated.SimulatedWorld()
-        process = a_child(world, exits_at, obeys)
-        state = {
-            "signal": None,
-            "facts": {},
-            "raw": {"time_limit_seconds": limit},
-            "world": world.operations,
-            "stand_ins": {"boundary": {"process": process}},
-            "clock_start": world.operations.clock.now(),
+class FromTheCauseAndTheBoundaryToAnEnding(unittest.TestCase):
+    def ending_for(self, wait, why):
+        facts = {
+            "id_claim": "ok",
+            "launch": "ok",
+            "stop": "confirmed",
+            "closing_freeze": "ok",
+            "delivery": "ok",
+            "wait": boundary.cause_of_end(wait, why),
         }
-        if signal_at is not None:
-            world.at(signal_at, lambda: state.update(signal="SIGINT"))
-        run.step_wait_for_the_end(state)
-        return state["facts"], world
+        decision = decisions.decide_ending(facts)  # type: ignore[arg-type]
+        return decision["ending"], decision["reason"], decision["failed_step"]
 
-    def test_a_child_that_exits_by_itself_gives_exited_and_is_never_asked(self):
-        facts, world = self.step(limit=10, exits_at=1)
-        self.assertEqual((facts["wait"], facts["exit_code"]), ("exited", 0))
-        self.assertEqual(requests(world), [])
-        self.assertNotIn("stop", facts)
+    def test_rows(self):
+        for wait, why, expected in (
+            ("exited", "timed_out", ("time_limit", "time_limit", "none")),
+            ("exited", "ended", ("ended_by_itself", "none", "none")),
+            ("exited", "cannot_tell", ("execution_failed", "execution_error", "cannot tell")),
+            ("signal", "ended", ("stopped_from_outside", "signal", "none")),
+            ("signal", "timed_out", ("stopped_from_outside", "signal", "none")),
+            ("signal", "cannot_tell", ("stopped_from_outside", "signal", "none")),
+            ("stop_record", "ended", ("stopped_from_outside", "stop_record", "none")),
+            ("error", "ended", ("execution_failed", "stop_not_confirmed", "stop_not_confirmed")),
+            (None, "ended", ("execution_failed", "execution_error", "cannot tell")),
+        ):
+            with self.subTest(wait=wait, why=why):
+                self.assertEqual(self.ending_for(wait, why), expected)
 
-    def test_the_limit_gives_time_limit_and_the_child_is_ended(self):
-        facts, world = self.step(limit=2)
-        self.assertEqual(facts["wait"], "time_limit")
-        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end"])
-        self.assertNotIn("stop", facts)
 
-    def test_a_signal_gives_signal(self):
-        facts, _ = self.step(limit=10, signal_at=1)
-        self.assertEqual(facts["wait"], "signal")
+class TheLimitTheTimerCanTake(unittest.TestCase):
+    def test_rows(self):
+        for value, usable in (
+            (1, True),
+            (0.5, True),
+            (1e-6, True),
+            (10**9, True),
+            (9e-7, False),  # rounds to nothing: the timer reads zero as "no maximum"
+            (0, False),
+            (-1, False),
+            (10**9 + 1, False),
+            (float("inf"), False),
+            (float("nan"), False),
+            (True, False),
+            ("5", False),
+            (None, False),
+            (10**400, False),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(boundary.usable_time_limit(value), usable)
 
-    def test_a_signal_during_the_grace_after_the_limit_changes_nothing_and_the_child_is_killed(
+    def test_the_limit_goes_to_the_timer_in_whole_microseconds_and_never_as_zero(self):
+        for seconds, expected in ((1, 1_000_000), (0.5, 500_000), (1e-6, 1), (10**9, 10**15)):
+            with self.subTest(seconds=seconds):
+                self.assertEqual(boundary.limit_microseconds(seconds), expected)
+
+    def test_the_launch_command_carries_the_limit_the_grace_and_the_protected_paths(self):
+        argv = boundary.launch_argv("shuttle-run-r-1", 2.5, ["tool", "--", "x"], ["HOME"], ["/rec"])
+        self.assertIn("--unit=shuttle-run-r-1", argv)
+        self.assertIn("RuntimeMaxSec=2500000us", argv)
+        self.assertIn("TimeoutStopSec=3s", argv)
+        self.assertEqual(
+            argv[argv.index("--ro-bind") : argv.index("--ro-bind") + 3],
+            ["--ro-bind", "/rec", "/rec"],
+        )
+        self.assertEqual(argv[-3:], ["tool", "--", "x"])  # the executor's own arguments untouched
+        self.assertIn("--die-with-parent", argv)
+        self.assertIn("--unshare-pid", argv)
+
+    def test_the_variables_that_reach_systemd_are_taken_from_the_executor_unless_named(self):
+        for names, unset in (
+            ([], ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"]),
+            (["XDG_RUNTIME_DIR"], ["DBUS_SESSION_BUS_ADDRESS"]),
+        ):
+            with self.subTest(names=names):
+                argv = boundary.launch_argv("n", 1, ["tool"], names, [])
+                found = [argv[i + 1] for i, part in enumerate(argv) if part == "--unsetenv"]
+                self.assertEqual(found, unset)
+
+
+def a_state(world, **program):
+    world.program("tool", **program)
+    process = world.operations.processes.start(
+        ["systemd-run", "--unit=shuttle-run-w", "bwrap", "--", "tool"], {}
+    )
+    return {
+        "world": world.operations,
+        "facts": {},
+        "problems": {},
+        "stand_ins": {},
+        "signal": None,
+        "clock_start": 0.0,
+        "boundary_name": "shuttle-run-w",
+        "boundary_process": process,
+    }
+
+
+class TheWaitAndStopStepsGiveTheseFacts(unittest.TestCase):
+    def test_an_executor_that_exited_gives_exited_and_a_stop_that_empties_the_boundary(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        self.assertEqual((state["facts"]["wait"], state["facts"]["stop"]), ("exited", "confirmed"))
+        self.assertEqual(state["facts"]["exit_code"], 0)
+        self.assertEqual(world.calls("boundary.stop")[0][0], ("shuttle-run-w.scope",))
+
+    def test_a_scope_that_timed_out_gives_time_limit(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, times_out=True)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        self.assertEqual(
+            (state["facts"]["wait"], state["facts"]["stop"]), ("time_limit", "confirmed")
+        )
+        self.assertEqual(state["facts"]["child_signal"], "SIGTERM")
+        self.assertEqual(len(world.calls("boundary.forget")), 1)  # the failed unit is cleared
+
+    def test_a_signal_gives_signal_and_the_boundary_is_stopped_by_name(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, hangs=True)
+        world.on_call("processes.poll", lambda: state.update(signal="SIGINT"), nth=2)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        self.assertEqual((state["facts"]["wait"], state["facts"]["stop"]), ("signal", "confirmed"))
+        self.assertEqual(len(world.calls("boundary.stop")), 1)
+
+    def test_a_boundary_that_is_not_seen_empty_gives_stop_not_confirmed(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, hangs=True, survives_stop=True)
+        world.on_call("processes.poll", lambda: state.update(signal="SIGINT"), nth=2)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        self.assertEqual(state["facts"]["stop"], "not_confirmed")
+        self.assertIs(state["stand_ins"]["stop_confirmation"]["everything_stopped"], False)
+
+    def test_a_scope_that_cannot_be_read_gives_stop_not_confirmed_and_a_cause_that_cannot_be_told(
         self,
     ):
-        facts, world = self.step(limit=2, signal_at=2 + GRACE / 2, obeys=("kill",))
-        self.assertEqual(facts["wait"], "time_limit")
-        self.assertNotIn("stop", facts)
-        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end", "kill"])
-        self.assertEqual((facts["exit_code"], facts["child_signal"]), (None, "SIGKILL"))
-
-    def test_a_limit_passing_in_the_grace_after_a_signal_changes_nothing(self):
-        facts, world = self.step(limit=2, signal_at=1, obeys=("kill",))
-        self.assertEqual(facts["wait"], "signal")
-        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end", "kill"])
-
-    def test_a_child_that_survives_the_kill_gives_stop_not_confirmed(self):
-        facts, _ = self.step(limit=2, obeys=())
-        self.assertEqual((facts["wait"], facts["stop"]), ("time_limit", "not_confirmed"))
-        self.assertEqual((facts["exit_code"], facts["child_signal"]), (None, None))
-
-    def test_the_duration_is_the_time_on_the_worlds_clock_from_the_start_to_the_end(self):
         world = simulated.SimulatedWorld()
-        process = a_child(world, exits_at=1)
-        state = {
-            "signal": None,
-            "facts": {},
-            "raw": {"time_limit_seconds": 10},
-            "world": world.operations,
-            "stand_ins": {"boundary": {"process": process}},
-            "clock_start": world.operations.clock.now(),
-        }
-        run.step_wait_for_the_end(state)
-        self.assertAlmostEqual(state["executor_duration"], 1.0, delta=POLL * 2)
-        self.assertEqual(state["ended_at"], world.operations.clock.timestamp())
+        state = a_state(world)
+        world.will_raise("boundary.show", OSError("no bus"))
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        self.assertEqual(state["facts"]["stop"], "not_confirmed")
+        self.assertEqual(state["facts"]["wait"], "cannot_tell")
 
 
 class TheExitFacts(unittest.TestCase):
@@ -189,7 +230,7 @@ class TheExitFacts(unittest.TestCase):
             ((-99, None), (None, "signal 99")),
         ):
             with self.subTest(given):
-                self.assertEqual(core.exit_facts(*given), expected)
+                self.assertEqual(decisions.exit_facts(*given), expected)
 
 
 class TheHandlersOnlyRecordTheFirstSignal(unittest.TestCase):

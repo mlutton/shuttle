@@ -8,8 +8,9 @@ have printed. Nothing real is touched and no time passes.
 import io
 import json
 
-from rehearsal.simulated_world import SimulatedWorld
 from shuttle.shell import run
+
+from rehearsal.simulated_world import SimulatedWorld
 
 RECORDS = "/records"
 DOCUMENT = "/input.json"
@@ -33,11 +34,11 @@ def document(command="tool", limit=30, **extra):
 
 def scene(doc=None, **program):
     """A world with the document in place and a program "tool" (see SimulatedWorld.program;
-    by default one that exits by itself at once)."""
+    by default one that exits at once)."""
     world = SimulatedWorld()
     world.make_folder(RECORDS)
     world.put_file(DOCUMENT, json.dumps(doc or document()))
-    world.program("tool", **(program if program else {"exits_after": 0}))
+    world.program("tool", **(program if program else {}))
     return world
 
 

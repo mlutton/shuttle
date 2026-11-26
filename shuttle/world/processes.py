@@ -25,14 +25,11 @@ def poll(process: subprocess.Popen[bytes]) -> int | None:
     return process.poll()
 
 
-def ask_to_end(process: subprocess.Popen[bytes]) -> None:
-    process.terminate()
+def wait(process: subprocess.Popen[bytes], seconds: float) -> int | None:
+    try:
+        return process.wait(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        return None
 
 
-def kill(process: subprocess.Popen[bytes]) -> None:
-    process.kill()
-
-
-PROCESSES = ProcessOperations(
-    find_program=find_program, start=start, poll=poll, ask_to_end=ask_to_end, kill=kill
-)
+PROCESSES = ProcessOperations(find_program=find_program, start=start, poll=poll, wait=wait)

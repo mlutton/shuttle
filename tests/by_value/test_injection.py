@@ -5,10 +5,10 @@ and deliver a signal at any call: no real disk, process or time. Whatever happen
 request id is claimed, an outcome record exists.
 
 Where an operation is the way into a step (a step that looks at the environment, starts a
-process, polls it), the failure is made in the operation. Ten of the steps of a run are
-placeholders that touch nothing (gates, set-up, fingerprints, stop confirmation, observing,
-closing freeze, delivery, tidying, tear-down, and the write step itself raising outside its own
-guard); no operation can be made to fail inside them, so those points are reached by passing
+process, polls it, stops the boundary), the failure is made in the operation. Nine of the steps
+of a run are placeholders that touch nothing (gates, set-up, fingerprints, observing, closing
+freeze, delivery, tidying, tear-down, and the write step itself raising outside its own guard);
+no operation can be made to fail inside them, so those points are reached by passing
 `run_steps` a table with one step replaced. When a placeholder becomes a real step that uses the
 operations, its row moves from STEP_TABLE_ONLY to an operation and the table is no longer needed.
 """
@@ -61,6 +61,7 @@ WAY_IN = {
     "run_input_checks_and_executor_driver_check": "processes.find_program",
     "launch_executor": "processes.start",
     "wait_for_the_end": "processes.poll",
+    "stop_everything_and_confirm_empty": "boundary.stop",
 }
 STEP_TABLE_ONLY = [name for name in AFTER_THE_CLAIM if name not in WAY_IN]
 NEEDS_A_LIVE_PROCESS = ("launch_executor", "wait_for_the_end")
@@ -76,22 +77,25 @@ def replaced(name, function):
 
 def a_scene(name=None):
     """A child that ends at once, except where a case needs a live process: there it stays
-    until the run ends it (the run asks it to end as soon as it sees what it is waiting for)."""
+    until the run stops the boundary (as soon as it sees what it is waiting for)."""
     if name in NEEDS_A_LIVE_PROCESS:
-        return scenes.scene(exits_after=None)
+        return scenes.scene(hangs=True)
     return scenes.scene()
 
 
-# Three runs to fail in turn: a child that ends at once, one that runs until the time limit and
-# obeys the ask, and one that ignores the ask and has to be killed.
+def a_signalled_scene():
+    """A child that runs until a signal reaches the run, which then stops the boundary."""
+    world = scenes.scene(hangs=True)
+    world.on_call("processes.poll", lambda: world.deliver("SIGINT"), nth=2)
+    return world
+
+
+# Three runs to fail in turn: a child that ends at once, one the boundary's timer ends, and one
+# that runs until a signal reaches the run.
 RUNS = {
     "ends at once": lambda: scenes.scene(),
-    "ends when asked, at the limit": lambda: scenes.scene(
-        scenes.document(limit=1), exits_after=None
-    ),
-    "has to be killed, at the limit": lambda: scenes.scene(
-        scenes.document(limit=1), exits_after=None, obeys=("kill",)
-    ),
+    "ends at the limit": lambda: scenes.scene(scenes.document(limit=1), times_out=True),
+    "ends by a signal": a_signalled_scene,
 }
 
 
@@ -113,7 +117,8 @@ def what_a_failed_call_left_behind(world, code, operation):
         wrong.append("an outcome record that fails the receipt check")
     if outcomes and "inj-1.request.json" not in names:
         wrong.append("an outcome record with no request record")
-    if not world.every_child_has_ended():
+    # Where the stop itself is what failed, the child is still there, and the record says so.
+    if operation != "boundary.stop" and not world.every_child_has_ended():
         wrong.append("a child is still running")
     return wrong
 
@@ -185,6 +190,17 @@ class Injection(unittest.TestCase):
                 self.assertEqual(code, 0, err)
                 self.assert_outcome(world, IF_IT_RAISES[name])
                 self.assertEqual(lines[-1], IF_IT_RAISES[name][0])
+
+    def test_a_stop_that_cannot_be_made_is_recorded_as_stop_not_confirmed_and_nothing_is_frozen(
+        self,
+    ):
+        world = a_signalled_scene()
+        world.will_raise("boundary.stop", OSError("injected"))
+        world.will_raise("boundary.show", OSError("injected"))
+        code, lines, err = scenes.run_in(world)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.ending_of(world), (EF, "stop_not_confirmed", "stop_not_confirmed"))
+        self.assertFalse(world.every_child_has_ended())
 
     def test_the_last_step_itself_raising_still_gives_an_outcome_record(self):
         world = scenes.scene()

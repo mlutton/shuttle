@@ -19,94 +19,27 @@ neither the ending nor the exit code, which says only whether the record was wri
 import contextlib
 import hashlib
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import TextIO
 
 from shuttle import __version__
-from shuttle.core import decisions, fixed
+from shuttle.core import boundary, decisions
 from shuttle.core.drivers import command
 from shuttle.core.shapes import (
     Conclusion,
     Decision,
     HeaderSource,
-    LaunchSpec,
     Operations,
-    Process,
     Receipt,
     RunState,
-    StepResult,
 )
-from shuttle.shell import records, stand_ins
-
-# The deadline (the time limit) and this grace are stand-ins until the boundary owns the time limit.
-END_GRACE_SECONDS = 3  # as of 2026-11-25: seconds between asking a child to end and killing it; a fixed policy, not read from the world
-_POLL_SECONDS = 0.05
-
-
-def _exited_within(world: Operations, process: Process, seconds: float) -> bool:
-    deadline = world.clock.now() + seconds
-    while world.processes.poll(process) is None:
-        if world.clock.now() >= deadline:
-            return False
-        world.clock.wait(_POLL_SECONDS)
-    return True
-
-
-def end_child(world: Operations, process: Process) -> str:
-    """End the direct child, for every cause: ask, wait a short grace (seconds), then kill.
-
-    Returns "ended" or "not_confirmed". Whether everything the child started is gone
-    is a stand-in (step 9); only the direct child is ended here.
-    """
-    if world.processes.poll(process) is None:
-        with contextlib.suppress(OSError):
-            world.processes.ask_to_end(process)
-        if not _exited_within(world, process, END_GRACE_SECONDS):
-            with contextlib.suppress(OSError):
-                world.processes.kill(process)
-            if not _exited_within(world, process, END_GRACE_SECONDS):
-                return "not_confirmed"
-    return "ended"
-
-
-def wait_for_the_cause(
-    world: Operations,
-    process: Process,
-    limit_seconds: float,
-    get_signal: Callable[[], str | None],
-) -> str:
-    """Poll until the child exits, a signal is seen, or the limit passes. Returns the first cause seen."""
-    deadline = world.clock.now() + limit_seconds
-    while True:
-        cause = decisions.wait_cause(
-            world.processes.poll(process) is not None,
-            world.clock.now() >= deadline,
-            get_signal(),
-        )
-        if cause:
-            return cause
-        world.clock.wait(_POLL_SECONDS)
-
-
-def _caller_environment(world: Operations, names: Sequence[str]) -> dict[str, str]:
-    """The variables the run may look at: PATH and the named ones, those that are set."""
-    found: dict[str, str] = {}
-    for name in ("PATH", *names):
-        value = world.environment.read_variable(name)
-        if value is not None:
-            found[name] = value
-    return found
-
-
-def start_in_boundary(
-    world: Operations, launch_spec: LaunchSpec, environment: Mapping[str, str]
-) -> StepResult:
-    """Boundary: a plain child process, no containment yet. Raises when it cannot start.
-
-    A stand-in until the boundary is built.
-    """
-    process = world.processes.start(launch_spec["argv"], environment)
-    return {fixed.STAND_IN_KEY: "boundary", "process": process}
+from shuttle.shell import (
+    launch_executor,
+    records,
+    stand_ins,
+    stop_and_confirm_empty,
+    wait_for_the_end,
+)
 
 
 def step_read_and_validate_document(state: RunState) -> None:
@@ -195,7 +128,7 @@ def step_run_input_checks_and_executor_driver_check(state: RunState) -> None:
     reason, text = decisions.executor_driver_check(
         settings["command"],
         names,
-        _caller_environment(world, names),
+        launch_executor.caller_environment(world, names),
         world.processes.find_program(settings["command"]),
     )
     if reason:
@@ -218,51 +151,6 @@ def step_take_opening_fingerprint(state: RunState) -> None:  # stand-in
     state["facts"]["opening_freeze"] = decisions.result_status(
         state["stand_ins"]["opening_fingerprint"]
     )
-
-
-def step_launch_executor(state: RunState) -> None:
-    world = state["world"]
-    spec = command.launch(state["raw"]["executor"]["settings"])
-    names = state["raw"].get("environment", [])
-    environment = decisions.build_environment(names, _caller_environment(world, names))
-    state["started_at"] = world.clock.timestamp()
-    state["clock_start"] = world.clock.now()
-    state["stand_ins"]["boundary"] = start_in_boundary(world, spec, environment)
-    state["facts"]["launch"] = "ok"
-
-
-def step_wait_for_the_end(state: RunState) -> None:
-    world = state["world"]
-    process = state["stand_ins"]["boundary"]["process"]
-    facts = state["facts"]
-    try:
-        cause = wait_for_the_cause(
-            world, process, float(state["raw"]["time_limit_seconds"]), lambda: state["signal"]
-        )
-        facts["wait"] = cause
-        if cause != "exited" and end_child(world, process) == "not_confirmed":
-            facts["stop"] = "not_confirmed"
-    finally:
-        if world.processes.poll(process) is None:  # the wait itself broke: still end the child
-            end_child(world, process)
-    returncode = world.processes.poll(process)
-    facts["exit_code"], facts["child_signal"] = decisions.exit_facts(
-        returncode,
-        world.signals.name_of(-returncode) if returncode is not None and returncode < 0 else None,
-    )
-    state["executor_duration"] = world.clock.now() - state["clock_start"]
-    state["ended_at"] = world.clock.timestamp()
-
-
-def step_stop_everything_and_confirm_empty(state: RunState) -> None:  # stand-in
-    state["stand_ins"]["stop_confirmation"] = stand_ins.stop_and_confirm_empty(
-        state["stand_ins"]["boundary"]
-    )
-    status = decisions.result_status(state["stand_ins"]["stop_confirmation"])
-    if (
-        state["facts"].get("stop") != "not_confirmed"
-    ):  # the wait may already have failed to end the child
-        state["facts"]["stop"] = "confirmed" if status == "ok" else "not_confirmed"
 
 
 def step_observe(state: RunState) -> None:
@@ -380,9 +268,9 @@ STEPS = (
     ("run_gates", step_run_gates),
     ("set_up_run_area", step_set_up_run_area),
     ("take_opening_fingerprint", step_take_opening_fingerprint),
-    ("launch_executor", step_launch_executor),
-    ("wait_for_the_end", step_wait_for_the_end),
-    ("stop_everything_and_confirm_empty", step_stop_everything_and_confirm_empty),
+    ("launch_executor", launch_executor.step),
+    ("wait_for_the_end", wait_for_the_end.step),
+    ("stop_everything_and_confirm_empty", stop_and_confirm_empty.step),
     ("observe", step_observe),
     ("take_closing_freeze", step_take_closing_freeze),
     ("deliver", step_deliver),
@@ -488,17 +376,18 @@ def _the_run(steps: Sequence[tuple[str, Callable[[RunState], None]]], state: Run
 
 def _clean_up(state: RunState) -> None:
     """Whatever went wrong, nothing is left running, and there is a conclusion."""
-    boundary = state["stand_ins"].get("boundary")
-    if boundary and boundary.get("process") is not None:
+    name = state.get("boundary_name")
+    if name and "stop" not in state["facts"]:  # the stop step did not run, or did not finish
         try:
-            end_child(state["world"], boundary["process"])
-        except BaseException as error:  # the last look at the child failed: say what cannot be said
-            if state["facts"].setdefault("stop", "not_confirmed") == "not_confirmed":
-                state["problems"].setdefault(
-                    "stop_not_confirmed",
-                    f"the last check on the child failed ({type(error).__name__}); "
-                    "it cannot be said to have ended",
-                )
+            empty = boundary.is_empty(stop_and_confirm_empty.stop_boundary(state["world"], name))
+            state["facts"]["stop"] = "confirmed" if empty else "not_confirmed"
+        except BaseException as error:  # the last look at the boundary failed
+            state["facts"]["stop"] = "not_confirmed"
+            state["problems"].setdefault(
+                "stop_not_confirmed",
+                f"the last check on the boundary failed ({type(error).__name__}); "
+                "it cannot be said to have emptied",
+            )
     if "conclusion" not in state:  # the last step did not run, or did not finish
         state["conclusion"] = conclude_run(state)
 

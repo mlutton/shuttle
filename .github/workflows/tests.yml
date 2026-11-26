@@ -11,6 +11,10 @@ jobs:
     # As of 2026-11-25 the check takes under a minute; a run past 10 minutes is a hang.
     # The suite inside it has its own 20 second budget (see checks/all.sh).
     timeout-minutes: 10
+    env:
+      # The tests that run a real executor need the boundary (systemd-run, systemctl, bwrap); with
+      # this set, its absence fails them instead of skipping them (tests/rehearsal/the_boundary.py).
+      SHUTTLE_REQUIRE_BOUNDARY: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,6 +22,10 @@ jobs:
           python-version: "3.12"
       - name: Install the development tools
         run: python3 -m pip install -r requirements-dev.txt
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Scope reason (temporary evidence)
+        run: ./checks/scope-reason.sh
       - name: Run the check
         run: ./checks/all.sh
       - name: Report tests, time, memory and coverage
@@ -47,6 +55,8 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      SHUTTLE_REQUIRE_BOUNDARY: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -54,6 +64,8 @@ jobs:
           python-version: "3.12"
       - name: Install the development tools
         run: python3 -m pip install -r requirements-dev.txt
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
       - name: Fetch the base commit
         run: git fetch --no-tags --depth=1 origin "$BASE_SHA"
         env:

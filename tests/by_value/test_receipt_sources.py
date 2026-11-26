@@ -240,7 +240,7 @@ class AnEmptyHostNameInARealRun(unittest.TestCase):
     """A host name that is empty (a container whose name was set empty) costs the host field only."""
 
     def test_the_exit_code_is_in_the_receipt_and_the_host_is_none(self):
-        world = scenes.scene(exits_after=0, exit_code=7)
+        world = scenes.scene(exit_code=7)
         world.host = ""
         code, lines, err = scenes.run_in(world)
         self.assertEqual((code, lines[-1], err), (0, "ended_by_itself", ""))
@@ -264,7 +264,7 @@ class TheMinimalReceiptIsNeverSilent(unittest.TestCase):
             state["executor_driver_observations"] = observed
 
         steps = [(n, a_driver_with_a_bare_string if n == "observe" else f) for n, f in run.STEPS]
-        world = scenes.scene(exits_after=0, exit_code=7)
+        world = scenes.scene(exit_code=7)
         code, lines, err = scenes.run_in(world, steps)
         self.assertEqual((code, lines[-1]), (0, "ended_by_itself"))
         (line,) = err.splitlines()
