@@ -3,7 +3,7 @@
 import unittest
 
 from shuttle.core import decisions as core
-from shuttle.core import fixed
+from shuttle.core import fixed, pairs
 from shuttle.core.drivers import command
 
 STAND_INS = {
@@ -320,6 +320,131 @@ class CheckReceipt(unittest.TestCase):
         receipt = self.good()
         receipt["ending"]["ending"] = pair("value", "record_failed")
         self.assertNotEqual(core.check_receipt(receipt), [])
+
+
+class EveryFieldHasTheStateTheRunEarnedIt(unittest.TestCase):
+    """A table of field to state, over a launched run and a refused one. The states are read from
+    the pairs, never through `flat`, which cannot tell the state "none" from the word "none"."""
+
+    def states(self, receipt):
+        return {
+            (group, name): held["state"]
+            for group, fields in receipt.items()
+            for name, held in fields.items()
+        }
+
+    def expected(self, default, **overrides):
+        """Every field of the four groups: `default`, with the (group, field) overrides."""
+        table = {(g, n): default for g, names in fixed.RECEIPT_GROUPS.items() for n in names}
+        for key, state in overrides.items():
+            group, name = key.split("__", 1)
+            self.assertIn((group, name), table, key)
+            table[(group, name)] = state
+        return table
+
+    def test_a_launched_run_that_ended_by_itself(self):
+        receipt = core.build_receipt(ENDED, ran_facts())
+        expected = self.expected(
+            fixed.NOT_BUILT,
+            ending__ending="value",
+            ending__reason="none",
+            ending__failed_step="none",
+            ending__reason_text="none",
+            ending__receipt_id="value",
+            execution__execution_version="value",
+            execution__host="value",
+            execution__started_at="value",
+            execution__ended_at="value",
+            execution__duration_executor_seconds="value",
+            execution__input_hash="value",
+            execution__reference_hashes="none",
+            execution__exit_code="value",
+            execution__signal="none",
+            executor_driver__executor_driver_name="value",
+            executor_driver__executor_driver_version="value",
+            executor_driver__tool_made_own_commits="cannot tell",
+            **{
+                f"executor_driver__{name}": "none"
+                for name in fixed.RECEIPT_GROUPS["executor_driver"]
+                if name
+                not in (
+                    "executor_driver_name",
+                    "executor_driver_version",
+                    "tool_made_own_commits",
+                )
+            },
+        )
+        self.assertEqual(self.states(receipt), expected)
+
+    def test_a_run_that_was_refused_before_anything_started(self):
+        facts = ran_facts(
+            launched=False,
+            exit_code=None,
+            signal=None,
+            started_at=None,
+            ended_at=None,
+            executor_duration=None,
+            executor_driver_observations=None,
+            stand_ins={},
+            reason_text="unknown field: surprise",
+        )
+        receipt = core.build_receipt(REFUSED, facts)
+        expected = self.expected(
+            fixed.NONE,
+            ending__ending="value",
+            ending__reason="value",
+            ending__failed_step="value",
+            ending__reason_text="value",
+            ending__receipt_id="value",
+            execution__execution_version="value",
+            execution__host="value",
+            execution__input_hash="value",
+        )
+        self.assertEqual(self.states(receipt), expected)
+
+    def test_a_refused_run_whose_reason_text_is_not_known_says_cannot_tell_for_it(self):
+        receipt = core.build_receipt(REFUSED, ran_facts(launched=False, reason_text=None))
+        self.assertEqual(receipt["ending"]["reason_text"], pair(fixed.CANNOT_TELL))
+
+
+class TheBuilderChecksWhatAPairHolds(unittest.TestCase):
+    def test_a_value_that_json_cannot_hold_is_a_problem(self):
+        for bad in (
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            b"x",
+            object(),
+            {1},
+            (1, 2),
+            {1: "a"},
+            [float("nan")],
+            {"a": object()},
+        ):
+            with self.subTest(repr(bad)):
+                self.assertIsNotNone(pairs.problem_with(pair("value", bad)))
+
+    def test_a_list_that_holds_itself_is_a_problem(self):
+        loop = []
+        loop.append(loop)
+        self.assertIsNotNone(pairs.problem_with(pair("value", loop)))
+
+    def test_plain_json_values_are_accepted(self):
+        for good in ("text", 0, -3, 0.5, False, True, ["a", 1, [2.5]], {"a": {"b": ["c"]}}, "none"):
+            with self.subTest(repr(good)):
+                self.assertIsNone(pairs.problem_with(pair("value", good)))
+
+    def test_a_word_for_a_state_held_as_a_value_in_the_ending_group_is_a_problem(self):
+        for name in ("ending", "reason", "failed_step", "reason_text"):
+            for word in (fixed.NONE, fixed.CANNOT_TELL, fixed.NOT_BUILT):
+                with self.subTest(field=name, word=word):
+                    receipt = core.build_receipt(ENDED, ran_facts())
+                    receipt["ending"][name] = pair("value", word)
+                    self.assertNotEqual(core.check_receipt(receipt), [])
+
+    def test_the_word_none_is_still_a_value_in_a_field_with_its_own_text(self):
+        receipt = core.build_receipt(ENDED, ran_facts(host="none"))
+        self.assertEqual(core.check_receipt(receipt), [])
 
 
 class Header(unittest.TestCase):

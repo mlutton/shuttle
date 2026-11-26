@@ -302,6 +302,18 @@ def _full_receipt(state: RunState, decision: Decision) -> Receipt:
     )
 
 
+def _minimal_receipt_line(error: BaseException) -> str:
+    """The one line on standard error when the full receipt could not be built."""
+    if isinstance(error, decisions.ReceiptNotBuilt):
+        why = "fields refused: " + "; ".join(error.problems)
+    else:
+        why = type(error).__name__
+    return " ".join(
+        f"shuttle: the full receipt could not be built ({why}); the minimal receipt, with "
+        "'cannot tell' for every field but the ending, was written instead".split()
+    )
+
+
 def conclude_run(state: RunState) -> Conclusion:
     """The conclusion: decide, build the receipt, write the record. Each part has its own fallback."""
     facts = state["facts"]
@@ -315,8 +327,9 @@ def conclude_run(state: RunState) -> Conclusion:
         )
     try:
         receipt = _full_receipt(state, decision)
-    except BaseException:
+    except BaseException as error:
         receipt = decisions.minimal_receipt(decision)
+        state["err"].write(_minimal_receipt_line(error) + "\n")
     source = _header_source(state)
     try:
         world = state["world"]

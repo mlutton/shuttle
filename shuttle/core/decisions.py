@@ -666,17 +666,17 @@ def _from_step(result: StepResult | None, key: str) -> Pair:
     """A receipt field from a step's result.
 
     A step that was not reached gives none. A stand-in gives "not built".
-    A real step gives the value under key, or "cannot tell" when it has none.
+    A real step gives what it returned under key: a value, "none" when that is empty,
+    "cannot tell" when it returned nothing for the key or something JSON cannot hold.
     """
     if result is None:
         return pairs.none()
     if is_stand_in(result):
         return pairs.not_built()
     values: Mapping[str, object] = result
-    found = values.get(key)
-    if isinstance(found, (str, int, float, bool)):
-        return pairs.value(found)
-    return pairs.cannot_tell()
+    if values.get(key) is None:
+        return pairs.cannot_tell()
+    return pairs.observed(values[key])
 
 
 def _changed_nothing(steps: Mapping[str, StepResult]) -> Pair:
@@ -769,7 +769,14 @@ def _executor_group_of(steps: Mapping[str, StepResult], launched: bool) -> Execu
 
 
 class ReceiptNotBuilt(ValueError):
-    """A receipt was assembled with a field that is not a state and value pair, or a missing one."""
+    """A receipt was assembled with a field that is not a state and value pair, or a missing one.
+
+    `problems` names each field refused, as "<group>: field <name>: <why>".
+    """
+
+    def __init__(self, problems: list[str]) -> None:
+        super().__init__("; ".join(problems))
+        self.problems = problems
 
 
 def build_receipt(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
@@ -786,7 +793,7 @@ def build_receipt(decision: Mapping[str, object], facts: ReceiptFacts) -> Receip
     receipt = _assemble(decision, facts)
     problems = check_receipt(receipt)
     if problems:
-        raise ReceiptNotBuilt("; ".join(problems))
+        raise ReceiptNotBuilt(problems)
     return receipt
 
 
@@ -806,28 +813,28 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "reason": pairs.of_text(_text_of(decision, "reason")),
         "failed_step": pairs.of_text(_text_of(decision, "failed_step")),
         "reason_text": pairs.of_text(reason),
-        "receipt_id": pairs.value(facts["receipt_id"]),
+        "receipt_id": pairs.observed(facts["receipt_id"]),
         "everything_stopped": _from_step(steps.get("stop_confirmation"), "everything_stopped"),
     }
     saw: ExecutionGroup = {
-        "execution_version": pairs.value(facts["execution_version"]),
-        "host": pairs.value(facts["host"]),
-        "started_at": pairs.of_known(facts["started_at"]),
-        "ended_at": pairs.of_known(facts["ended_at"]),
+        "execution_version": pairs.observed(facts["execution_version"]),
+        "host": pairs.observed(facts["host"]),
+        "started_at": pairs.observed(facts["started_at"]),
+        "ended_at": pairs.observed(facts["ended_at"]),
         # The runtime is observed through the boundary, which is a stand-in.
         "observed_runtime": pairs.not_built() if launched else unlooked,
         "duration_gates_seconds": _from_step(steps.get("gates"), "duration_seconds"),
         "duration_opening_freeze_seconds": _from_step(
             steps.get("opening_fingerprint"), "duration_seconds"
         ),
-        "duration_executor_seconds": pairs.of_known(facts["executor_duration"]),
+        "duration_executor_seconds": pairs.observed(facts["executor_duration"]),
         "duration_closing_freeze_seconds": _from_step(
             steps.get("closing_freeze"), "duration_seconds"
         ),
         "duration_delivery_seconds": _from_step(steps.get("delivery"), "duration_seconds"),
-        "input_hash": pairs.value(facts["input_hash"])
-        if facts["input_hash"]
-        else pairs.cannot_tell(),
+        "input_hash": pairs.cannot_tell()
+        if facts["input_hash"] is None
+        else pairs.observed(facts["input_hash"]),
         "reference_hashes": pairs.none(),
         "fingerprint_before": _from_step(steps.get("opening_fingerprint"), "fingerprint"),
         "fingerprint_after": _from_step(steps.get("closing_freeze"), "fingerprint"),
@@ -839,8 +846,8 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "delivered": _from_step(steps.get("delivery"), "delivered"),
         "delivery_branch": _from_step(steps.get("delivery"), "branch"),
         "delivery_branch_reason": _from_step(steps.get("delivery"), "branch_reason"),
-        "exit_code": pairs.of_known(facts["exit_code"]),
-        "signal": pairs.of_known(facts["signal"]),
+        "exit_code": pairs.observed(facts["exit_code"]),
+        "signal": pairs.observed(facts["signal"]),
         "peak_memory_bytes": _from_step(boundary, "peak_memory_bytes") if launched else unlooked,
         "processor_time_seconds": _from_step(boundary, "processor_time_seconds")
         if launched
@@ -887,6 +894,26 @@ def minimal_receipt(decision: Mapping[str, object]) -> Receipt:
     }
 
 
+# The ending group's own "nothing" and "cannot tell" are states, never the word held as a value.
+_FIELDS_THAT_SAY_IT_BY_STATE = ("ending", "reason", "failed_step", "reason_text")
+
+
+def _state_words_held_as_values(ending: Mapping[str, object]) -> list[str]:
+    problems = []
+    for name in _FIELDS_THAT_SAY_IT_BY_STATE:
+        held = ending.get(name)
+        if (
+            isinstance(held, dict)
+            and held.get("state") == fixed.VALUE
+            and held.get("value") in (fixed.NONE, fixed.CANNOT_TELL, fixed.NOT_BUILT)
+        ):
+            problems.append(
+                f"ending: field {name} holds the word {held['value']!r} as a value; "
+                "that is said by the state"
+            )
+    return problems
+
+
 def check_receipt(receipt: Mapping[str, object]) -> list[str]:
     """Problems with a receipt as read back (or built), judged against the fixed list. Empty when fine."""
     problems = []
@@ -906,6 +933,8 @@ def check_receipt(receipt: Mapping[str, object]) -> list[str]:
             if problem:
                 problems.append(f"{group}: field {name}: {problem}")
     ending = receipt["ending"]
+    if isinstance(ending, Mapping):
+        problems += _state_words_held_as_values(ending)
     if isinstance(ending, Mapping) and all(
         k in ending for k in ("ending", "reason", "failed_step")
     ):

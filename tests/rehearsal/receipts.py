@@ -2,7 +2,9 @@
 
 `flat(receipt)` turns every pair of state and value into the value when the state is "value", and
 into the state's own word ("none", "cannot tell", "not built") otherwise: the receipt as it was
-before every field became a pair. Tests that are about the pairs themselves read them directly.
+before every field became a pair. It cannot tell the state "none" (or "cannot tell", "not built")
+from a value that is the same word, so a test that cares which one a field holds reads the pair
+directly (see `EveryFieldHasTheStateTheRunEarnedIt` in tests/by_value/test_receipt.py).
 """
 
 
