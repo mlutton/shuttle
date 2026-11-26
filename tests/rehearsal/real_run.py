@@ -6,6 +6,7 @@ scripts. A script says it is up through a named pipe the test reads, so no test 
 
 import json
 import os
+import resource
 import subprocess
 import sys
 import tempfile
@@ -55,9 +56,20 @@ class RealRun(unittest.TestCase):
             },
         }
 
-    def start(self, doc, path_first=None):
+    # For a case that could make the command write or read without end (a link to /dev/zero):
+    # no file it makes can pass 16 MB and its memory cannot pass 1 GB, so a regression ends in
+    # an error the test sees instead of growing until the machine gives out.
+    LIMITS = {resource.RLIMIT_FSIZE: 16 * 1024 * 1024, resource.RLIMIT_AS: 1024 * 1024 * 1024}
+
+    @classmethod
+    def limited(cls):
+        for which, size in cls.LIMITS.items():
+            resource.setrlimit(which, (size, size))
+
+    def start(self, doc, path_first=None, limits=False):
         """The real command, started; the caller waits for it with `communicate`. With
-        `path_first`, that folder comes first on the command's PATH."""
+        `path_first`, that folder comes first on the command's PATH. With `limits`, the command
+        and what it starts run under `LIMITS` (the limits are inherited across exec)."""
         path = os.path.join(self.root, f"{doc['request_id']}.input.json")
         with open(path, "w") as f:
             json.dump(doc, f)
@@ -68,6 +80,7 @@ class RealRun(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            preexec_fn=self.limited if limits else None,
         )
         self.addCleanup(self.end, doc["request_id"], proc)
         return proc
@@ -87,9 +100,9 @@ class RealRun(unittest.TestCase):
         for name in (f"shuttle-run-{request_id}", f"shuttle-gate-{request_id}-0"):
             subprocess.run(["systemctl", "--user", "stop", f"{name}.scope"], capture_output=True)
 
-    def run_to_the_end(self, doc, path_first=None):
+    def run_to_the_end(self, doc, path_first=None, limits=False):
         """Run the command to its end: (exit code, standard output lines, standard error)."""
-        proc = self.start(doc, path_first)
+        proc = self.start(doc, path_first, limits)
         stdout, stderr = proc.communicate(timeout=120)
         return proc.returncode, stdout.splitlines(), stderr
 
