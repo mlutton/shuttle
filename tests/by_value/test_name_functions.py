@@ -19,7 +19,8 @@ annotation mentions Path. A function already registered stays registered whateve
 parameters are called. What this cannot see: a name-carrying parameter called something else
 (`item`, `entry`, `x`, `facts`, `lines`), a name inside another value under such a parameter,
 a function reading a name from the environment or a global, and a lambda. When it misses a word
-a function really uses, add the word to NAME_PARTS.
+a function really uses, add the word to NAME_PARTS. The rule is a net with wide holes; the
+table tests of the existing functions are the real guard.
 
 A registered test has to exist, be a test method, and refer to the names table (directly or
 through one helper it calls), or registering against an unrelated test would pass.
@@ -41,7 +42,21 @@ sys.path.insert(0, TESTS)
 
 from hostile import registry  # noqa: E402  (the path is set above)
 
-NAME_PARTS = ("path", "file", "name", "folder", "root", "link", "source")
+NAME_PARTS = (
+    "path",
+    "file",
+    "name",
+    "folder",
+    "root",
+    "link",
+    "source",
+    "changed",
+    "failed",
+    "entries",
+    "listing",
+    "target",
+    "location",
+)
 # "dir" is a word of its own, or "dirs", "dirname", "dirpath": inside another word it is not
 # (`dirty`).
 DIR_WORDS = ("dir", "dirs", "dirname", "dirpath")
@@ -210,8 +225,48 @@ class TestRecognition(unittest.TestCase):
         self.assertEqual(functions(source, "m"), {"m.f": ["target", "p"]})
 
     def test_general_words_and_unrelated_parameters_are_not_names(self):
-        source = "def f(lines, facts, before, after, failed, known, raw, item, x): pass\n"
+        source = "def f(lines, facts, before, after, known, raw, item, x): pass\n"
         self.assertEqual(functions(source, "m"), {"m.f": []})
+
+    def test_the_reviewers_24_signatures_that_carry_a_file_name_are_twelve_flagged_twelve_missed(
+        self,
+    ):
+        # Round-two review of pull request #12, note N1: 24 plausible new signatures. The word
+        # rule saw 6 of them (the first six) and now sees 12; the other 12 are the holes
+        # the README names. The list is the reviewer's, the annotations are filled in.
+        flagged = [
+            "def a(file: str): pass",
+            "def b(file_path: str): pass",
+            "def c(paths: list[str]): pass",
+            "def d(names: list[str]): pass",
+            "def e(fname: str): pass",
+            "def f(handle: Path): pass",
+            "def g(changed: list[str]): pass",
+            "def h(failed: list[str]): pass",
+            "def i(entries: list[str]): pass",
+            "def j(listing: list[str]): pass",
+            "def k(target: str): pass",
+            "def l(location: str): pass",
+        ]
+        missed = [
+            "def m(p: str): pass",
+            "def n(entry: str): pass",
+            "def o(base: str, rel: str): pass",
+            "def q(candidate: str): pass",
+            "def r(items: list[str]): pass",
+            "def s(fn: str): pass",
+            "def t(top: str): pass",
+            "def u(label: str): pass",
+            "def v(f: str): pass",
+            "def w(where: str): pass",
+            "def x(out: str): pass",
+            "def y(rows: list[str]): pass",
+        ]
+        source = "\n".join(flagged + missed) + "\n"
+        self.assertEqual(len(flagged + missed), 24)
+        found = functions(source, "m")
+        self.assertEqual(sum(1 for params in found.values() if params), 12)
+        self.assertEqual([k for k, v in found.items() if v], [f"m.{c}" for c in "abcdefghijkl"])
 
     def test_a_method_is_named_with_its_class(self):
         self.assertEqual(

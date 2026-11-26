@@ -27,13 +27,16 @@ def pointed_paths(text: str, top_level: set[str], ignored: set[str]) -> list[tup
     points at the folder before it. A path (a) holds a slash and ends in a file extension or a
     slash, whatever its first component; or (b) is a bare word ending in `.md`; or (c) starts
     with a top-level entry of the tree. Absolute paths and anything under an ignored entry are
-    not paths."""
+    not paths. A span is not a path either when it starts with `~/` or `../`, or when its first
+    component holds a dot and is not an entry of the tree (`example.com/x.html`)."""
     found = []
     for span in re.findall(r"`([^`\n]+)`", text):
         word = re.split(r":|#", span.split()[0].removeprefix("./"))[0]
         word = word[: word.index("*")] if "*" in word else word
         first = word.split("/")[0]
-        if not word or word.startswith("/") or "<" in word or ">" in word or first in ignored:
+        if not word or word.startswith(("/", "~/", "../")) or "<" in word or ">" in word:
+            continue
+        if first in ignored or ("/" in word and "." in first and first not in top_level):
             continue
         last = word.rstrip("/").split("/")[-1]
         slash = "/" in word
@@ -123,6 +126,11 @@ class PointedPathsTest(unittest.TestCase):
             "<dir>/x.md",
             "users.noreply.github.com",
             "gh pr view",
+            "example.com/x.html",
+            "~/x.md",
+            "../x.md",
+            "../checks/all.sh",
+            "~/checks/",
         ):
             with self.subTest(span=span):
                 self.assertEqual(self.paths(f"`{span}`"), [])
