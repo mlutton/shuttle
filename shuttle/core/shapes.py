@@ -99,6 +99,7 @@ class StepResult(TypedDict, total=False):
     stand_in: str
     process: Any  # the handle the process operations made; nothing else looks inside
     ok: bool
+    duration_seconds: float  # a real step that took time says how much
 
 
 class Facts(TypedDict, total=False):

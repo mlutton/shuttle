@@ -6,8 +6,10 @@ Nothing here touches a file, the clock, the environment or a process.
 import math
 from collections.abc import Iterable, Mapping, Sequence
 
-from shuttle.core import fixed, pairs
+from shuttle.core import fixed, pairs, refusals
+from shuttle.core.drivers import command as command_driver
 from shuttle.core.shapes import (
+    CommandSettings,
     Conclusion,
     Decision,
     Document,
@@ -382,7 +384,15 @@ _DOCUMENT_FIELDS = (
     "time_limit_seconds",
     "environment",
     "executor",
+    "instruction",
+    "instruction_hash",
+    "references",
+    "gates",
+    "statement_location",
+    "reach",
 )
+_REFERENCE_FIELDS = ("name", "path", "hash", "size", "hash_source")
+_GATE_FIELDS = ("name", "command", "arguments", "limit_seconds")
 _EXECUTOR_FIELDS = ("name", "settings")
 _COMMAND_SETTINGS = ("command", "arguments")
 _ID_CHARACTERS = fixed.ID_CHARACTERS
@@ -509,11 +519,59 @@ def _document_refusal(raw: Document) -> tuple[str, str] | None:
             "time_limit_seconds is required and must be a number above zero and at most "
             f"{_LONGEST_TIME_LIMIT_SECONDS}",
         )
-    names = raw.get("environment", [])
-    if not isinstance(names, list) or not all(
-        _text(n) and all(c in _NAME_CHARACTERS for c in n) for n in names
+    env = refusals.check_environment_entries(raw.get("environment", []))
+    if env:
+        return env["reason"], env["problem"]
+    return _parts_refusal(raw)
+
+
+def _list_of_objects(value: object, what: str) -> tuple[str, str] | None:
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        return "missing_setting", f"{what} must be a list of objects"
+    return None
+
+
+def _reference_refusal(reference: Document) -> tuple[str, str] | None:
+    unknown = _unknown_names(reference, _REFERENCE_FIELDS)
+    if unknown:
+        return "unknown_field", f"unknown field in a reference: {unknown}"
+    texts = all(_text(reference.get(f)) for f in ("name", "path", "hash", "hash_source"))
+    if not texts or not _plain_int(reference.get("size")) or reference["size"] < 0:
+        return "missing_setting", "a reference needs name, path, hash, size and hash_source"
+    return None
+
+
+def _gate_refusal(gate: Document) -> tuple[str, str] | None:
+    unknown = _unknown_names(gate, _GATE_FIELDS)
+    if unknown:
+        return "unknown_field", f"unknown field in a gate: {unknown}"
+    arguments = gate.get("arguments")
+    if (
+        not _text(gate.get("name"))
+        or not _text(gate.get("command"))
+        or not isinstance(arguments, list)
+        or not all(isinstance(a, str) for a in arguments)
+        or not _usable_time_limit(gate.get("limit_seconds"))
     ):
-        return "missing_setting", "environment must be a list of variable names"
+        return "missing_setting", "a gate needs name, command, arguments and limit_seconds above 0"
+    return None
+
+
+def _parts_refusal(raw: Document) -> tuple[str, str] | None:
+    """The shape of the parts the refusal checks judge; what they hold is judged by those checks."""
+    for field in ("instruction", "instruction_hash", "statement_location"):
+        if field in raw and not isinstance(raw[field], str):
+            return "missing_setting", f"{field} is not text"
+    for field, refuse in (("references", _reference_refusal), ("gates", _gate_refusal)):
+        if field not in raw:
+            continue
+        refusal = _list_of_objects(raw[field], field)
+        if refusal:
+            return refusal
+        for item in raw[field]:
+            refusal = refuse(item)
+            if refusal:
+                return refusal
     return None
 
 
@@ -537,17 +595,17 @@ def validate_document(raw: object) -> DocumentCheck:
 
 def parse_command_line(argv: Sequence[str]) -> dict[str, str]:
     """Turn the arguments after the program name into a form, or a one-line refusal."""
-    if argv and argv[0] in ("check", "stop", "status"):
+    if len(argv) == 2 and argv[0] in ("run", "check"):
+        return {"form": argv[0], "document_path": argv[1]}
+    if argv and argv[0] in ("stop", "status"):
         return {
-            "refusal": f"shuttle: the {argv[0]} form is not built yet; only 'run <input document>' exists"
+            "refusal": f"shuttle: the {argv[0]} form is not built yet; only 'run' and 'check' exist"
         }
-    if len(argv) == 2 and argv[0] == "run":
-        return {"form": "run", "document_path": argv[1]}
-    return {"refusal": "shuttle: usage: python3 -m shuttle run <input document>"}
+    return {"refusal": "shuttle: usage: python3 -m shuttle run|check <input document>"}
 
 
 def executor_driver_check(
-    command: str,
+    settings: CommandSettings,
     environment_names: Iterable[str],
     caller_environment: Mapping[str, str],
     tool_found: bool,
@@ -561,10 +619,11 @@ def executor_driver_check(
                 ", ".join(missing)
             ),
         )
-    if not tool_found:
+    reason = command_driver.check(settings, tool_found)
+    if reason:
         return (
-            "tool_not_installed",
-            f"the command {command!r} was not found; install it or name one that exists",
+            reason,
+            f"the command {settings['command']!r} was not found; install it or name one that exists",
         )
     return None, None
 

@@ -147,6 +147,12 @@ class ValidateDocument(unittest.TestCase):
 
 
 class ParseCommandLine(unittest.TestCase):
+    def test_check_with_one_path(self):
+        self.assertEqual(
+            core.parse_command_line(["check", "doc.json"]),
+            {"form": "check", "document_path": "doc.json"},
+        )
+
     def test_run_with_one_path(self):
         self.assertEqual(
             core.parse_command_line(["run", "doc.json"]),
@@ -154,7 +160,7 @@ class ParseCommandLine(unittest.TestCase):
         )
 
     def test_other_forms_are_refused_in_one_line(self):
-        for form in ("check", "stop", "status"):
+        for form in ("stop", "status"):
             with self.subTest(form):
                 got = core.parse_command_line([form, "x"])
                 self.assertEqual(got["refusal"].count("\n"), 0)

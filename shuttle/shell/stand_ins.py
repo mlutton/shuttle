@@ -14,10 +14,6 @@ def _stand_in(name: str) -> StepResult:
     return {fixed.STAND_IN_KEY: name}
 
 
-def run_gates(gates: object) -> StepResult:
-    return _stand_in("gates")
-
-
 def set_up_run_area(declared_setup: object) -> StepResult:
     return _stand_in("setup")
 

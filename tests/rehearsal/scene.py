@@ -36,6 +36,7 @@ def scene(doc=None, **program):
     by default one that exits by itself at once)."""
     world = SimulatedWorld()
     world.make_folder(RECORDS)
+    world.put_shipped_data()
     world.put_file(DOCUMENT, json.dumps(doc or document()))
     world.program("tool", **(program if program else {"exits_after": 0}))
     return world

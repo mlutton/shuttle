@@ -666,6 +666,7 @@ IMPORTS = (
     ("an allowed module: json", "import json", CORE, None, "", ""),
     ("an allowed module: math", "import math", CORE, None, "", ""),
     ("an allowed module: re", "import re", CORE, None, "", ""),
+    ("an allowed module: hashlib", "import hashlib", CORE, None, "", ""),
     ("an allowed module: typing", "from typing import Any", CORE, None, "", ""),
     ("an allowed module, aliased", "import json as j", CORE, None, "", ""),
     (
