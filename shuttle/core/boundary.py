@@ -68,6 +68,17 @@ def unit_of(name: str) -> str:
     return name + ".scope"
 
 
+def for_the_scope_tool(argv: Sequence[str]) -> list[str]:
+    """`argv` as the scope tool must be given it so the command it starts gets it unchanged.
+
+    `systemd-run` expands `$NAME`, `${NAME}` and `$$` in the command it is given, and a `$` is
+    only literal when written `$$`. The tool has an option that turns this off
+    (`--expand-environment=no`), but only from systemd 254; doubling every `$` works on every
+    version. `%` and a backslash are not touched (shown against systemd 262): left alone.
+    """
+    return [part.replace("$", "$$") for part in argv]
+
+
 def launch_argv(
     name: str,
     limit_seconds: float,
@@ -96,22 +107,26 @@ def launch_argv(
         "-p",
         f"TimeoutStopSec={GRACE_SECONDS}s",
         "--",
-        "bwrap",
-        "--unshare-pid",
-        "--die-with-parent",
-        "--json-status-fd",
-        str(report_fd),
-        "--bind",
-        "/",
-        "/",
-        *[part for path in protected_paths for part in ("--ro-bind", path, path)],
-        "--dev",
-        "/dev",
-        "--proc",
-        "/proc",
-        *[part for variable in left_out for part in ("--unsetenv", variable)],
-        "--",
-        *argv,
+        *for_the_scope_tool(
+            [
+                "bwrap",
+                "--unshare-pid",
+                "--die-with-parent",
+                "--json-status-fd",
+                str(report_fd),
+                "--bind",
+                "/",
+                "/",
+                *[part for path in protected_paths for part in ("--ro-bind", path, path)],
+                "--dev",
+                "/dev",
+                "--proc",
+                "/proc",
+                *[part for variable in left_out for part in ("--unsetenv", variable)],
+                "--",
+                *argv,
+            ]
+        ),
     ]
 
 
@@ -221,13 +236,13 @@ def gate_argv(name: str, limit_seconds: float, argv: Sequence[str], report_fd: i
         "-p",
         f"TimeoutStopSec={GRACE_SECONDS}s",
         "--",
-        "sh",
-        "-c",
-        GATE_SCRIPT,
-        "sh",
-        str(report_fd),
-        *argv,
+        *for_the_scope_tool(["sh", "-c", GATE_SCRIPT, "sh", str(report_fd), *argv]),
     ]
+
+
+def gate_started(report: str) -> bool:
+    """Whether the gate's report says its scope was made and its command was about to start."""
+    return GATE_STARTED in report.split()
 
 
 def gate_answer(report: str, why: str, returncode: int | None) -> str:
@@ -237,6 +252,6 @@ def gate_answer(report: str, why: str, returncode: int | None) -> str:
     Only a gate that said it started, whose scope was seen settled and did not end by its limit,
     and that ended with a status (not a signal) answers by that status; any other ending is failed.
     """
-    started = GATE_STARTED in report.split()
+    started = gate_started(report)
     exit_code = returncode if returncode is not None and returncode >= 0 else None
     return refusals.gate_answer(started, exit_code, why != ENDED)

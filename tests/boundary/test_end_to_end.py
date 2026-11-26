@@ -15,6 +15,7 @@ not add one of their own.
 import hashlib
 import importlib
 import os
+import select
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -63,8 +64,18 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
             }
         ]
         proc = self.start(doc)
-        with open(up) as f:
-            f.read()  # blocks until the script is running
+        # Block until the script says it is up or the command ends, whichever comes first: a run
+        # that is refused never starts the script, and must fail here, not hang.
+        said = os.open(up, os.O_RDONLY | os.O_NONBLOCK)
+        ended = os.pidfd_open(proc.pid)
+        try:
+            ready, _, _ = select.select([said, ended], [], [])
+        finally:
+            os.close(said)
+            os.close(ended)
+        if said not in ready:
+            stdout, stderr = proc.communicate(timeout=120)
+            self.fail(f"the command ended before the script was up: {stdout!r} {stderr!r}")
         stdout, stderr = proc.communicate(timeout=120)
         self.assertEqual((proc.returncode, stderr), (0, ""))
         lines = stdout.splitlines()

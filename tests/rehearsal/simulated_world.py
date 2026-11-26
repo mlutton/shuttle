@@ -291,7 +291,8 @@ class SimulatedWorld:
         if not argv or argv[0] != "systemd-run":
             return list(argv), None, False
         unit = next(p.split("=", 1)[1] for p in argv if p.startswith("--unit=")) + ".scope"
-        inside = list(argv)[list(argv).index("--") + 1 :]
+        # the scope tool turns each "$$" back into "$" before it starts the command
+        inside = [p.replace("$$", "$") for p in list(argv)[list(argv).index("--") + 1 :]]
         if inside[:3] == ["sh", "-c", boundary.GATE_SCRIPT]:  # sh, its report descriptor, the gate
             return inside[5:], unit, True
         if inside[:1] == ["bwrap"]:  # the box, then the executor

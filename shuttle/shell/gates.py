@@ -3,7 +3,7 @@
 A gate is a command with its own limit. It is read-only by its nature: it is started with PATH
 only in its environment and answers by its exit code (0 yes, 1 no, anything else, a limit passed
 or a start that failed: failed). Each runs in a scope of its own (shuttle.core.boundary) with its
-limit on the scope: nothing here times it. After it ends the scope is stopped by name and seen
+limit on the scope: nothing here times it. After it ends, when it reported that it started, the scope is stopped by name and seen
 empty, and why it ended is read from the scope; `boundary.gate_answer` decides the answer, and the
 first that is not a yes refuses the run, naming the gate and its answer.
 """
@@ -28,8 +28,13 @@ def ask_gate(world: Operations, gate: Document, environment: dict[str, str], nam
         return refusals.gate_answer(False, None, False)
     while (returncode := world.processes.wait(process, POLL_SECONDS)) is None:
         pass  # the scope ends the gate when its limit runs out
+    said = world.processes.read_report(process)
+    if not boundary.gate_started(said):
+        # This run did not make a scope of that name (the name may be somebody else's): it is
+        # not stopped, and the gate failed.
+        return refusals.gate_answer(False, None, False)
     why = boundary.why_ended(stop_and_confirm_empty.stop_boundary(world, name))
-    return boundary.gate_answer(world.processes.read_report(process), why, returncode)
+    return boundary.gate_answer(said, why, returncode)
 
 
 def run_gates(

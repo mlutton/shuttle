@@ -206,3 +206,30 @@ class AScriptThatTriesToWriteTheRecords(real_run.RealRun):
             self.assertEqual(f.read(), "original")
         with open(os.path.join(self.place, "new.txt")) as f:
             self.assertEqual(f.read(), "the place is writable")
+
+
+class AGateWhoseScopeNameIsTakenByAnotherUnit(real_run.RealRun):
+    def test_reads_failed_and_the_other_unit_is_left_running(self):
+        up = self.pipe("up")
+        holder = self.script("holder.py", SAYS_IT_IS_UP_AND_SLEEPS)
+        name = "shuttle-gate-r-1-0"  # the name this run's first gate would take
+        other = subprocess.Popen(
+            ["systemd-run", "--user", "--scope", "--quiet", f"--unit={name}", sys.executable]
+            + [holder, up]
+        )
+        self.addCleanup(other.wait)
+        self.addCleanup(
+            subprocess.run, ["systemctl", "--user", "stop", f"{name}.scope"], capture_output=True
+        )
+        with open(up) as f:
+            f.read()  # blocks until the other unit is running
+        doc = self.document(self.script("never.py", "raise SystemExit(0)"))
+        doc["gates"] = [{"name": "g", "command": "/bin/true", "arguments": [], "limit_seconds": 60}]
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(lines[-1], "could_not_start")
+        self.assertEqual(flat(self.outcome()["receipt"])["ending"]["reason"], "gate_failed")
+        state = subprocess.run(
+            ["systemctl", "--user", "is-active", f"{name}.scope"], capture_output=True, text=True
+        )
+        self.assertEqual(state.stdout.strip(), "active")
