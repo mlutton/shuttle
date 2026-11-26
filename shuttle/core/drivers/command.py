@@ -4,10 +4,7 @@ An executor driver offers four functions (check, launch, observe, declare) and
 its declarations as data. It never names an ending. There is no base class.
 """
 
-from collections.abc import Mapping
-from typing import Any
-
-from shuttle.core.shapes import LaunchSpec
+from shuttle.core.shapes import CommandSettings, ExecutorDriverGroup, LaunchSpec
 
 NAME = "command"
 VERSION = "1"
@@ -24,19 +21,19 @@ def declare() -> dict[str, list[str]]:
     return DECLARATIONS
 
 
-def check(settings: Mapping[str, Any], tool_found: bool) -> str | None:
+def check(settings: CommandSettings, tool_found: bool) -> str | None:
     """Pure: the reason code that refuses these settings, or None."""
     if not tool_found:
         return "tool_not_installed"
     return None
 
 
-def launch(settings: Mapping[str, Any]) -> LaunchSpec:
+def launch(settings: CommandSettings) -> LaunchSpec:
     """Pure: the one command to start. It exits when done. The environment is built by the core."""
     return {"argv": [settings["command"]] + list(settings["arguments"])}
 
 
-def observe(none_fact: str, cannot_tell: str) -> dict[str, str]:
+def observe(none_fact: str, cannot_tell: str) -> ExecutorDriverGroup:
     """Pure: the driver group of the receipt. A plain command reports nothing of its own.
 
     "none" means looked and nothing there; "cannot tell" means could not look.

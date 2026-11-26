@@ -1,21 +1,18 @@
 """The shapes of the plain data that passes between the core and the shell, and of the operations.
 
-Types only; nothing here runs. Where a shape is known it is a typed record.
-Where it still varies (the facts of a run, the receipt, the shell's state) it is a
-dictionary of anything, and is listed in the pull request as loosely typed.
+Types only; nothing here runs. Every shape the code knows is a typed record, so a missing or
+misnamed field fails the strict type check. Two shapes stay loosely typed because they arrive from
+outside and are checked by value: `Document` (the input document as read from JSON, shape unknown
+until the validation code has looked at it) and what `records.read_record` reads back from disk.
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, TypedDict
+from typing import Any, NamedTuple, TextIO, TypedDict
 
-# Loosely typed for now: the facts of a run, the receipt and its groups, a step's
-# result, the document as read from JSON, and the shell's state of a run.
-Facts = dict[str, Any]
-Receipt = dict[str, dict[str, Any]]
-StepResult = dict[str, Any]
+type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+
+# Arrives from outside: checked by value (decisions.validate_document), never trusted by type.
 Document = dict[str, Any]
-State = dict[str, Any]
-HeaderSource = dict[str, Any]
 
 
 class Decision(TypedDict):
@@ -24,10 +21,48 @@ class Decision(TypedDict):
     failed_step: str
 
 
+class Refusal(TypedDict):
+    reason: str
+    step: str
+
+
+class HeaderSource(TypedDict):
+    """What a header is formed from: the document's identifying parts."""
+
+    request_id: str
+    records_location: str
+    thread: str
+    round: int
+    kind: str
+    parent_session: str
+    asked_by: str
+    executor_name: str
+
+
 class DocumentCheck(TypedDict):
     header_source: HeaderSource | None
-    refusal: dict[str, str] | None
+    refusal: Refusal | None
     problem: str | None
+
+
+class RecordHeader(TypedDict):
+    record_id: str
+    record_type: str
+    time: str
+    request_id: str
+    thread: str
+    round: int
+    parent_session: str
+    asked_by: str
+    kind: str
+    executor_name: str
+    format_version: int
+
+
+# Functional form: the key is called "input", a name the core may not mention in code.
+RequestRecord = TypedDict(  # noqa: UP013 (the class form would name a field `input`)
+    "RequestRecord", {"header": RecordHeader, "input": Document}
+)
 
 
 class Conclusion(TypedDict):
@@ -36,8 +71,180 @@ class Conclusion(TypedDict):
     exit: int
 
 
+class Outcome(TypedDict, total=False):
+    """How the last step went, as `decisions.conclude` reads it."""
+
+    kind: str
+    decision: Decision
+    path: str
+    receipt_text: str
+    problem: str | None
+
+
+class CommandSettings(TypedDict):
+    """The command driver's settings, once the document is checked."""
+
+    command: str
+    arguments: list[str]
+
+
 class LaunchSpec(TypedDict):
     argv: list[str]
+
+
+class StepResult(TypedDict, total=False):
+    """What a step returns. A stand-in is marked with `stand_in`; a real step reports `ok`."""
+
+    stand_in: str
+    process: Any  # the handle the process operations made; nothing else looks inside
+    ok: bool
+
+
+class Facts(TypedDict, total=False):
+    """What the steps of a run left for the decisions. A step that did not run has no fact."""
+
+    unreadable: bool
+    header_source: HeaderSource | None
+    id_claim: str
+    input_check: str
+    executor_driver_check: str
+    gates: str
+    setup: str
+    opening_freeze: str
+    launch: str
+    wait: str
+    stop: str
+    closing_freeze: str
+    delivery: str
+    exit_code: int | None
+    child_signal: str | None
+
+
+# ------------------------------------------------------------------ the receipt
+
+
+class EndingGroup(TypedDict):
+    ending: JsonValue
+    reason: JsonValue
+    failed_step: JsonValue
+    reason_text: JsonValue
+    receipt_id: JsonValue
+    everything_stopped: JsonValue
+    execution_version: JsonValue
+    host: JsonValue
+
+
+class ExecutionGroup(TypedDict):
+    started_at: JsonValue
+    ended_at: JsonValue
+    observed_runtime: JsonValue
+    duration_gates: JsonValue
+    duration_opening_freeze: JsonValue
+    duration_executor: JsonValue
+    duration_closing_freeze: JsonValue
+    duration_delivery: JsonValue
+    input_hash: JsonValue
+    reference_hashes: JsonValue
+    fingerprint_before: JsonValue
+    fingerprint_after: JsonValue
+    changed_nothing: JsonValue
+    files_added: JsonValue
+    files_changed: JsonValue
+    files_deleted: JsonValue
+    files_list_kept_file: JsonValue
+    delivered: JsonValue
+    delivery_branch: JsonValue
+    delivery_branch_reason: JsonValue
+    exit_code: JsonValue
+    signal: JsonValue
+    peak_memory: JsonValue
+    processor_time: JsonValue
+    session_file_kept_at: JsonValue
+    teardown_failure: JsonValue
+    stop_reason: JsonValue
+    stop_asker: JsonValue
+
+
+class ExecutorDriverGroup(TypedDict):
+    executor_driver_name: JsonValue
+    executor_driver_version: JsonValue
+    tool_version: JsonValue
+    model: JsonValue
+    effort: JsonValue
+    tokens_in: JsonValue
+    tokens_out: JsonValue
+    tokens_cached: JsonValue
+    activity: JsonValue
+    session_id: JsonValue
+    refused_actions: JsonValue
+    quota_level: JsonValue
+    vendor_limit_reached: JsonValue
+    vendor_limit_reset: JsonValue
+    tool_made_own_commits: JsonValue
+    load_lists_differ: JsonValue
+    load_lists_kept_file: JsonValue
+    changed_self_loaded_file: JsonValue
+    waiting_question: JsonValue
+
+
+class ExecutorGroup(TypedDict):
+    statement_state: JsonValue
+    statement_hash: JsonValue
+    statement_location: JsonValue
+    claim: JsonValue
+
+
+class Receipt(TypedDict):
+    the_ending: EndingGroup
+    what_execution_saw: ExecutionGroup
+    what_the_executor_driver_observed: ExecutorDriverGroup
+    what_the_executor_said: ExecutorGroup
+
+
+class ReceiptFacts(TypedDict):
+    """What `decisions.build_receipt` is handed besides the decision."""
+
+    receipt_id: str
+    execution_version: str
+    host: str
+    input_hash: str
+    launched: bool
+    started_at: str | None
+    ended_at: str | None
+    executor_duration: float | None
+    exit_code: int | None
+    signal: str | None
+    # None when observing failed or never happened
+    executor_driver_observations: ExecutorDriverGroup | None
+    stand_ins: dict[str, StepResult]  # step name to result; a step not reached is absent
+    reason_text: str | None
+
+
+class OutcomeRecord(TypedDict):
+    header: RecordHeader
+    receipt: Receipt
+
+
+class RunState(TypedDict, total=False):
+    """The shell's state of one run, built up step by step."""
+
+    document_path: str
+    out: TextIO
+    err: TextIO
+    world: "Operations"
+    facts: Facts
+    stand_ins: dict[str, StepResult]
+    problems: dict[str, str]
+    problem: str
+    signal: str | None
+    raw: Document
+    input_hash: str
+    started_at: str
+    ended_at: str
+    clock_start: float
+    executor_duration: float
+    executor_driver_observations: ExecutorDriverGroup
+    conclusion: Conclusion
 
 
 # ------------------------------------------------------------------ the operations

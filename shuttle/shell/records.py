@@ -8,11 +8,10 @@ reached through the operations passed in, never directly.
 
 import contextlib
 import json
-from collections.abc import Mapping
 from typing import Any
 
 from shuttle.core import decisions
-from shuttle.core.shapes import Operations
+from shuttle.core.shapes import Operations, OutcomeRecord, RequestRecord
 
 
 def request_path(records_location: str, request_id: str) -> str:
@@ -27,7 +26,7 @@ class RecordNotBuilt(Exception):
     """The text of a record could not be built; nothing was written."""
 
 
-def _put_whole(world: Operations, final: str, record: Mapping[str, Any]) -> str:
+def _put_whole(world: Operations, final: str, record: RequestRecord | OutcomeRecord) -> str:
     """Put a record under its real name whole, or not at all.
 
     The text is built first, written under a temporary name in the same folder, flushed, and
@@ -49,7 +48,7 @@ def _put_whole(world: Operations, final: str, record: Mapping[str, Any]) -> str:
 
 
 def claim_request_record(
-    world: Operations, records_location: str, request_id: str, record: Mapping[str, Any]
+    world: Operations, records_location: str, request_id: str, record: RequestRecord
 ) -> str:
     """Claim the request id by putting the request record in place whole.
 
@@ -62,7 +61,7 @@ def claim_request_record(
 
 
 def write_outcome_record(
-    world: Operations, records_location: str, request_id: str, record: Mapping[str, Any]
+    world: Operations, records_location: str, request_id: str, record: OutcomeRecord
 ) -> str:
     """Write the outcome record once. Raises FileExistsError when one exists.
 

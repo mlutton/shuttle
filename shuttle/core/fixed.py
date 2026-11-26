@@ -3,6 +3,8 @@
 Adding a value here is a format version change.
 """
 
+from typing import Final
+
 FORMAT_VERSION = 1
 
 NONE = "none"  # looked, and there is nothing
@@ -189,4 +191,4 @@ RECEIPT_GROUPS = {
 }
 
 # The mark a stand-in step puts on what it returns.
-STAND_IN_KEY = "stand_in"
+STAND_IN_KEY: Final = "stand_in"

@@ -4,6 +4,7 @@ import unittest
 
 from shuttle.core import decisions as core
 from shuttle.core import fixed
+from shuttle.core.drivers import command
 
 STAND_INS = {
     name: {fixed.STAND_IN_KEY: name}
@@ -33,10 +34,7 @@ def ran_facts(**changes):
         "executor_duration": 0.9,
         "exit_code": 3,
         "signal": fixed.NONE,
-        "executor_driver_observations": {
-            "executor_driver_name": "command",
-            "executor_driver_version": "1",
-        },
+        "executor_driver_observations": command.observe(fixed.NONE, fixed.CANNOT_TELL),
         "stand_ins": dict(STAND_INS),
         "reason_text": None,
     }
