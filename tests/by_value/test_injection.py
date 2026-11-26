@@ -5,10 +5,12 @@ and deliver a signal at any call: no real disk, process or time. Whatever happen
 request id is claimed, an outcome record exists.
 
 Where an operation is the way into a step (a step that looks at the environment, starts a
-process, polls it, stops the boundary), the failure is made in the operation. Nine of the steps
-of a run are placeholders that touch nothing (gates, set-up, fingerprints, observing, closing
-freeze, delivery, tidying, tear-down, and the write step itself raising outside its own guard);
-no operation can be made to fail inside them, so those points are reached by passing
+process, polls it, stops the boundary), the failure is made in the operation. Eight of the steps
+of a run are placeholders that touch nothing (set-up, fingerprints, observing, closing freeze,
+delivery, tidying, tear-down, and the write step itself raising outside its own guard), and the
+gates step touches nothing when the document names no gate (a gate is reached through
+`processes.start` in test_refusal_flow.py); no operation can be made to fail inside them, so those
+points are reached by passing
 `run_steps` a table with one step replaced. When a placeholder becomes a real step that uses the
 operations, its row moves from STEP_TABLE_ONLY to an operation and the table is no longer needed.
 """

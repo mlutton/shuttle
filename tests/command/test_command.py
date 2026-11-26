@@ -531,8 +531,8 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(lines, ["none"])
         self.assertEqual(os.listdir(self.records), [])
 
-    def test_the_other_three_forms_print_a_one_line_refusal(self):
-        for form in ("check", "stop", "status"):
+    def test_the_forms_not_built_print_a_one_line_refusal(self):
+        for form in ("stop", "status"):
             with self.subTest(form):
                 done, lines = self.run_command(None, argv=[form, "x"])
                 self.assertNotEqual(done.returncode, 0)

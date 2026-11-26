@@ -24,6 +24,7 @@ CALLS = {
     "files.write_new": ("/f", "text"),
     "files.link": ("/f", "/g"),
     "files.remove": ("/f",),
+    "files.usable_folder": ("/f",),
     "processes.find_program": ("tool",),
     "processes.start": (["tool"], {}),
     "processes.poll": (None,),

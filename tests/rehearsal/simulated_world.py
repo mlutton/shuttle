@@ -18,6 +18,7 @@ It is held to the real operations by the contract cases in contract.py.
 """
 
 import datetime
+import os
 import signal
 
 from shuttle.core.shapes import (
@@ -50,6 +51,14 @@ _TIMED_OUT = {"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout
 WAITS_BEFORE_GIVING_UP = 1000  # a wait that would never end is a failure of the test
 
 
+def _shipped(name):
+    """A file shipped with the package, as the real world holds it."""
+    folder = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(folder, "shuttle", "data", name)
+    with open(path, "rb") as f:
+        return path, f.read()
+
+
 class SimulatedWorld:
     def __init__(self, host="sim-host", environment=None):
         self.t = 0.0  # seconds on the simulated clock, which does not move
@@ -78,6 +87,7 @@ class SimulatedWorld:
                 write_new=self._write_new,
                 link=self._link,
                 remove=self._remove,
+                usable_folder=self._usable_folder,
             ),
             processes=ProcessOperations(
                 find_program=self._find_program,
@@ -113,6 +123,12 @@ class SimulatedWorld:
     def put_file(self, path, text):
         data = text if isinstance(text, bytes) else text.encode("utf-8")
         self.files[path] = bytearray(data)
+
+    def put_shipped_data(self):
+        """The data files shipped with the package, which a run reads (the kinds)."""
+        for name in ("kinds_with_statement.txt", "kinds_without_statement.txt"):
+            path, data = _shipped(name)
+            self.files[path] = bytearray(data)
 
     def put_a_name_that_leads_nowhere(self, path):
         self.dangling.add(path)
@@ -219,6 +235,10 @@ class SimulatedWorld:
     def _exists(self, path):
         self._enter("files.exists", path)
         return path in self.files or path in self.folders or path in self.dangling
+
+    def _usable_folder(self, path):
+        self._enter("files.usable_folder", path)
+        return path in self.folders
 
     def _write_new(self, path, text):
         how, error = self._enter("files.write_new", path, text)

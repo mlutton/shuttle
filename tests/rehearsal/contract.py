@@ -127,6 +127,13 @@ class ContractCases:
     def test_reading_a_folder_raises_is_a_directory(self):
         self.assertRaisesExactly(IsADirectoryError, self.world.files.read, self.harness.folder())
 
+    def test_only_a_folder_is_a_usable_folder(self):
+        folder, absent = self.harness.folder(), self.fresh("absent")
+        self.assertTrue(self.world.files.usable_folder(folder))
+        self.assertFalse(self.world.files.usable_folder(absent))
+        self.world.files.write_new(absent, TEXT)
+        self.assertFalse(self.world.files.usable_folder(absent))
+
     def test_a_folder_is_there_and_cannot_be_written_over_linked_from_or_removed(self):
         folder, other = self.harness.folder(), self.fresh("other")
         self.assertTrue(self.world.files.exists(folder))
