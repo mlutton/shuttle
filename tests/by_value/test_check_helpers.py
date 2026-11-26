@@ -198,6 +198,10 @@ class FixModeDecisionsTest(unittest.TestCase):
         self.assertEqual(fixmode.links_to_hash({"/r/real.py"}, links), ["/r/b.py", "/r/out.py"])
         self.assertEqual(fixmode.links_to_hash({"/r/real.py"}, {}), [])
 
+    def test_links_that_end_at_one_file_count_once(self):
+        links = {"/r/l2.py": "/o/x.py", "/r/l1.py": "/o/x.py", "/r/other.py": "/o/y.py"}
+        self.assertEqual(fixmode.links_to_hash(set(), links), ["/r/l1.py", "/r/other.py"])
+
     def test_pycache_is_not_skipped_because_ruff_does_not_skip_it(self):
         self.assertNotIn("__pycache__", fixmode.SKIPPED_FOLDERS)
         self.assertEqual(set(fixmode.SKIPPED_FOLDERS), {".git", ".ruff_cache", ".mypy_cache"})

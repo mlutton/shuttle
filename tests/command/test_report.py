@@ -50,6 +50,9 @@ class Tiny(unittest.TestCase):
     def test_skipped(self):
         pass
 """
+# a file in a folder with no __init__.py that nothing imports; its second line holds the marker
+# text inside a string, which coverage excludes without it being a marker comment
+NOPKG = 'z = 3\ntext = "see # not tested: only a string"\ny = 4\n'
 COULD_NOT = "The test report could not be produced"
 
 
@@ -72,6 +75,7 @@ class ReportTest(unittest.TestCase):
             self.write(name, "")
         self.write("shuttle/core/m.py", MODULE)
         self.write("tests/by_value/test_m.py", TESTS)
+        self.write("shuttle/core/sub/nopkg.py", NOPKG)
 
     def write(self, name, text):
         path = os.path.join(self.tree, name)
@@ -91,9 +95,23 @@ class ReportTest(unittest.TestCase):
         )
 
     def test_the_numbers_match_the_project_and_the_child_process_is_counted(self):
-        result = self.report()
+        pr = {
+            "REPORT_EVENT_NAME": "pull_request",
+            "REPORT_PR_HEAD_SHA": "a" * 40,
+            "REPORT_PR_BASE_SHA": "b" * 40,
+            "REPORT_RUN_SHA": "c" * 40,
+        }
+        result = self.report(**pr)
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
+        self.assertTrue(any(x.startswith("Commit: " + "a" * 40 + ", the head of") for x in lines))
+        self.assertIn("with the base " + "b" * 40, result.stdout)
+        self.assertRegex(result.stderr, r"report: 3 tests run in \d+\.\d{3} s under coverage")
+        # a file coverage has no data for still has a row, with its statements never run
+        nopkg = next(x for x in lines if x.startswith("shuttle/core/sub/nopkg.py"))
+        self.assertRegex(nopkg, r"nopkg\.py\s+2\s+2\s+0%\s+1, 3$")
+        self.assertIn("**The excluded lines and the marker list do not agree:**", lines)
+        self.assertTrue(any("nopkg.py line 2: holds the marker text" in x for x in lines))
         self.assertIn("- 3 run: 2 passed, 1 skipped, 0 failed, 0 errors.", lines)
         self.assertIn("by_value.test_m.Tiny.test_skipped: no reason but this one", lines)
         self.assertTrue(any(re.fullmatch(r"- Total time: \d+\.\d{3} s .*", x) for x in lines))
@@ -106,8 +124,7 @@ class ReportTest(unittest.TestCase):
         self.assertIn(
             "shuttle/core/m.py:10  reached only on a machine this project does not have", lines
         )
-        self.assertTrue(any(x.startswith("Commit `unknown (") for x in lines), result.stdout)
-        self.assertIn("command `./checks/report.sh`", result.stdout)
+        self.assertIn("Command: `./checks/report.sh`", result.stdout)
         # nothing was left behind in the tree
         left = [n for n in os.listdir(self.tree) if n.startswith(".coverage")]
         self.assertEqual(left, [])
@@ -119,6 +136,18 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(len(result.stdout.splitlines()), 1, result.stdout)
         self.assertTrue(result.stdout.startswith(COULD_NOT), result.stdout)
         self.assertIn("FileNotFoundError", result.stdout)
+
+    def test_a_missing_coverage_is_named_in_the_one_line_failure(self):
+        stub = os.path.join(self.tree, "stub", "coverage")
+        os.makedirs(stub)
+        with open(os.path.join(stub, "__init__.py"), "w") as f:
+            f.write("")
+        with open(os.path.join(stub, "__main__.py"), "w") as f:
+            f.write("import sys\nsys.exit('No module named coverage')\n")
+        result = self.report(PYTHONPATH=os.path.join(self.tree, "stub"))
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(len(result.stdout.splitlines()), 1)
+        self.assertIn("the run failed (exit 1): No module named coverage", result.stdout)
 
     def test_a_helper_that_cannot_start_or_prints_nothing_still_gets_the_line(self):
         for what in ("missing", "not parseable", "prints nothing"):

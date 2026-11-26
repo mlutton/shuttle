@@ -36,7 +36,18 @@ COMMAND = "./checks/report.sh"
 # As of 2026-11-26 the eight slowest tests are listed.
 SLOWEST = 8
 TEST_FOLDERS = ("by_value", "command", "boundary")
-MARKER = "# not tested:"
+# The marker text is built so that this very line does not contain it: coverage's exclusion
+# pattern is matched against source lines, so a line holding the text would be excluded.
+MARKER = "#" + " not tested:"
+# Scripts the tests also run from copies placed in temporary trees; that part is not counted
+# against these files (the copies are outside the measured folders).
+RUN_FROM_COPIES = (
+    "checks/fixmode.py",
+    "checks/guards.py",
+    "checks/names.py",
+    "checks/report.py",
+    "checks/timed_tests.py",
+)
 COULD_NOT = "The test report could not be produced"
 RUN_TIMEOUT_SECONDS = 600
 COVERAGE_ENVIRONMENT = (
@@ -61,7 +72,7 @@ class TestRecord:
 @dataclass(frozen=True)
 class FileCoverage:
     path: str
-    statements: int
+    statements: int | None  # None: coverage could not analyse the file ("not measured")
     missing: tuple[int, ...]  # lines of statements never run, and not marked as untested
     excluded: tuple[int, ...]  # lines carrying a "not tested" marker (statements not counted)
 
@@ -89,6 +100,7 @@ class Facts:
     files: tuple[FileCoverage, ...]
     markers: tuple[Marker, ...]
     failures: tuple[str, ...] = ()
+    marker_problems: tuple[str, ...] = ()
 
 
 # ------------------------------------------------------------------ pure functions
@@ -134,15 +146,27 @@ def time_per_folder(tests: tuple[TestRecord, ...]) -> list[tuple[str, int, float
 
 
 def find_markers(path: str, source: str) -> tuple[list[Marker], list[str]]:
-    """The "# not tested: <reason>" comments in a file's source (comments only, never text in
-    a string), and the problems with them: a marker with an empty reason, or a near miss
-    (`# not tested` without the colon) that coverage would not honour."""
+    """The not-tested marker comments in a file's source (comments only, never text in a
+    string), and the problems with them: a marker with an empty reason, a near miss (the text
+    without the colon) that coverage would not honour, and a line that holds the marker text
+    outside a comment (coverage matches source lines, so it would exclude that line, and the
+    list of markers would not show it). The excluded lines and the listed markers are thus
+    the same set, or the problems say where they differ."""
     found: list[Marker] = []
     problems: list[str] = []
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
     except (tokenize.TokenError, SyntaxError):
         return [], [f"{path}: could not be read for markers"]
+    comment_lines = {
+        t.start[0] for t in tokens if t.type == tokenize.COMMENT and MARKER in t.string
+    }
+    for number, text in enumerate(source.splitlines(), start=1):
+        if MARKER in text and number not in comment_lines:
+            problems.append(
+                f"{path} line {number}: holds the marker text outside a comment, so coverage "
+                "excludes it without it being listed"
+            )
     for token in tokens:
         if token.type != tokenize.COMMENT:
             continue
@@ -205,6 +229,61 @@ def normalize_coverage(data: dict[str, Any], root: str) -> list[FileCoverage]:
     return sorted(out, key=lambda f: f.path)
 
 
+def merge_rows(
+    walked: list[str], measured: list[FileCoverage], analysed: dict[str, FileCoverage]
+) -> tuple[FileCoverage, ...]:
+    """One row per walked file, in path order: coverage's own record when it has one, else
+    the analysis of the file (all its statements never run), else "not measured"."""
+    have = {f.path: f for f in measured}
+    return tuple(
+        have.get(path) or analysed.get(path) or FileCoverage(path, None, (), ())
+        for path in sorted(set(walked))
+    )
+
+
+def commit_text(facts: dict[str, str], local_sha: str, dirty: bool) -> str:
+    """What the report says about the commit it describes, from the CI event's facts (empty
+    on a local run) and the local checkout's. On a pull request run the code that ran is
+    GitHub's merge of the pull request's head with its base, so both are named."""
+    sha = re.compile(r"[0-9a-f]{7,64}")
+    head, base = facts.get("head", ""), facts.get("base", "")
+    if facts.get("event") == "pull_request" and sha.fullmatch(head) and sha.fullmatch(base):
+        merge = facts.get("run", "")
+        merged = f" (merge commit {merge})" if sha.fullmatch(merge) else ""
+        return (
+            f"{head}, the head of the pull request; this run was on GitHub's merge of it "
+            f"with the base {base}{merged}"
+        )
+    if not sha.fullmatch(local_sha):
+        return "unknown (not a git checkout)"
+    return local_sha + (" with uncommitted changes" if dirty else "")
+
+
+def event_facts(environ: dict[str, str]) -> dict[str, str]:
+    """The pull request facts the workflow passes in as environment variables."""
+    names = {
+        "event": "REPORT_EVENT_NAME",
+        "head": "REPORT_PR_HEAD_SHA",
+        "base": "REPORT_PR_BASE_SHA",
+        "run": "REPORT_RUN_SHA",
+    }
+    return {key: environ.get(name, "") for key, name in names.items()}
+
+
+def log_line(facts: Facts) -> str:
+    """One line for the job log (the report itself goes to the summary and the artifact)."""
+    return (
+        f"report: {len(facts.tests)} tests run in {facts.total_seconds:.3f} s under coverage "
+        f"(Python {facts.python})"
+    )
+
+
+def step_failure(what: str, code: int, stdout: str, stderr: str) -> str:
+    """Why a step failed: its name and the last line the tool itself printed."""
+    lines = (stderr.strip() or stdout.strip()).splitlines()
+    return f"{what} failed (exit {code}): {lines[-1] if lines else 'no output'}"
+
+
 def percent(statements: int, missing: int) -> str:
     return "n/a" if statements == 0 else f"{100 * (statements - missing) / statements:.0f}%"
 
@@ -227,14 +306,14 @@ def render_coverage(files: tuple[FileCoverage, ...]) -> list[str]:
     rows: list[tuple[str, ...]] = [
         (
             escape_name(f.path),
-            str(f.statements),
-            str(len(f.missing)),
-            percent(f.statements, len(f.missing)),
+            "not measured" if f.statements is None else str(f.statements),
+            "" if f.statements is None else str(len(f.missing)),
+            "" if f.statements is None else percent(f.statements, len(f.missing)),
             ranges(f.missing),
         )
         for f in files
     ]
-    total = sum(f.statements for f in files)
+    total = sum(f.statements or 0 for f in files)
     never = sum(len(f.missing) for f in files)
     rows.append(("total", str(total), str(never), percent(total, never), ""))
     return _table(rows, ("file", "statements", "never run", "run", "lines never run"))
@@ -257,13 +336,14 @@ def render_report(facts: Facts) -> str:
     skipped = [f"{escape_name(t.id)}: {escape_name(t.reason)}" for t in facts.tests if t.reason]
     slow = [f"{t.seconds:8.3f} s  {escape_name(t.id)}" for t in slowest(facts.tests)]
     folders = [
-        f"{name:<10}{count:>5} tests{seconds:>10.3f} s"
+        f"{name:<10}{count:>5} tests{seconds:>10.3f} s" if count else f"{name:<10}none yet"
         for name, count, seconds in time_per_folder(facts.tests)
     ]
+    copies = [f.path for f in facts.files if f.path in RUN_FROM_COPIES]
     out = [
         "## Test report for this run",
         "",
-        f"Commit `{escape_name(facts.commit)}`; command `{facts.command}`; "
+        f"Commit: {escape_name(facts.commit)}. Command: `{facts.command}`. "
         f"Python {escape_name(facts.python)}; coverage.py {escape_name(facts.coverage)}.",
         "",
         "Generated by this run, never checked in. Nothing fails on a number here. The suite "
@@ -296,15 +376,33 @@ def render_report(facts: Facts) -> str:
         "### Coverage",
         "",
         "Statements per Python file, the statements never run and their line ranges. "
-        "Child processes the tests start are measured; code that runs only from copies of "
-        "the scripts placed in temporary trees is not counted against the originals. "
-        "Statements on a line marked deliberately untested are left out of the counts and "
-        "listed below. The percentage is for orientation only.",
+        "Child processes the tests start are measured, except those started with an "
+        "environment of their own. Statements on a line marked deliberately untested are "
+        "left out of the counts and listed below. The percentage is for orientation only. "
+        "Every Python file under the measured folders has a row; a file coverage has no data "
+        "for shows all its statements as never run.",
         "",
         fenced(render_coverage(facts.files)),
-        "### Deliberately untested",
+        f"Totals are for Python {escape_name(facts.python)}; statement counts differ between "
+        "Python versions, so a local report and a hosted one are not to be compared number "
+        "for number.",
         "",
     ]
+    if copies:
+        out += [
+            "These files are also run from copies placed in temporary trees, and that part is "
+            "not counted against them, so their rows understate how much is exercised: "
+            + ", ".join(f"`{escape_name(c)}`" for c in copies)
+            + ".",
+            "",
+        ]
+    out += ["### Deliberately untested", ""]
+    if facts.marker_problems:
+        out += [
+            "**The excluded lines and the marker list do not agree:**",
+            "",
+            fenced([escape_name(p) for p in facts.marker_problems]),
+        ]
     if facts.markers:
         out += [
             f"Lines marked `{MARKER} <reason>`:",
@@ -339,10 +437,43 @@ def _run(args: list[str], root: str, env: dict[str, str]) -> subprocess.Complete
     )
 
 
+class ReportError(Exception):
+    """A step failed; the message says which and what the tool itself said last."""
+
+
 def _must(done: subprocess.CompletedProcess[str], what: str) -> None:
     if done.returncode != 0:
         sys.stderr.write(done.stdout + done.stderr)
-        raise RuntimeError(f"{what} failed (exit {done.returncode})")
+        raise ReportError(step_failure(what, done.returncode, done.stdout, done.stderr))
+
+
+def walked_files(root: str, sources: list[str]) -> list[str]:
+    """Every .py file under the measured folders, as paths relative to root with "/"
+    separators. No folder is skipped by name (the same rule as the rule test's walk)."""
+    found = [
+        os.path.relpath(os.path.join(folder, name), root).replace(os.sep, "/")
+        for source in sources
+        for folder, _, names in os.walk(os.path.join(root, source))
+        for name in names
+        if name.endswith(".py")
+    ]
+    return sorted(found)
+
+
+def analyse_unmeasured(rc: str, root: str, paths: list[str]) -> dict[str, FileCoverage]:
+    """Coverage's own count of the statements of files it has no data for (all never run)."""
+    import coverage  # imported here: only the runner needs it
+
+    cov = coverage.Coverage(config_file=rc)
+    cov.load()
+    out = {}
+    for path in paths:
+        try:
+            _, statements, excluded, missing, _ = cov.analysis2(os.path.join(root, path))
+        except coverage.CoverageException:
+            continue  # shown as "not measured"
+        out[path] = FileCoverage(path, len(statements), tuple(missing), tuple(excluded))
+    return out
 
 
 def source_markers(root: str, paths: list[str]) -> tuple[list[Marker], list[str]]:
@@ -371,10 +502,15 @@ def git_commit(root: str) -> str:
             ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True
         ).stdout.strip()
     except OSError:
-        return "unknown (git could not run)"
-    if not sha:
-        return "unknown (not a git checkout)"
-    return sha + (" plus uncommitted changes" if dirty else "")
+        return commit_text(event_facts(dict(os.environ)), "", False)
+    return commit_text(event_facts(dict(os.environ)), sha, bool(dirty))
+
+
+def pyproject_sources(pyproject: dict[str, Any]) -> list[str]:
+    return [
+        str(s)
+        for s in pyproject.get("tool", {}).get("coverage", {}).get("run", {}).get("source", [])
+    ]
 
 
 def gather(root: str, scratch: str) -> Facts:
@@ -397,10 +533,12 @@ def gather(root: str, scratch: str) -> Facts:
     with open(timing, encoding="utf-8") as timed_file:
         t = json.load(timed_file)
     with open(out, encoding="utf-8") as coverage_file:
-        files = tuple(normalize_coverage(json.load(coverage_file), root))
+        measured = normalize_coverage(json.load(coverage_file), root)
+    walked = walked_files(root, [s for s in pyproject_sources(pyproject)])
+    have = {f.path for f in measured}
+    analysed = analyse_unmeasured(rc, root, [w for w in walked if w not in have])
+    files = merge_rows(walked, measured, analysed)
     markers, problems = source_markers(root, [f.path for f in files])
-    if problems:
-        raise RuntimeError("; ".join(problems))
     tests = tuple(
         TestRecord(r["id"], float(r["seconds"]), r["outcome"], r["reason"]) for r in t["tests"]
     )
@@ -416,6 +554,7 @@ def gather(root: str, scratch: str) -> Facts:
         peak_children_kib=to_kib(int(t["maxrss_children"]), t["platform"]),
         files=files,
         markers=tuple(markers),
+        marker_problems=tuple(problems),
         failures=tuple(f"{r.id} ({r.outcome})" for r in tests if r.outcome in ("failed", "error")),
     )
 
@@ -425,12 +564,16 @@ def run() -> int:
     with tempfile.TemporaryDirectory() as scratch:
         facts = gather(root, scratch)
     sys.stdout.write(render_report(facts))
+    sys.stderr.write(log_line(facts) + "\n")
     return 0
 
 
 def main() -> int:
     try:
         return run()
+    except ReportError as error:  # a step failed; its own message says which
+        print(failure_line(str(error)))
+        return 1
     except Exception as error:  # an empty report must never pass for one
         traceback.print_exc()
         print(failure_line(f"{type(error).__name__}: {error}"))

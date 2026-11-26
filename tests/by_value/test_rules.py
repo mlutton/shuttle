@@ -25,6 +25,7 @@ import io
 import os
 import re
 import sys
+import tempfile
 import tokenize
 import tomllib
 import unittest
@@ -163,13 +164,25 @@ def _covers_rule(codes):
     return not named or any(BANNED_IMPORT_RULE.startswith(c) or c == "ALL" for c in named)
 
 
+def _leading_codes(text):
+    """The rule codes (letters then digits) a noqa lists, in order, up to the first word that
+    is not one: in `E501 all callers pass it` the code is E501 and the rest is prose."""
+    codes = []
+    for word in re.split(r"[,\s]+", text.strip()):
+        if not re.fullmatch(r"[A-Za-z]+[0-9]+", word):
+            break
+        codes.append(word)
+    return codes
+
+
 def _noqa_covers_rule(rest):
     """`rest` is what follows the word noqa in a comment: nothing or other words (blanket), or
-    a colon and a list of codes."""
+    a colon and a list of codes (a colon with no valid code is treated as blanket)."""
     stripped = rest.lstrip()
     if not stripped.startswith(":"):
         return True  # a blanket ignore covers every rule
-    return _covers_rule(stripped[1:])
+    codes = _leading_codes(stripped[1:])
+    return not codes or _covers_rule(" ".join(codes))
 
 
 def noqa_problems(source, path):
@@ -262,17 +275,24 @@ def _read(path):
         return f.read()
 
 
-def package_files():
-    """(path relative to shuttle/, source) for every .py file under shuttle/, recursively."""
-    paths = [
+def python_files(root):
+    """Every .py file under root, recursively, sorted. No folder is skipped by name: a source
+    file inside a folder called __pycache__ is still a module Python can import (as a
+    namespace package), and a folder whose name merely contains that text is just a folder.
+    The interpreter's own files there end in .pyc and are not .py files."""
+    return sorted(
         os.path.join(folder, name)
-        for folder, _, files in os.walk(PACKAGE)
-        if "__pycache__" not in folder
-        for name in sorted(files)
+        for folder, _, files in os.walk(root)
+        for name in files
         if name.endswith(".py")
-    ]
+    )
+
+
+def package_files(root=PACKAGE):
+    """(path relative to shuttle/, source) for every .py file under shuttle/, recursively."""
     return [
-        (os.path.relpath(path, PACKAGE).replace(os.sep, "/"), _read(path)) for path in sorted(paths)
+        (os.path.relpath(path, root).replace(os.sep, "/"), _read(path))
+        for path in python_files(root)
     ]
 
 
@@ -559,6 +579,9 @@ class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
         for source in (
             "x = 1  # noqa: E501",
             "x = 1  # noqa: E501, F401",
+            "x = 1  # noqa: E501 all callers pass it",
+            "x = 1  # noqa: E501 t",
+            "x = 1  # noqa: E501,F401 ti and tid are words",
             "# ruff: noqa: F401\nx = 1",
             "# ruff: disable[E501]\nx = 1",
             "x = 1  # a noqa mention in prose is not an ignore",
@@ -678,13 +701,25 @@ class TestThePackageItself(unittest.TestCase):
         self.assertEqual(check_package(files), [])
 
     def test_the_walk_sees_every_python_file_under_the_package(self):
-        counted = sum(
-            name.endswith(".py")
-            for folder, _, files in os.walk(PACKAGE)
-            if "__pycache__" not in folder
-            for name in files
-        )
+        counted = sum(name.endswith(".py") for _, _, files in os.walk(PACKAGE) for name in files)
         self.assertEqual(len(package_files()), counted)
+
+    def test_a_folder_with_the_text_pycache_in_its_name_is_walked_and_so_is_a_real_one(self):
+        with tempfile.TemporaryDirectory() as root:
+            for place in ("core/p__pycache__q", "core/__pycache__", "core/__pycache__/deep"):
+                os.makedirs(os.path.join(root, place))
+                with open(os.path.join(root, place, "m.py"), "w") as f:
+                    f.write("# ruff: noqa\nimport os\n")
+            with open(os.path.join(root, "core", "__pycache__", "m.cpython-312.pyc"), "wb") as f:
+                f.write(b"\0")
+            found = [path for path, _ in package_files(root)]
+            self.assertEqual(
+                found,
+                ["core/__pycache__/deep/m.py", "core/__pycache__/m.py", "core/p__pycache__q/m.py"],
+            )
+            problems = check_package(package_files(root))
+            self.assertEqual(len(problems), 6, problems)  # a lint ignore and the import, each
+            self.assertTrue(all(p.startswith("core/") for p in problems))
 
 
 class TestNotTestedMarkers(unittest.TestCase):

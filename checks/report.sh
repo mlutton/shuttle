@@ -12,6 +12,7 @@ if [ -z "${PYTHON:-}" ]; then
 fi
 out=$("$PYTHON" "$root/checks/report.py")
 code=$?
+# The only deciding in this script: empty output means the helper could not run at all.
 if [ -z "$out" ]; then
     echo "The test report could not be produced; see the job log for why."
     exit 1

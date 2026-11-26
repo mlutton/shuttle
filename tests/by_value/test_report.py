@@ -103,9 +103,122 @@ class MarkerTest(unittest.TestCase):
                 self.assertEqual(found, [], text)
                 self.assertEqual(len(problems), 1, text)
 
-    def test_text_in_a_string_is_not_a_marker(self):
-        found, problems = report.find_markers("a.py", 'x = "# not tested:"\n')
-        self.assertEqual((found, problems), ([], []))
+    def test_text_in_a_string_is_not_a_marker_and_is_reported_as_an_excluded_line(self):
+        # coverage matches source lines, so it excludes this line; the report must say so
+        found, problems = report.find_markers("a.py", f'x = "{report.MARKER} y"\n')
+        self.assertEqual(found, [])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("a.py line 1", problems[0])
+        self.assertIn("outside a comment", problems[0])
+
+    def test_a_docstring_line_holding_the_text_is_reported_by_its_own_line(self):
+        source = f'"""Doc\nmentions {report.MARKER} here\n"""\n'
+        _, problems = report.find_markers("a.py", source)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("a.py line 2", problems[0])
+
+    def test_a_real_marker_is_listed_and_raises_no_problem_so_excluded_and_listed_agree(self):
+        found, problems = report.find_markers("a.py", f"x = 1  {report.MARKER} why\n")
+        self.assertEqual(found, [report.Marker("a.py", 1, "why")])
+        self.assertEqual(problems, [])
+
+    def test_this_module_s_own_source_holds_the_marker_text_nowhere_outside_a_comment(self):
+        with open(os.path.join(CHECKS, "report.py"), encoding="utf-8") as f:
+            self.assertEqual(report.find_markers("checks/report.py", f.read()), ([], []))
+
+
+class RowsAndCommitTest(unittest.TestCase):
+    def test_the_rows_are_the_walked_files_whatever_coverage_found(self):
+        measured = [F("shuttle/a.py", 3, (2,), ()), F("shuttle/stray_data.py", 9, (), ())]
+        analysed = {"shuttle/sub/nopkg.py": F("shuttle/sub/nopkg.py", 4, (1, 2, 3, 4), ())}
+        walked = ["shuttle/sub/nopkg.py", "shuttle/a.py", "shuttle/gone.py"]
+        rows = report.merge_rows(walked, measured, analysed)
+        self.assertEqual([r.path for r in rows], sorted(walked))
+        by_path = {r.path: r for r in rows}
+        self.assertEqual(by_path["shuttle/sub/nopkg.py"].missing, (1, 2, 3, 4))
+        self.assertIsNone(by_path["shuttle/gone.py"].statements)
+
+    def test_a_file_that_could_not_be_analysed_says_not_measured_and_adds_nothing_to_totals(self):
+        text = report.render_report(
+            facts(files=(F("shuttle/x.py", None, (), ()), F("shuttle/y.py", 2, (1,), ())))
+        )
+        row = next(x for x in text.splitlines() if x.startswith("shuttle/x.py"))
+        self.assertIn("not measured", row)
+        total = next(x for x in text.splitlines() if x.startswith("total"))
+        self.assertRegex(total, r"total\s+2\s+1\s+50%")
+
+    PR = {"event": "pull_request", "head": "a" * 40, "base": "b" * 40, "run": "c" * 40}
+
+    def test_on_a_pull_request_the_head_is_named_and_the_merge_with_the_base_too(self):
+        text = report.commit_text(self.PR, "d" * 40, False)
+        self.assertTrue(text.startswith("a" * 40 + ", the head of the pull request"))
+        self.assertIn("merge of it with the base " + "b" * 40, text)
+        self.assertIn("merge commit " + "c" * 40, text)
+        self.assertNotIn("d" * 40, text)
+
+    def test_locally_it_is_head_and_says_when_the_tree_is_dirty(self):
+        self.assertEqual(report.commit_text({}, "d" * 40, False), "d" * 40)
+        self.assertEqual(
+            report.commit_text({}, "d" * 40, True), "d" * 40 + " with uncommitted changes"
+        )
+        self.assertEqual(report.commit_text({}, "", False), "unknown (not a git checkout)")
+
+    def test_odd_event_values_are_not_trusted(self):
+        for bad in (
+            {**self.PR, "head": "x`y"},
+            {**self.PR, "base": ""},
+            {**self.PR, "event": "push"},
+        ):
+            with self.subTest(bad=bad):
+                self.assertEqual(report.commit_text(bad, "d" * 40, False), "d" * 40)
+
+    def test_the_workflow_s_variables_become_the_event_facts(self):
+        env = {
+            "REPORT_EVENT_NAME": "pull_request",
+            "REPORT_PR_HEAD_SHA": "1" * 40,
+            "REPORT_PR_BASE_SHA": "2" * 40,
+            "REPORT_RUN_SHA": "3" * 40,
+            "PATH": "/x",
+        }
+        self.assertEqual(
+            report.event_facts(env),
+            {"event": "pull_request", "head": "1" * 40, "base": "2" * 40, "run": "3" * 40},
+        )
+        self.assertEqual(report.event_facts({}), {"event": "", "head": "", "base": "", "run": ""})
+
+    def test_the_job_log_line_has_the_count_and_the_time(self):
+        tests = (T("by_value.a", 1.0, "passed"),) * 3
+        line = report.log_line(facts(tests=tests, total_seconds=12.3456))
+        self.assertEqual(line, "report: 3 tests run in 12.346 s under coverage (Python 3.12.1)")
+
+    def test_a_failed_step_is_named_with_the_tools_own_last_line(self):
+        self.assertEqual(
+            report.step_failure("the run", 1, "", "Traceback\n  x\nNo module named coverage\n"),
+            "the run failed (exit 1): No module named coverage",
+        )
+        self.assertEqual(report.step_failure("json", 2, "", ""), "json failed (exit 2): no output")
+        self.assertTrue(
+            report.failure_line("the run failed (exit 1): No module named coverage").endswith(
+                "No module named coverage; see the job log."
+            )
+        )
+
+    def test_the_files_run_from_copies_are_named_under_the_table_only_when_present(self):
+        text = report.render_report(facts(files=(F("checks/fixmode.py", 5, (1,), ()),)))
+        self.assertIn("also run from copies placed in temporary trees", text)
+        self.assertIn("`checks/fixmode.py`", text.split("copies placed")[1])
+        self.assertNotIn(
+            "copies placed", report.render_report(facts(files=(F("a.py", 1, (), ()),)))
+        )
+
+    def test_the_python_version_sits_with_the_totals_and_counts_are_said_to_differ(self):
+        text = report.render_report(facts())
+        self.assertIn("Totals are for Python 3.12.1; statement counts differ between Python", text)
+
+    def test_marker_problems_are_a_visible_block_in_the_report(self):
+        text = report.render_report(facts(marker_problems=("a.py line 3: holds the text",)))
+        self.assertIn("**The excluded lines and the marker list do not agree:**", text)
+        self.assertIn("a.py line 3: holds the text", text)
 
 
 class ConfigTest(unittest.TestCase):
@@ -166,7 +279,7 @@ class RenderTest(unittest.TestCase):
             facts(tests=tests, total_seconds=1.9, files=files, markers=markers)
         )
         for expected in (
-            "Commit `abc123`; command `./checks/report.sh`; Python 3.12.1; coverage.py 7.13.0.",
+            "Commit: abc123. Command: `./checks/report.sh`. Python 3.12.1; coverage.py 7.13.0.",
             "- 3 run: 2 passed, 1 skipped, 0 failed, 0 errors.",
             "- Total time: 1.900 s",
             "- Peak memory: 4.0 MiB, the largest resident size any one process",
@@ -175,7 +288,7 @@ class RenderTest(unittest.TestCase):
             "   1.250 s  command.test_b.B.test_two",
             "by_value      1 tests     0.500 s",
             "command       2 tests     1.250 s",
-            "boundary      0 tests     0.000 s",
+            "boundary  none yet",
             "shuttle/a.py",
             "4-6, 9",
             "total  ",
@@ -192,7 +305,8 @@ class RenderTest(unittest.TestCase):
         self.assertIn("None skipped.", text)
         self.assertIn("No tests ran.", text)
         self.assertIn("No line carries a `# not tested: <reason>` marker.", text)
-        self.assertIn("by_value      0 tests     0.000 s", text)
+        self.assertIn("by_value  none yet", text)
+        self.assertNotIn("0 tests", text)
 
     def test_failures_are_named(self):
         text = report.render_report(facts(failures=("a.b (failed)",)))

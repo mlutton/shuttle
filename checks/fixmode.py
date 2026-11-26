@@ -115,9 +115,14 @@ def links_to_hash(hashed_targets: set[str], links: dict[str, str]) -> list[str]:
     """Which symbolic links to regular files to hash under their own path: those whose resolved
     target is not itself among the files already hashed (a link to such a file is the same
     content and would be counted twice; a link to a file outside the tree, or inside a
-    skipped folder, would otherwise be rewritten by ruff without anyone seeing it).
+    skipped folder, would otherwise be rewritten by ruff without anyone seeing it). Several
+    links, or a chain of them, that end at one file are one file: the first by path is hashed.
     links maps a link's path to its resolved target."""
-    return sorted(link for link, target in links.items() if target not in hashed_targets)
+    first: dict[str, str] = {}
+    for link in sorted(links):
+        if links[link] not in hashed_targets:
+            first.setdefault(links[link], link)
+    return sorted(first.values())
 
 
 def is_bytecode(folder: str, name: str) -> bool:

@@ -25,6 +25,12 @@ jobs:
         # whether the job passes; if the report cannot be made, it says so in one line. The
         # same bytes go to the job summary and to the artifact below.
         if: always()
+        env:
+          # What the report needs to name the pull request's own head, not GitHub's merge.
+          REPORT_EVENT_NAME: ${{ github.event_name }}
+          REPORT_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPORT_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REPORT_RUN_SHA: ${{ github.sha }}
         run: |
           ./checks/report.sh > "$RUNNER_TEMP/report.md" || true
           cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"

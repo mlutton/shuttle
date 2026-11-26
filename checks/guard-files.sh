@@ -12,6 +12,7 @@ line="The guard file listing could not be produced; see the job log for why."
 [ "$#" -eq 1 ] || { echo "usage: checks/guard-files.sh <base commit>" >&2; exit 2; }
 out=$("${PYTHON:-python3}" "$(dirname "$0")/guards.py" "$@")
 code=$?
+# The only deciding in this script: empty output means the helper could not run at all.
 if [ -z "$out" ]; then
     echo "$line"
     exit 1
