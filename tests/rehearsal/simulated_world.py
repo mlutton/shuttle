@@ -278,8 +278,8 @@ class SimulatedWorld:
 
         return restore
 
-    @staticmethod
-    def _name_of(number):
+    def _name_of(self, number):
+        self._enter("signals.name_of", number)
         try:
             return signal.Signals(number).name
         except ValueError:
