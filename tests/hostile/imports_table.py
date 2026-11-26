@@ -4,7 +4,7 @@ A row is a tuple: (label, source, folder, caught_by, note, problem).
 
 - label: what the form attacks.
 - source: the module's text.
-- folder: where the module sits under shuttle/ ("core", "core/drivers", "shell", ...). A
+- folder: where the module sits under shuttle/ ("core", "core/drivers", "shell", "world", ...). A
   folder whose last part starts with "noinit" is made without an __init__.py (the linter then
   has no package to resolve a relative import against). A folder ending in ".py" is the
   module's own place ("core/p1/__init__.py", "stray.py"), for the forms that depend on it.
@@ -14,7 +14,9 @@ A row is a tuple: (label, source, folder, caught_by, note, problem).
   problem). None: the form is allowed and neither says anything.
 - problem: for a form the rule test refuses, a phrase every right refusal contains (the
   test asserts the problem it returns holds it, so a form refused for the wrong reason, or by
-  the wrong rule, still fails); empty otherwise.
+  the wrong rule, still fails); empty otherwise. The shell folder is exempt from the linter (the
+  same rule bans importing shuttle.shell, and a shell module imports its siblings), so a row
+  about the shell is the rule test's alone; so is the world folder, which the linter exempts.
 - note: why, when it is not obvious; "known gap" marks a form that gets through both guards
   although it should not (the verdict then is None and the reason is written here).
 
@@ -653,8 +655,58 @@ IMPORTS = (
         "",
         "",
     ),
-    # ---- what the shell may do
-    ("the shell importing os", "import os, subprocess, codecs", "shell", None, "", ""),
+    # ---- what the shell may do, and what it may not (it orchestrates; the world reaches)
+    (
+        "the shell importing os",
+        "import os, subprocess, codecs",
+        "shell",
+        "rule test",
+        "the linter does not look: the shell folder is exempt from it, because the same rule bans "
+        "importing shuttle.shell",
+        "allow-list",
+    ),
+    (
+        "the shell importing a library that reaches the world",
+        "import subprocess",
+        "shell",
+        "rule test",
+        "",
+        "allow-list",
+    ),
+    ("the shell importing signal", "import signal", "shell", "rule test", "", "allow-list"),
+    ("the shell importing time", "from time import sleep", "shell", "rule test", "", "allow-list"),
+    ("the shell importing datetime", "import datetime", "shell", "rule test", "", "allow-list"),
+    ("the shell importing socket", "import socket", "shell", "rule test", "", "allow-list"),
+    ("the shell importing uuid", "import uuid", "shell", "rule test", "", "allow-list"),
+    ("the shell importing shutil", "import shutil", "shell", "rule test", "", "allow-list"),
+    ("the shell importing sys", "import sys", "shell", "rule test", "", "allow-list"),
+    (
+        "the shell importing a module nobody thought of",
+        "import fcntl",
+        "shell",
+        "rule test",
+        "",
+        "allow-list",
+    ),
+    (
+        "the shell importing a library inside a function",
+        "def f():\n    import subprocess\n",
+        "shell",
+        "rule test",
+        "",
+        "allow-list",
+    ),
+    ("the shell importing json and hashlib", "import json, hashlib", "shell", None, "", ""),
+    ("the shell importing contextlib", "from contextlib import suppress", "shell", None, "", ""),
+    ("the shell importing typing", "from typing import Any", "shell", None, "", ""),
+    (
+        "the shell importing the operations' type",
+        "from shuttle.core.shapes import Operations",
+        "shell",
+        None,
+        "",
+        "",
+    ),
     ("the shell importing the core", "from shuttle.core import decisions", "shell", None, "", ""),
     (
         "the shell importing another shell module",
@@ -666,7 +718,22 @@ IMPORTS = (
     ),
     ("the shell, relative, a sibling", "from . import records", "shell", None, "", ""),
     ("the shell, relative, the core", "from ..core import decisions", "shell", None, "", ""),
-    ("the shell using open and print", "print(open('f').read())", "shell", None, "", ""),
+    (
+        "the shell using open and print",
+        "print(open('f').read())",
+        "shell",
+        "rule test",
+        "",
+        "the shell mentions",
+    ),
+    (
+        "the shell using open on its own",
+        "x = open('f')",
+        "shell",
+        "rule test",
+        "",
+        "the shell mentions",
+    ),
     # ---- the world folder: the only place that reaches the world, and holding no decisions
     ("the world importing os and subprocess", "import os, subprocess, socket", WORLD, None, "", ""),
     (

@@ -7,7 +7,7 @@ target-version = "py312"  # minimum Python: 3.12 (the whole suite passes on it; 
 [tool.ruff.lint]
 # E4, E7, E9: pycodestyle errors; F: pyflakes; I: import order; B: bugbear;
 # UP: pyupgrade; SIM: simplify; C901: complexity per function.
-# TID251: libraries that reach the world are banned outside the shell (see below).
+# TID251: libraries that reach the world are banned outside the world folder (see below).
 # PLR1702: at most three nested blocks in a function, tests included.
 select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "C901", "TID251", "PLR1702"]
 # PLR1702 is a preview rule in ruff 0.14.10. With explicit-preview-rules only the rules
@@ -25,60 +25,62 @@ max-complexity = 10
 max-nested-blocks = 3
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-# The linter's half of the shell-isolation rule: it points at the line. The other half, an
-# allow-list for everything under shuttle/core/, is tests/by_value/test_rules.py. Where a
-# module sits is its classification: shuttle/core/ decides, shuttle/shell/ reaches the world.
-"os".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"sys".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"io".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"pathlib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"shutil".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"tempfile".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"glob".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"fileinput".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"stat".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"subprocess".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"multiprocessing".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"threading".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"concurrent".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"asyncio".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"pty".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"time".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"datetime".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"sched".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"zoneinfo".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"signal".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"socket".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"ssl".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"select".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"selectors".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"http".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"urllib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"ftplib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"smtplib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"email".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"xmlrpc".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"socketserver".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"webbrowser".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"getpass".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"platform".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"pwd".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"grp".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"resource".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"ctypes".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"sqlite3".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"shelve".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"dbm".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"pickle".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"random".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"secrets".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"uuid".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"importlib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"runpy".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"logging".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"atexit".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"sysconfig".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
-"site".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
+# The linter's half of the isolation rule: it points at the line. The other half, an allow-list
+# for everything under shuttle/core/ and shuttle/shell/, is tests/by_value/test_rules.py. Where a
+# module sits is its classification: shuttle/core/ decides, shuttle/shell/ orchestrates (calls
+# the operations it is handed and the core), shuttle/world/ is the real set of operations and the
+# only place that reaches the world.
+"os".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"sys".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"io".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"pathlib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"shutil".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"tempfile".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"glob".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"fileinput".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"stat".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"subprocess".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"multiprocessing".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"threading".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"concurrent".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"asyncio".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"pty".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"time".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"datetime".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"sched".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"zoneinfo".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"signal".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"socket".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"ssl".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"select".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"selectors".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"http".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"urllib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"ftplib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"smtplib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"email".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"xmlrpc".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"socketserver".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"webbrowser".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"getpass".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"platform".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"pwd".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"grp".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"resource".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"ctypes".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"sqlite3".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"shelve".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"dbm".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"pickle".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"random".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"secrets".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"uuid".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"importlib".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"runpy".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"logging".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"atexit".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"sysconfig".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
+"site".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
 "shuttle.shell".msg = "Nothing under shuttle/core/ may import shuttle/shell/. Move the code that needs it into the shell folder, or pass what it computes in as an argument."
 "shuttle.__main__".msg = "The entry file belongs to the shell: nothing under shuttle/core/ may import it. Move the code that needs it into shuttle/shell/."
 
@@ -88,10 +90,15 @@ max-nested-blocks = 3
 ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
-# Where the world may be reached: the shell folder, the entry file that hands to it, and the tests.
-# Everything else under shuttle/ (the core folder, sub-folders included) is held to the ban.
-"shuttle/shell/**" = ["TID251"]  # the shell: clock, signals, files, environment, processes, streams
+# Where the libraries on the ban list may be imported: the world folder, and the tests. Everything
+# else under shuttle/ (the core folder, sub-folders included) is held to the ban.
+# Two more are exempt, for another reason. The shell folder and the entry file import
+# `shuttle.shell`, which the same rule bans so that the core cannot (ruff cannot ban an import in
+# one folder only). The shell holds no banned library: tests/by_value/test_rules.py gives it an
+# allow-list of standard library modules, refuses `open` and `print`, and lets only shell/cli.py
+# import the world.
 "shuttle/world/**" = ["TID251"]  # the world: files, processes, the clock, signals, the environment, identity, streams
+"shuttle/shell/**" = ["TID251"]  # imports its own siblings (see above); held to its allow-list by the rule test
 "shuttle/__main__.py" = ["TID251"]  # hands straight to the shell's command line
 "tests/**" = ["TID251"]  # tests spawn processes and use temporary folders; the ban is for the package
 
