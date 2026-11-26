@@ -1,19 +1,17 @@
 """Stand-ins: steps of a run whose real work belongs to a later increment.
 
 Each has the signature the real step will have and returns a marked value, so
-a receipt field fed by it says "cannot tell" instead of an invented value.
+a receipt field fed by it says "not built" instead of an invented value. (A real step will
+say "looked, found nothing" by returning an empty value; a key it leaves out, or `None`, reads
+as "cannot tell".)
 """
-
-from typing import Any
 
 from shuttle.core import fixed
 from shuttle.core.shapes import StepResult
 
 
-def _stand_in(name: str, **extra: Any) -> StepResult:
-    result = {fixed.STAND_IN_KEY: name}
-    result.update(extra)
-    return result
+def _stand_in(name: str) -> StepResult:
+    return {fixed.STAND_IN_KEY: name}
 
 
 def run_gates(gates: object) -> StepResult:

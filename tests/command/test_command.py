@@ -4,6 +4,7 @@ Each test makes its own temporary root holding the records location and the
 small scripts. Nothing outside it is read or written.
 """
 
+import importlib
 import json
 import os
 import signal
@@ -14,6 +15,9 @@ import time
 import unittest
 
 from shuttle.core import fixed
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+flat = importlib.import_module("rehearsal.receipts").flat
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -107,7 +111,7 @@ class CommandSeam(unittest.TestCase):
         request = self.read("req-1.request.json")
         self.assertEqual(request["header"]["record_type"], "request")
         self.assertEqual(request["header"]["request_id"], "req-1")
-        self.assertEqual(request["input"], self.document())
+        self.assertEqual(json.loads(request["input"]), self.document())
         self.assertEqual(request["header"]["thread"], "thread-1")
         self.assertEqual(request["header"]["round"], 1)
         self.assertEqual(request["header"]["kind"], "plain")
@@ -119,7 +123,7 @@ class CommandSeam(unittest.TestCase):
         outcome = self.read("req-1.outcome.json")
         self.assertEqual(outcome["header"]["record_type"], "outcome")
         self.assertEqual(outcome["header"]["request_id"], "req-1")
-        self.assertEqual(outcome["header"]["format_version"], 1)
+        self.assertEqual(outcome["header"]["record_version"], fixed.RECORD_VERSION)
         for field, value in (
             ("thread", "thread-1"),
             ("round", 1),
@@ -129,59 +133,67 @@ class CommandSeam(unittest.TestCase):
             ("executor_name", "command"),
         ):
             self.assertEqual(outcome["header"][field], value, field)
-        receipt = outcome["receipt"]
+        raw = outcome["receipt"]
         self.assertEqual(
-            sorted(receipt),
+            sorted(raw),
             sorted(
                 [
-                    "the_ending",
-                    "what_execution_saw",
-                    "what_the_executor_driver_observed",
-                    "what_the_executor_said",
+                    "ending",
+                    "execution",
+                    "executor_driver",
+                    "executor",
                 ]
             ),
         )
         for group, names in fixed.RECEIPT_GROUPS.items():
-            self.assertEqual(sorted(receipt[group]), sorted(names), group)
+            self.assertEqual(sorted(raw[group]), sorted(names), group)
             for name in names:
-                value = receipt[group][name]
-                self.assertNotIn(value, (None, "", [], {}), f"{group}.{name}")
-        ending = receipt["the_ending"]
+                held = raw[group][name]
+                self.assertEqual(sorted(held), ["state", "value"], f"{group}.{name}")
+                self.assertIn(held["state"], fixed.STATES, f"{group}.{name}")
+        receipt = flat(raw)
+        ending = receipt["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("ended_by_itself", "none", "none"),
         )
-        saw = receipt["what_execution_saw"]
+        saw = receipt["execution"]
         self.assertEqual(saw["exit_code"], 0)
         self.assertEqual(saw["signal"], "none")
         self.assertEqual(len(saw["input_hash"]), 64)
-        self.assertEqual(
-            receipt["what_the_executor_driver_observed"]["executor_driver_name"], "command"
-        )
-        self.assertEqual(saw["observed_runtime"], "cannot tell")
+        self.assertEqual(receipt["executor_driver"]["executor_driver_name"], "command")
+        self.assertEqual(saw["observed_runtime"], "not built")
 
-    def test_what_is_a_stand_in_says_cannot_tell(self):
+    def test_what_is_a_stand_in_says_not_built_and_what_a_plain_command_cannot_say_is_cannot_tell(
+        self,
+    ):
         self.run_command(self.document())
         receipt = self.read("req-1.outcome.json")["receipt"]
         for group, field in [
-            ("what_execution_saw", "fingerprint_before"),
-            ("what_execution_saw", "fingerprint_after"),
-            ("what_execution_saw", "changed_nothing"),
-            ("what_execution_saw", "delivered"),
-            ("what_execution_saw", "teardown_failure"),
-            ("what_execution_saw", "peak_memory"),
-            ("the_ending", "everything_stopped"),
-            ("what_the_executor_said", "claim"),
+            ("execution", "fingerprint_before"),
+            ("execution", "fingerprint_after"),
+            ("execution", "changed_nothing"),
+            ("execution", "delivered"),
+            ("execution", "teardown_failure"),
+            ("execution", "peak_memory_bytes"),
+            ("ending", "everything_stopped"),
+            ("executor", "claim"),
         ]:
-            self.assertEqual(receipt[group][field], "cannot tell", field)
+            self.assertEqual(receipt[group][field], {"state": "not built", "value": None}, field)
+        # Both states in one receipt: the command driver cannot look at its tool's own commits.
+        driver = receipt["executor_driver"]
+        self.assertEqual(driver["tool_made_own_commits"], {"state": "cannot tell", "value": None})
+        states = {held["state"] for group in receipt.values() for held in group.values()}
+        self.assertIn("not built", states)
+        self.assertIn("cannot tell", states)
 
     def test_the_exit_code_of_the_script_is_recorded_and_does_not_change_the_ending(self):
         done, lines = self.run_command(self.document(exit_code=7))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "ended_by_itself")
-        receipt = self.read("req-1.outcome.json")["receipt"]
-        self.assertEqual(receipt["what_execution_saw"]["exit_code"], 7)
-        self.assertEqual(receipt["the_ending"]["ending"], "ended_by_itself")
+        receipt = flat(self.read("req-1.outcome.json")["receipt"])
+        self.assertEqual(receipt["execution"]["exit_code"], 7)
+        self.assertEqual(receipt["ending"]["ending"], "ended_by_itself")
 
     def test_a_second_run_with_the_same_request_id_is_refused_and_leaves_the_first_records_untouched(
         self,
@@ -204,7 +216,7 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(
             lines, ["req-1", os.path.join(self.records, "req-1.outcome.json"), "could_not_start"]
         )
-        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("could_not_start", "unknown_field", "input_check"),
@@ -215,14 +227,6 @@ class CommandSeam(unittest.TestCase):
 
     def deep_nesting(self):
         return "[" * 1500 + "]" * 1500
-
-    def this_python_cannot_write_the_nesting(self):
-        """One cheap probe at the depth the tests use; no search over larger depths."""
-        try:
-            json.dumps({"a": json.loads(self.deep_nesting())}, indent=2)
-        except RecursionError:
-            return True
-        return False
 
     def test_a_request_record_cut_short_by_a_file_size_limit_leaves_no_record_and_the_id_works_afterwards(
         self,
@@ -267,31 +271,9 @@ class CommandSeam(unittest.TestCase):
             sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"]
         )
 
-    def test_a_document_whose_request_record_cannot_be_built_leaves_no_record_and_the_id_works_afterwards(
+    def test_a_document_nested_deeper_than_some_pythons_can_write_as_json_gets_both_records_written_and_parseable(
         self,
     ):
-        if not self.this_python_cannot_write_the_nesting():
-            self.skipTest("this Python writes this nesting; the next test covers what happens then")
-        text = json.dumps(self.document())[:-1] + f', "surprise": {self.deep_nesting()}}}'
-        done, lines = self.run_command(text)
-        self.assertNotEqual(done.returncode, 0)
-        self.assertEqual(lines[-1], "could_not_start")
-        self.assertEqual(len(done.stderr.strip().splitlines()), 1)
-        self.assertIn("NOT spent", done.stderr)
-        self.assertEqual(os.listdir(self.records), [], "neither record may exist")
-        done, lines = self.run_command(self.document())
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(lines[-1], "ended_by_itself")
-        self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
-        self.assertEqual(self.read("req-1.outcome.json")["header"]["request_id"], "req-1")
-
-    def test_a_document_nested_deeper_than_old_pythons_could_write_gets_both_records_written_and_parseable(
-        self,
-    ):
-        if self.this_python_cannot_write_the_nesting():
-            self.skipTest(
-                "this Python cannot write this nesting; the previous test covers what happens then"
-            )
         text = json.dumps(self.document())[:-1] + f', "surprise": {self.deep_nesting()}}}'
         done, lines = self.run_command(text)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -299,9 +281,10 @@ class CommandSeam(unittest.TestCase):
             lines[-1], "could_not_start"
         )  # the unknown field "surprise" is refused, and recorded
         request = self.read("req-1.request.json")
-        self.assertEqual(request["input"]["surprise"], json.loads(self.deep_nesting()))
+        self.assertEqual(json.loads(request["input"])["surprise"], json.loads(self.deep_nesting()))
         self.assertEqual(
-            self.read("req-1.outcome.json")["receipt"]["the_ending"]["reason"], "unknown_field"
+            flat(self.read("req-1.outcome.json")["receipt"])["ending"]["reason"],
+            "unknown_field",
         )
         self.assertEqual(
             sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"]
@@ -337,7 +320,8 @@ class CommandSeam(unittest.TestCase):
         )
         self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
         self.assertEqual(
-            self.read("req-1.outcome.json")["receipt"]["the_ending"]["ending"], "ended_by_itself"
+            flat(self.read("req-1.outcome.json")["receipt"])["ending"]["ending"],
+            "ended_by_itself",
         )
 
     def test_a_tool_that_is_not_installed_could_not_start_at_the_executor_driver_check(self):
@@ -346,7 +330,7 @@ class CommandSeam(unittest.TestCase):
         done, lines = self.run_command(doc)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
-        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["reason"], ending["failed_step"]),
             ("tool_not_installed", "executor_driver_check"),
@@ -409,7 +393,7 @@ class CommandSeam(unittest.TestCase):
         stdout, stderr = proc.communicate(timeout=30)
         self.assertEqual(proc.returncode, 0, stderr)
         self.assertEqual(stdout.splitlines()[-1], "stopped_from_outside")
-        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("stopped_from_outside", "signal", "none"),
@@ -422,7 +406,7 @@ class CommandSeam(unittest.TestCase):
         done, lines = self.run_command(doc)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
-        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["reason"], ending["failed_step"]), ("no_time_limit", "input_check")
         )
@@ -436,7 +420,7 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stderr, "")
         self.assertEqual(lines[-1], "could_not_start")
-        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("could_not_start", "launch_failed", "launch"),
@@ -449,7 +433,7 @@ class CommandSeam(unittest.TestCase):
                     os.remove(os.path.join(self.records, name))
                 done, lines = self.run_command(self.document(format_version=bad))
                 self.assertEqual(lines[-1], "could_not_start")
-                ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+                ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
                 self.assertEqual(
                     (ending["reason"], ending["failed_step"]),
                     ("unknown_format_version", "input_check"),
@@ -513,7 +497,7 @@ class CommandSeam(unittest.TestCase):
         done, lines = self.run_command(self.document(environment=["SHUTTLE_TEST_ABSENT"]), env=env)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(lines[-1], "could_not_start")
-        ending = self.read("req-1.outcome.json")["receipt"]["the_ending"]
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]
         self.assertEqual(
             (ending["reason"], ending["failed_step"]), ("missing_setting", "executor_driver_check")
         )
@@ -560,8 +544,8 @@ class CommandSeam(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertEqual(lines[0], "req-1")
         self.assertEqual(lines[-1], "ended_by_itself")
-        printed = json.loads("\n".join(lines[1:-1]))
-        self.assertEqual(printed["the_ending"]["ending"], "ended_by_itself")
+        printed = flat(json.loads("\n".join(lines[1:-1])))
+        self.assertEqual(printed["ending"]["ending"], "ended_by_itself")
         self.assertIn("not written", done.stderr)
         self.assertEqual(os.listdir(self.records), ["req-1.request.json"])
 

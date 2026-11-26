@@ -7,6 +7,7 @@ on a real child that is still running when the limit passes: it is asked to end,
 record says time_limit, and the child is gone.
 """
 
+import importlib
 import io
 import json
 import os
@@ -17,6 +18,9 @@ import unittest
 
 from shuttle.shell import run
 from shuttle.world import real
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+flat = importlib.import_module("rehearsal.receipts").flat
 
 LIMIT = 0.5  # long enough that the script has started before the limit passes
 
@@ -63,13 +67,13 @@ class FullFlowOfATimeLimit(unittest.TestCase):
             self.assertEqual(code, 0, err.getvalue())
             self.assertEqual(out.getvalue().splitlines()[-1], "time_limit")
             with open(os.path.join(records, "g-1.outcome.json")) as f:
-                receipt = json.load(f)["receipt"]
-            ending = receipt["the_ending"]
+                receipt = flat(json.load(f)["receipt"])
+            ending = receipt["ending"]
             self.assertEqual(
                 (ending["ending"], ending["reason"], ending["failed_step"]),
                 ("time_limit", "time_limit", "none"),
             )
-            self.assertEqual(receipt["what_execution_saw"]["signal"], "SIGTERM")  # it was asked
+            self.assertEqual(receipt["execution"]["signal"], "SIGTERM")  # it was asked
             self.assertGreaterEqual(elapsed, LIMIT)
             with open(pid_file) as f:
                 pid = int(f.read())

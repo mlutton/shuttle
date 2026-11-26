@@ -24,6 +24,7 @@ from shuttle.shell import run
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 scenes = importlib.import_module("rehearsal.scene")
+flat = importlib.import_module("rehearsal.receipts").flat
 
 AFTER_THE_CLAIM = [name for name, _ in run.STEPS][2:14]  # steps 3 to 14
 CNS, EF = "could_not_start", "execution_failed"
@@ -195,7 +196,7 @@ class EveryOperationFailingInTurn(unittest.TestCase):
 
 class Injection(unittest.TestCase):
     def ending_of(self, world):
-        ending = scenes.outcome(world)["receipt"]["the_ending"]
+        ending = flat(scenes.outcome(world)["receipt"])["ending"]
         return ending["ending"], ending["reason"], ending["failed_step"]
 
     def assert_outcome(self, world, expected):
@@ -253,9 +254,9 @@ class Injection(unittest.TestCase):
         world.will_raise("identity.host_name", RuntimeError("injected"))
         code, lines, err = scenes.run_in(world)
         self.assertEqual(code, 0, err)
-        receipt = scenes.outcome(world)["receipt"]
-        self.assertEqual(receipt["the_ending"]["ending"], "ended_by_itself")
-        self.assertEqual(receipt["what_execution_saw"]["exit_code"], "cannot tell")
+        receipt = flat(scenes.outcome(world)["receipt"])
+        self.assertEqual(receipt["ending"]["ending"], "ended_by_itself")
+        self.assertEqual(receipt["execution"]["exit_code"], "cannot tell")
         self.assertEqual(lines[-1], "ended_by_itself")
 
     def test_writing_the_record_failing_prints_the_receipt_then_the_ending_and_exits_non_zero(self):
@@ -268,7 +269,7 @@ class Injection(unittest.TestCase):
         self.assertEqual(lines[0], "inj-1")
         self.assertEqual(lines[-1], "ended_by_itself")
         self.assertEqual(
-            json.loads("\n".join(lines[1:-1]))["the_ending"]["ending"],
+            flat(json.loads("\n".join(lines[1:-1])))["ending"]["ending"],
             "ended_by_itself",
         )
         self.assertIn("not written", err)
@@ -301,15 +302,15 @@ class Injection(unittest.TestCase):
     def test_a_document_that_cannot_be_built_into_a_request_record_spends_no_id_and_writes_nothing(
         self,
     ):
-        # By value: JSON read from a file can be built into text on this Python, so the step
-        # that claims the id is given a document with a loop in it (the real command's test of
-        # this, test_command.py, skips where the Python can write the nesting it uses).
+        # By value: the input is kept as the text the caller gave, which can always be built into
+        # a record, so the step that claims the id is given something that cannot be (a loop)
+        # in the text's place.
         real = dict(run.STEPS)["claim_request_id"]
 
         def with_a_loop(state):
             loop = []
             loop.append(loop)
-            state["raw"] = dict(state["raw"], loop=loop)
+            state["input_text"] = loop
             real(state)
 
         world = scenes.scene()

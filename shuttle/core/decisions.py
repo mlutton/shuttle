@@ -5,17 +5,24 @@ Nothing here touches a file, the clock, the environment or a process.
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any
 
-from shuttle.core import fixed
+from shuttle.core import fixed, pairs
 from shuttle.core.shapes import (
     Conclusion,
     Decision,
     Document,
     DocumentCheck,
+    EndingGroup,
+    ExecutionGroup,
+    ExecutorDriverGroup,
+    ExecutorGroup,
     Facts,
     HeaderSource,
+    Outcome,
+    Pair,
     Receipt,
+    ReceiptFacts,
+    RecordHeader,
     StepResult,
 )
 
@@ -82,7 +89,7 @@ def _decide(f: Facts) -> Decision:
     return _decide_after_launch(f)
 
 
-def _decide_before_launch(f: Facts) -> Decision | None:
+def _decide_before_launch(f: Mapping[str, object]) -> Decision | None:
     """The decision when a step before the launch refused or failed, else None."""
     claim = f.get("id_claim", "ok")
     if claim == "used":
@@ -110,13 +117,13 @@ def _decide_before_launch(f: Facts) -> Decision | None:
         value = f.get(step)
         if value is None or value == "ok":
             continue
-        if value in bad:
+        if isinstance(value, str) and value in bad:
             return _decision(_CNS, bad[value], step)
         return _before_launch_error(step)
     return None
 
 
-def _decide_after_launch(f: Facts) -> Decision:
+def _decide_after_launch(f: Mapping[str, object]) -> Decision:
     wait = f.get("wait")
     if wait not in _WAIT:
         return _after_launch_error()
@@ -141,7 +148,7 @@ def _decide_after_launch(f: Facts) -> Decision:
     return _decision("ended_by_itself")
 
 
-def check_decision(decision: Mapping[str, Any]) -> list[str]:
+def check_decision(decision: Mapping[str, object]) -> list[str]:
     """Problems with a decision, judged against the fixed list. Empty when fine.
 
     For a reader of records and for the tests; the writer never blocks on it.
@@ -149,7 +156,7 @@ def check_decision(decision: Mapping[str, Any]) -> list[str]:
     ending = decision.get("ending")
     reason = decision.get("reason")
     step = decision.get("failed_step")
-    if ending not in fixed.ENDINGS:
+    if not isinstance(ending, str) or ending not in fixed.ENDINGS:
         return [f"ending {ending!r} is not on the list"]
     reasons = fixed.REASONS_BY_ENDING[ending]
     if reason == fixed.NONE:
@@ -157,7 +164,7 @@ def check_decision(decision: Mapping[str, Any]) -> list[str]:
         if step != fixed.NONE:
             problems.append(f"failed step {step!r} needs a reason")
         return problems
-    if reason not in reasons:
+    if not isinstance(reason, str) or reason not in reasons:
         return [f"reason {reason!r} does not belong to ending {ending}"]
     if step not in fixed.STEPS_FOR_REASON[reason]:
         return [f"failed step {step!r} does not go with reason {reason}"]
@@ -171,13 +178,15 @@ def check_decision(decision: Mapping[str, Any]) -> list[str]:
     return []
 
 
-def ending_conflicts(known: Mapping[str, Any], receipt: Receipt) -> list[str]:
+def ending_conflicts(known: Mapping[str, object], receipt: Mapping[str, object]) -> list[str]:
     """Problems when a receipt's ending differs from the ending already known."""
-    shown = receipt.get("the_ending", {})
+    shown = receipt.get("ending", {})
+    if not isinstance(shown, Mapping):
+        shown = {}
     return [
-        f"{key} is {shown.get(key)!r} in the receipt but {known[key]!r} was known"
+        f"{key} is {pairs.text_of(shown.get(key))!r} in the receipt but {known[key]!r} was known"
         for key in ("ending", "reason", "failed_step")
-        if shown.get(key) != known[key]
+        if pairs.text_of(shown.get(key)) != known[key]
     ]
 
 
@@ -229,7 +238,7 @@ _STEP_FAILURES: dict[str, tuple[str | None, Facts]] = {
 
 def facts_after_error(step: str) -> Facts:
     """The facts a step leaves when it raises an error. Observing, kept files and teardown leave none."""
-    return dict(_STEP_FAILURES.get(step, (None, {}))[1])
+    return _STEP_FAILURES.get(step, (None, {}))[1].copy()
 
 
 def failed_step_after_error(step: str) -> str | None:
@@ -269,7 +278,7 @@ def wait_cause(child_exited: bool, deadline_passed: bool, signal_name: str | Non
     return None
 
 
-def _failed_before_launch(f: Facts) -> bool:
+def _failed_before_launch(f: Mapping[str, object]) -> bool:
     return bool(
         f.get("input_check")
         or f.get("executor_driver_check")
@@ -280,7 +289,7 @@ def _failed_before_launch(f: Facts) -> bool:
     )
 
 
-def step_runs(step: str, facts: Facts) -> bool:
+def step_runs(step: str, facts: Mapping[str, object]) -> bool:
     """Whether a step runs, given the facts so far.
 
     The last step always runs. The first runs once, until a header is formed. After a refusal only the claim of the request id
@@ -305,7 +314,7 @@ def step_runs(step: str, facts: Facts) -> bool:
     return True
 
 
-def outcome_kind(facts: Facts) -> str:
+def outcome_kind(facts: Mapping[str, object]) -> str:
     """What the last step must do: "unreadable", "not_recorded" or "record"."""
     if facts.get("unreadable") or facts.get("header_source") is None:
         return "unreadable"
@@ -323,7 +332,7 @@ def result_status(result: object) -> str:
     )
 
 
-def conclude(outcome: Mapping[str, Any]) -> Conclusion:
+def conclude(outcome: Outcome) -> Conclusion:
     """What the command prints and returns, from how the last step went.
 
     outcome: {"kind": "written" | "write_failed" | "not_recorded" | "unreadable",
@@ -376,8 +385,8 @@ _DOCUMENT_FIELDS = (
 )
 _EXECUTOR_FIELDS = ("name", "settings")
 _COMMAND_SETTINGS = ("command", "arguments")
-_ID_CHARACTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-_NAME_CHARACTERS = _ID_CHARACTERS
+_ID_CHARACTERS = fixed.ID_CHARACTERS
+_NAME_CHARACTERS = fixed.ID_CHARACTERS
 
 
 def _valid_request_id(value: object) -> bool:
@@ -483,10 +492,10 @@ def _executor_refusal(executor: object) -> tuple[str, str] | None:
 
 def _document_refusal(raw: Document) -> tuple[str, str] | None:
     """(reason, problem) when a document whose header can be formed is refused, else None."""
-    if not _plain_int(raw.get("format_version")) or raw["format_version"] != fixed.FORMAT_VERSION:
+    if not _plain_int(raw.get("format_version")) or raw["format_version"] != fixed.INPUT_VERSION:
         return (
             "unknown_format_version",
-            f"format_version must be the integer {fixed.FORMAT_VERSION}",
+            f"format_version must be the integer {fixed.INPUT_VERSION}",
         )
     unknown = _unknown_names(raw, _DOCUMENT_FIELDS)
     if unknown:
@@ -595,6 +604,21 @@ def build_environment(
 # --------------------------------------------------------------------- the records
 
 
+def record_name(request_id: str, kind: str) -> str:
+    """The name of a request id's record of one kind (a kind on `fixed.RECORD_KINDS`).
+
+    The one place record names are made.
+    """
+    if kind not in fixed.RECORD_KINDS:
+        raise ValueError(f"{kind!r} is not a kind of record")
+    return f"{request_id}.{kind}.json"
+
+
+def temporary_name(name: str, process_number: int) -> str:
+    """The name a record has while it is being written: its own, then `.tmp-`, then the process number."""
+    return f"{name}.tmp-{process_number}"
+
+
 def join_path(folder: str, name: str) -> str:
     """A name inside a folder, written the way os.path.join writes it on a POSIX system."""
     if not folder or folder.endswith("/"):
@@ -604,7 +628,7 @@ def join_path(folder: str, name: str) -> str:
 
 def build_header(
     record_type: str, header_source: HeaderSource, record_id: str, time: str
-) -> dict[str, Any]:
+) -> RecordHeader:
     return {
         "record_id": record_id,
         "record_type": record_type,
@@ -616,7 +640,7 @@ def build_header(
         "asked_by": header_source["asked_by"],
         "kind": header_source["kind"],
         "executor_name": header_source["executor_name"],
-        "format_version": fixed.FORMAT_VERSION,
+        "record_version": fixed.RECORD_VERSION,
     }
 
 
@@ -624,137 +648,283 @@ def is_stand_in(value: object) -> bool:
     return isinstance(value, dict) and fixed.STAND_IN_KEY in value
 
 
-def _from_step(result: StepResult | None, key: str) -> Any:
-    """A receipt value from a step's result.
+def _from_step(result: StepResult | None, key: str) -> Pair:
+    """A receipt field from a step's result.
 
-    A step that was not reached gives none. A stand-in gives "cannot tell".
-    A real step gives the value under key.
+    A step that was not reached gives none. A stand-in gives "not built".
+    A real step gives what it returned under key: a value, "none" when that is empty,
+    "cannot tell" when it returned nothing for the key or something JSON cannot hold.
     """
     if result is None:
-        return fixed.NONE
+        return pairs.none()
     if is_stand_in(result):
-        return fixed.CANNOT_TELL
-    return result.get(key, fixed.CANNOT_TELL)
+        return pairs.not_built()
+    values: Mapping[str, object] = result
+    if values.get(key) is None:
+        return pairs.cannot_tell()
+    return pairs.observed(values[key])
 
 
-def _plain(value: Any) -> Any:
-    return fixed.NONE if value is None else value
-
-
-def _changed_nothing(steps: Mapping[str, StepResult]) -> Any:
+def _changed_nothing(steps: Mapping[str, StepResult]) -> Pair:
     before, after = steps.get("opening_fingerprint"), steps.get("closing_freeze")
     if before is None or after is None:
-        return fixed.NONE
+        return pairs.none()
     if is_stand_in(before) or is_stand_in(after):
-        return fixed.CANNOT_TELL
-    return before.get("fingerprint") == after.get("fingerprint")
+        return pairs.not_built()
+    return pairs.value(before.get("fingerprint") == after.get("fingerprint"))
 
 
-def build_receipt(decision: Mapping[str, Any], facts: Facts) -> Receipt:
-    """Build the receipt from the decision and the facts gathered. Every field is present.
+def _driver_group_of(value: Pair) -> ExecutorDriverGroup:
+    return {
+        "executor_driver_name": value,
+        "executor_driver_version": value,
+        "tool_version": value,
+        "model": value,
+        "effort": value,
+        "tokens_in": value,
+        "tokens_out": value,
+        "tokens_cached": value,
+        "activity": value,
+        "session_id": value,
+        "refused_actions": value,
+        "quota_level": value,
+        "vendor_limit_reached": value,
+        "vendor_limit_reset": value,
+        "tool_made_own_commits": value,
+        "load_lists_differ": value,
+        "load_lists_kept_file": value,
+        "changed_self_loaded_file": value,
+        "waiting_question": value,
+    }
+
+
+def _executor_group_all(value: Pair) -> ExecutorGroup:
+    return {
+        "statement_state": value,
+        "statement_hash": value,
+        "statement_location": value,
+        "claim": value,
+    }
+
+
+def _execution_group_of(value: Pair) -> ExecutionGroup:
+    return {
+        "execution_version": value,
+        "host": value,
+        "started_at": value,
+        "ended_at": value,
+        "observed_runtime": value,
+        "duration_gates_seconds": value,
+        "duration_opening_freeze_seconds": value,
+        "duration_executor_seconds": value,
+        "duration_closing_freeze_seconds": value,
+        "duration_delivery_seconds": value,
+        "input_hash": value,
+        "reference_hashes": value,
+        "fingerprint_before": value,
+        "fingerprint_after": value,
+        "changed_nothing": value,
+        "files_added": value,
+        "files_changed": value,
+        "files_deleted": value,
+        "files_list_kept_file": value,
+        "delivered": value,
+        "delivery_branch": value,
+        "delivery_branch_reason": value,
+        "exit_code": value,
+        "signal": value,
+        "peak_memory_bytes": value,
+        "processor_time_seconds": value,
+        "session_file_kept_at": value,
+        "teardown_failure": value,
+        "stop_reason": value,
+        "stop_asker": value,
+    }
+
+
+def _executor_group_of(steps: Mapping[str, StepResult], launched: bool) -> ExecutorGroup:
+    kept = steps.get("kept_files")
+    if not launched:
+        return _executor_group_all(pairs.none())
+    return {
+        "statement_state": _from_step(kept, "statement_state"),
+        "statement_hash": _from_step(kept, "statement_hash"),
+        "statement_location": _from_step(kept, "statement_location"),
+        "claim": _from_step(kept, "claim"),
+    }
+
+
+class ReceiptNotBuilt(ValueError):
+    """A receipt was assembled with a field that is not a state and value pair, or a missing one.
+
+    `problems` names each field refused, as "<group>: field <name>: <why>".
+    """
+
+    def __init__(self, problems: list[str]) -> None:
+        super().__init__("; ".join(problems))
+        self.problems = problems
+
+
+def build_receipt(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
+    """Build the receipt from the decision and the facts gathered. Every field is a pair.
+
+    Raises ReceiptNotBuilt when any field is not a pair of a state and a value (a bare string
+    where a pair belongs, from a step or a driver), or a field is missing.
 
     facts: receipt_id, execution_version, host, input_hash, launched, started_at,
-    ended_at, executor_duration, exit_code, signal, executor_driver_observations (dict, or
-    None when the observation failed or never happened), stand_ins (step name to
+    ended_at, executor_duration, exit_code, signal, executor_driver_observations (None
+    when the observation failed or never happened), stand_ins (step name to
     result; a step not reached is absent), reason_text.
     """
+    receipt = _assemble(decision, facts)
+    problems = check_receipt(receipt)
+    if problems:
+        raise ReceiptNotBuilt(problems)
+    return receipt
+
+
+def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
     steps = facts["stand_ins"]
     launched = facts["launched"]
     reason = facts.get("reason_text")
     if reason is None:
         reason = fixed.NONE if decision["reason"] == fixed.NONE else fixed.CANNOT_TELL
     observed = facts.get("executor_driver_observations")
-    unlooked = fixed.NONE
+    boundary = steps.get("boundary")
+    # A step the run never reached looked at nothing: "none".
+    unlooked = pairs.none()
 
-    receipt = {
-        group: {name: fixed.NONE for name in names} for group, names in fixed.RECEIPT_GROUPS.items()
+    ending: EndingGroup = {
+        "ending": pairs.of_text(_text_of(decision, "ending")),
+        "reason": pairs.of_text(_text_of(decision, "reason")),
+        "failed_step": pairs.of_text(_text_of(decision, "failed_step")),
+        "reason_text": pairs.of_text(reason),
+        "receipt_id": pairs.observed(facts["receipt_id"]),
+        "everything_stopped": _from_step(steps.get("stop_confirmation"), "everything_stopped"),
     }
-    receipt["the_ending"].update(
-        decision,
-        reason_text=reason,
-        receipt_id=facts["receipt_id"],
-        everything_stopped=_from_step(steps.get("stop_confirmation"), "everything_stopped"),
-        execution_version=facts["execution_version"],
-        host=facts["host"],
-    )
-    receipt["what_execution_saw"].update(
-        started_at=_plain(facts["started_at"]),
-        ended_at=_plain(facts["ended_at"]),
-        # Nothing observes the runtime yet: cannot tell once the executor started, none before.
-        observed_runtime=fixed.CANNOT_TELL if launched else unlooked,
-        duration_gates=_from_step(steps.get("gates"), "duration"),
-        duration_opening_freeze=_from_step(steps.get("opening_fingerprint"), "duration"),
-        duration_executor=_plain(facts["executor_duration"]),
-        duration_closing_freeze=_from_step(steps.get("closing_freeze"), "duration"),
-        duration_delivery=_from_step(steps.get("delivery"), "duration"),
-        input_hash=facts["input_hash"],
-        reference_hashes=fixed.NONE,
-        fingerprint_before=_from_step(steps.get("opening_fingerprint"), "fingerprint"),
-        fingerprint_after=_from_step(steps.get("closing_freeze"), "fingerprint"),
-        changed_nothing=_changed_nothing(steps),
-        files_added=_from_step(steps.get("closing_freeze"), "files_added"),
-        files_changed=_from_step(steps.get("closing_freeze"), "files_changed"),
-        files_deleted=_from_step(steps.get("closing_freeze"), "files_deleted"),
-        files_list_kept_file=_from_step(steps.get("kept_files"), "files_list"),
-        delivered=_from_step(steps.get("delivery"), "delivered"),
-        delivery_branch=_from_step(steps.get("delivery"), "branch"),
-        delivery_branch_reason=_from_step(steps.get("delivery"), "branch_reason"),
-        exit_code=_plain(facts["exit_code"]),
-        signal=_plain(facts["signal"]),
-        peak_memory=_from_step(steps.get("boundary"), "peak_memory") if launched else unlooked,
-        processor_time=_from_step(steps.get("boundary"), "processor_time")
+    saw: ExecutionGroup = {
+        "execution_version": pairs.observed(facts["execution_version"]),
+        "host": pairs.observed(facts["host"]),
+        "started_at": pairs.observed(facts["started_at"]),
+        "ended_at": pairs.observed(facts["ended_at"]),
+        # The runtime is observed through the boundary, which is a stand-in.
+        "observed_runtime": pairs.not_built() if launched else unlooked,
+        "duration_gates_seconds": _from_step(steps.get("gates"), "duration_seconds"),
+        "duration_opening_freeze_seconds": _from_step(
+            steps.get("opening_fingerprint"), "duration_seconds"
+        ),
+        "duration_executor_seconds": pairs.observed(facts["executor_duration"]),
+        "duration_closing_freeze_seconds": _from_step(
+            steps.get("closing_freeze"), "duration_seconds"
+        ),
+        "duration_delivery_seconds": _from_step(steps.get("delivery"), "duration_seconds"),
+        "input_hash": pairs.cannot_tell()
+        if facts["input_hash"] is None
+        else pairs.observed(facts["input_hash"]),
+        "reference_hashes": pairs.none(),
+        "fingerprint_before": _from_step(steps.get("opening_fingerprint"), "fingerprint"),
+        "fingerprint_after": _from_step(steps.get("closing_freeze"), "fingerprint"),
+        "changed_nothing": _changed_nothing(steps),
+        "files_added": _from_step(steps.get("closing_freeze"), "files_added"),
+        "files_changed": _from_step(steps.get("closing_freeze"), "files_changed"),
+        "files_deleted": _from_step(steps.get("closing_freeze"), "files_deleted"),
+        "files_list_kept_file": _from_step(steps.get("kept_files"), "files_list"),
+        "delivered": _from_step(steps.get("delivery"), "delivered"),
+        "delivery_branch": _from_step(steps.get("delivery"), "branch"),
+        "delivery_branch_reason": _from_step(steps.get("delivery"), "branch_reason"),
+        "exit_code": pairs.observed(facts["exit_code"]),
+        "signal": pairs.observed(facts["signal"]),
+        "peak_memory_bytes": _from_step(boundary, "peak_memory_bytes") if launched else unlooked,
+        "processor_time_seconds": _from_step(boundary, "processor_time_seconds")
         if launched
         else unlooked,
-        session_file_kept_at=_from_step(steps.get("kept_files"), "session_file"),
-        teardown_failure=_from_step(steps.get("teardown"), "failure"),
-        stop_reason=_from_step(steps.get("stop_confirmation"), "stop_reason"),
-        stop_asker=_from_step(steps.get("stop_confirmation"), "stop_asker"),
-    )
-    if observed is not None:
-        receipt["what_the_executor_driver_observed"].update(observed)
-    elif launched:
-        receipt["what_the_executor_driver_observed"].update(
-            {
-                name: fixed.CANNOT_TELL
-                for name in fixed.RECEIPT_GROUPS["what_the_executor_driver_observed"]
-            }
-        )
-    receipt["what_the_executor_said"].update(
-        {
-            name: _from_step(steps.get("kept_files"), name) if launched else unlooked
-            for name in fixed.RECEIPT_GROUPS["what_the_executor_said"]
-        }
-    )
-    return receipt
-
-
-def minimal_receipt(decision: Mapping[str, Any]) -> Receipt:
-    """The receipt when building the full one failed: the decision, and "cannot tell" for everything else."""
-    receipt = {
-        group: {name: fixed.CANNOT_TELL for name in names}
-        for group, names in fixed.RECEIPT_GROUPS.items()
+        "session_file_kept_at": _from_step(steps.get("kept_files"), "session_file"),
+        "teardown_failure": _from_step(steps.get("teardown"), "failure"),
+        "stop_reason": _from_step(steps.get("stop_confirmation"), "stop_reason"),
+        "stop_asker": _from_step(steps.get("stop_confirmation"), "stop_asker"),
     }
-    receipt["the_ending"].update(decision)
-    return receipt
+    driver = (
+        observed
+        if observed is not None
+        else _driver_group_of(pairs.cannot_tell() if launched else unlooked)
+    )
+    return {
+        "ending": ending,
+        "execution": saw,
+        "executor_driver": driver,
+        "executor": _executor_group_of(steps, launched),
+    }
 
 
-def check_receipt(receipt: Receipt) -> list[str]:
-    """Problems with a receipt, judged against the fixed list. Empty when fine."""
+def _text_of(decision: Mapping[str, object], key: str) -> str:
+    value = decision[key]
+    return value if isinstance(value, str) else fixed.CANNOT_TELL
+
+
+def minimal_receipt(decision: Mapping[str, object]) -> Receipt:
+    """The receipt when building the full one failed: the decision, and "cannot tell" for everything else."""
+    unknown = pairs.cannot_tell()
+    ending: EndingGroup = {
+        "ending": pairs.of_text(_text_of(decision, "ending")),
+        "reason": pairs.of_text(_text_of(decision, "reason")),
+        "failed_step": pairs.of_text(_text_of(decision, "failed_step")),
+        "reason_text": unknown,
+        "receipt_id": unknown,
+        "everything_stopped": unknown,
+    }
+    return {
+        "ending": ending,
+        "execution": _execution_group_of(unknown),
+        "executor_driver": _driver_group_of(unknown),
+        "executor": _executor_group_all(unknown),
+    }
+
+
+# The ending group's own "nothing" and "cannot tell" are states, never the word held as a value.
+_FIELDS_THAT_SAY_IT_BY_STATE = ("ending", "reason", "failed_step", "reason_text")
+
+
+def _state_words_held_as_values(ending: Mapping[str, object]) -> list[str]:
+    problems = []
+    for name in _FIELDS_THAT_SAY_IT_BY_STATE:
+        held = ending.get(name)
+        if (
+            isinstance(held, dict)
+            and held.get("state") == fixed.VALUE
+            and held.get("value") in (fixed.NONE, fixed.CANNOT_TELL, fixed.NOT_BUILT)
+        ):
+            problems.append(
+                f"ending: field {name} holds the word {held['value']!r} as a value; "
+                "that is said by the state"
+            )
+    return problems
+
+
+def check_receipt(receipt: Mapping[str, object]) -> list[str]:
+    """Problems with a receipt as read back (or built), judged against the fixed list. Empty when fine."""
     problems = []
     if set(receipt) != set(fixed.RECEIPT_GROUPS):
         return [f"the receipt's groups are {sorted(receipt)}"]
     for group, names in fixed.RECEIPT_GROUPS.items():
         held = receipt[group]
+        if not isinstance(held, Mapping):
+            problems.append(f"{group}: is not a group of fields")
+            continue
         for name in sorted(set(names) - set(held)):
             problems.append(f"{group}: field {name} is missing")
         for name in sorted(set(held) - set(names)):
             problems.append(f"{group}: field {name} is not on the list")
         for name in names:
-            if name in held and (held[name] is None or held[name] in ("", [], {})):
-                problems.append(
-                    f"{group}: field {name} holds nothing; it must be a value, 'none' or 'cannot tell'"
-                )
-    ending = receipt["the_ending"]
-    if all(k in ending for k in ("ending", "reason", "failed_step")):
-        problems += check_decision({k: ending[k] for k in ("ending", "reason", "failed_step")})
+            problem = pairs.problem_with(held[name]) if name in held else None
+            if problem:
+                problems.append(f"{group}: field {name}: {problem}")
+    ending = receipt["ending"]
+    if isinstance(ending, Mapping):
+        problems += _state_words_held_as_values(ending)
+    if isinstance(ending, Mapping) and all(
+        k in ending for k in ("ending", "reason", "failed_step")
+    ):
+        problems += check_decision(
+            {k: pairs.text_of(ending[k]) for k in ("ending", "reason", "failed_step")}
+        )
     return problems

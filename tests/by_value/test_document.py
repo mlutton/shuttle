@@ -4,6 +4,7 @@ import copy
 import unittest
 
 from shuttle.core import decisions as core
+from shuttle.core import fixed
 
 GOOD = {
     "format_version": 1,
@@ -163,6 +164,28 @@ class ParseCommandLine(unittest.TestCase):
         for argv in ([], ["run"], ["run", "a", "b"], ["frob", "x"]):
             with self.subTest(argv):
                 self.assertIn("refusal", core.parse_command_line(argv))
+
+
+class TwoVersionNumbers(unittest.TestCase):
+    """The input document and the records carry their own version, each checked on its own."""
+
+    def test_the_two_numbers_are_not_the_same_number(self):
+        self.assertNotEqual(fixed.INPUT_VERSION, fixed.RECORD_VERSION)
+
+    def test_a_document_is_checked_against_the_input_version(self):
+        self.assertEqual(GOOD["format_version"], fixed.INPUT_VERSION)
+        self.assertIsNone(core.validate_document(GOOD)["refusal"])
+
+    def test_a_document_that_names_the_records_version_is_refused(self):
+        checked = core.validate_document(with_change(format_version=fixed.RECORD_VERSION))
+        self.assertEqual(checked["refusal"]["reason"], "unknown_format_version")
+
+    def test_a_header_carries_the_records_version_and_not_the_inputs(self):
+        source = core.validate_document(GOOD)["header_source"]
+        header = core.build_header("outcome", source, "rec-1", "2026-01-01T00:00:00Z")
+        self.assertEqual(header["record_version"], fixed.RECORD_VERSION)
+        self.assertNotIn("format_version", header)
+        self.assertNotEqual(header["record_version"], GOOD["format_version"])
 
 
 if __name__ == "__main__":

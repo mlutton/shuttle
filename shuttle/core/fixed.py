@@ -1,12 +1,31 @@
 """The fixed values: the one list the writer and any checker both read.
 
-Adding a value here is a format version change.
+Adding a value here changes the record version, and for a value the input document may name, the input version.
 """
 
-FORMAT_VERSION = 1
+from typing import Final
 
+# Two version numbers, each checked on its own. The input document carries one (its key is
+# `format_version`); the records carry the other (the header's `record_version`).
+INPUT_VERSION = 1
+RECORD_VERSION = 2
+
+# The four states of a receipt field, in the one list. A field is a pair of a state and a value.
+VALUE = "value"  # looked, and found this
 NONE = "none"  # looked, and there is nothing
 CANNOT_TELL = "cannot tell"  # could not look
+NOT_BUILT = "not built"  # the step behind this field is still a stand-in
+# While stand-ins exist NOT_BUILT is a state; when the last one is replaced, remove it from here.
+STATES = (VALUE, NONE, CANNOT_TELL, NOT_BUILT)
+
+# The characters a request id (and an environment variable's name) may hold. A dot is not one of
+# them, so a record's name, `<id>.<kind>.json`, reads back to its id and kind unambiguously.
+ID_CHARACTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+
+# The kinds of record that live beside each other under one request id. Only the request and
+# outcome records are written; the stop record and the liveness file have their names reserved
+# here and nothing more is defined for them yet.
+RECORD_KINDS = ("request", "outcome", "stop", "liveness")
 
 ENDINGS = (
     "ended_by_itself",
@@ -119,25 +138,25 @@ del _reason
 
 # The receipt: four groups, by who knows the fact.
 RECEIPT_GROUPS = {
-    "the_ending": (
+    "ending": (
         "ending",
         "reason",
         "failed_step",
         "reason_text",
         "receipt_id",
         "everything_stopped",
+    ),
+    "execution": (
         "execution_version",
         "host",
-    ),
-    "what_execution_saw": (
         "started_at",
         "ended_at",
         "observed_runtime",
-        "duration_gates",
-        "duration_opening_freeze",
-        "duration_executor",
-        "duration_closing_freeze",
-        "duration_delivery",
+        "duration_gates_seconds",
+        "duration_opening_freeze_seconds",
+        "duration_executor_seconds",
+        "duration_closing_freeze_seconds",
+        "duration_delivery_seconds",
         "input_hash",
         "reference_hashes",
         "fingerprint_before",
@@ -152,14 +171,14 @@ RECEIPT_GROUPS = {
         "delivery_branch_reason",
         "exit_code",
         "signal",
-        "peak_memory",
-        "processor_time",
+        "peak_memory_bytes",
+        "processor_time_seconds",
         "session_file_kept_at",
         "teardown_failure",
         "stop_reason",
         "stop_asker",
     ),
-    "what_the_executor_driver_observed": (
+    "executor_driver": (
         "executor_driver_name",
         "executor_driver_version",
         "tool_version",
@@ -180,7 +199,7 @@ RECEIPT_GROUPS = {
         "changed_self_loaded_file",
         "waiting_question",
     ),
-    "what_the_executor_said": (
+    "executor": (
         "statement_state",
         "statement_hash",
         "statement_location",
@@ -189,4 +208,4 @@ RECEIPT_GROUPS = {
 }
 
 # The mark a stand-in step puts on what it returns.
-STAND_IN_KEY = "stand_in"
+STAND_IN_KEY: Final = "stand_in"

@@ -25,11 +25,12 @@ from shuttle.core.drivers import command
 from shuttle.core.shapes import (
     Conclusion,
     Decision,
+    HeaderSource,
     LaunchSpec,
     Operations,
     Process,
     Receipt,
-    State,
+    RunState,
     StepResult,
 )
 from shuttle.shell import records, stand_ins
@@ -105,11 +106,12 @@ def start_in_boundary(
     return {fixed.STAND_IN_KEY: "boundary", "process": process}
 
 
-def step_read_and_validate_document(state: State) -> None:
+def step_read_and_validate_document(state: RunState) -> None:
     facts = state["facts"]
     try:
         data = state["world"].files.read(state["document_path"])
-        raw = json.loads(data.decode("utf-8"))
+        text = data.decode("utf-8")
+        raw = json.loads(text)
     except (OSError, ValueError) as error:
         facts["unreadable"] = True
         state["problem"] = (
@@ -117,6 +119,7 @@ def step_read_and_validate_document(state: State) -> None:
         )
         return
     state["raw"] = raw
+    state["input_text"] = text
     state["input_hash"] = hashlib.sha256(data).hexdigest()
     checked = decisions.validate_document(raw)
     if checked["header_source"] is None:
@@ -128,13 +131,21 @@ def step_read_and_validate_document(state: State) -> None:
     facts["header_source"] = checked["header_source"]
     if checked["refusal"]:
         facts["input_check"] = checked["refusal"]["reason"]
-        state["problems"]["input_check"] = checked["problem"]
+        state["problems"]["input_check"] = checked["problem"] or ""
     state["out"].write(checked["header_source"]["request_id"] + "\n")
     state["out"].flush()
 
 
-def step_claim_request_id(state: State) -> None:
-    facts, source, world = state["facts"], state["facts"]["header_source"], state["world"]
+def _header_source(state: RunState) -> HeaderSource:
+    """The header source the steps after reading the document may rely on."""
+    source = state["facts"].get("header_source")
+    if source is None:
+        raise RuntimeError("no header source: the document was not read")
+    return source
+
+
+def step_claim_request_id(state: RunState) -> None:
+    facts, source, world = state["facts"], _header_source(state), state["world"]
     header = decisions.build_header(
         "request", source, world.identity.new_id(), world.clock.timestamp()
     )
@@ -143,7 +154,7 @@ def step_claim_request_id(state: State) -> None:
             state["world"],
             source["records_location"],
             source["request_id"],
-            {"header": header, "input": state["raw"]},
+            {"header": header, "input": state["input_text"]},
         )
     except records.RecordNotBuilt as error:
         facts["id_claim"] = "unusable"  # nothing is claimed; no record is written either way
@@ -164,7 +175,7 @@ def step_claim_request_id(state: State) -> None:
         facts["id_claim"] = "ok"
 
 
-def step_run_input_checks_and_executor_driver_check(state: State) -> None:
+def step_run_input_checks_and_executor_driver_check(state: RunState) -> None:
     # The input checks are real in the first step (the document's shape). This step is the
     # executor driver's check and the check of the named environment variables.
     world = state["world"]
@@ -178,27 +189,27 @@ def step_run_input_checks_and_executor_driver_check(state: State) -> None:
     )
     if reason:
         state["facts"]["executor_driver_check"] = reason
-        state["problems"]["executor_driver_check"] = text
+        state["problems"]["executor_driver_check"] = text or ""
 
 
-def step_run_gates(state: State) -> None:  # stand-in
+def step_run_gates(state: RunState) -> None:  # stand-in
     state["stand_ins"]["gates"] = stand_ins.run_gates([])
     state["facts"]["gates"] = decisions.result_status(state["stand_ins"]["gates"])
 
 
-def step_set_up_run_area(state: State) -> None:  # stand-in
+def step_set_up_run_area(state: RunState) -> None:  # stand-in
     state["stand_ins"]["setup"] = stand_ins.set_up_run_area(command.declare()["needs_setup"])
     state["facts"]["setup"] = decisions.result_status(state["stand_ins"]["setup"])
 
 
-def step_take_opening_fingerprint(state: State) -> None:  # stand-in
+def step_take_opening_fingerprint(state: RunState) -> None:  # stand-in
     state["stand_ins"]["opening_fingerprint"] = stand_ins.take_opening_fingerprint(None)
     state["facts"]["opening_freeze"] = decisions.result_status(
         state["stand_ins"]["opening_fingerprint"]
     )
 
 
-def step_launch_executor(state: State) -> None:
+def step_launch_executor(state: RunState) -> None:
     world = state["world"]
     spec = command.launch(state["raw"]["executor"]["settings"])
     names = state["raw"].get("environment", [])
@@ -209,7 +220,7 @@ def step_launch_executor(state: State) -> None:
     state["facts"]["launch"] = "ok"
 
 
-def step_wait_for_the_end(state: State) -> None:
+def step_wait_for_the_end(state: RunState) -> None:
     world = state["world"]
     process = state["stand_ins"]["boundary"]["process"]
     facts = state["facts"]
@@ -232,7 +243,7 @@ def step_wait_for_the_end(state: State) -> None:
     state["ended_at"] = world.clock.timestamp()
 
 
-def step_stop_everything_and_confirm_empty(state: State) -> None:  # stand-in
+def step_stop_everything_and_confirm_empty(state: RunState) -> None:  # stand-in
     state["stand_ins"]["stop_confirmation"] = stand_ins.stop_and_confirm_empty(
         state["stand_ins"]["boundary"]
     )
@@ -243,33 +254,33 @@ def step_stop_everything_and_confirm_empty(state: State) -> None:  # stand-in
         state["facts"]["stop"] = "confirmed" if status == "ok" else "not_confirmed"
 
 
-def step_observe(state: State) -> None:
-    state["executor_driver_observations"] = command.observe(fixed.NONE, fixed.CANNOT_TELL)
+def step_observe(state: RunState) -> None:
+    state["executor_driver_observations"] = command.observe()
 
 
-def step_take_closing_freeze(state: State) -> None:  # stand-in
+def step_take_closing_freeze(state: RunState) -> None:  # stand-in
     state["stand_ins"]["closing_freeze"] = stand_ins.take_closing_freeze(
         None, state["stand_ins"].get("opening_fingerprint")
     )
     state["facts"]["closing_freeze"] = decisions.result_status(state["stand_ins"]["closing_freeze"])
 
 
-def step_deliver(state: State) -> None:  # stand-in
+def step_deliver(state: RunState) -> None:  # stand-in
     state["stand_ins"]["delivery"] = stand_ins.deliver(
         None, state["stand_ins"].get("closing_freeze")
     )
     state["facts"]["delivery"] = decisions.result_status(state["stand_ins"]["delivery"])
 
 
-def step_move_kept_files(state: State) -> None:  # stand-in
+def step_move_kept_files(state: RunState) -> None:  # stand-in
     state["stand_ins"]["kept_files"] = stand_ins.keep_files([])
 
 
-def step_tear_down(state: State) -> None:  # stand-in
+def step_tear_down(state: RunState) -> None:  # stand-in
     state["stand_ins"]["teardown"] = stand_ins.tear_down(None)
 
 
-def _full_receipt(state: State, decision: Decision) -> Receipt:
+def _full_receipt(state: RunState, decision: Decision) -> Receipt:
     facts, world = state["facts"], state["world"]
     return decisions.build_receipt(
         decision,
@@ -277,7 +288,7 @@ def _full_receipt(state: State, decision: Decision) -> Receipt:
             "receipt_id": world.identity.new_id(),
             "execution_version": __version__,
             "host": world.identity.host_name(),
-            "input_hash": state.get("input_hash", fixed.CANNOT_TELL),
+            "input_hash": state.get("input_hash"),
             "launched": facts.get("launch") == "ok",
             "started_at": state.get("started_at"),
             "ended_at": state.get("ended_at"),
@@ -291,7 +302,19 @@ def _full_receipt(state: State, decision: Decision) -> Receipt:
     )
 
 
-def conclude_run(state: State) -> Conclusion:
+def _minimal_receipt_line(error: BaseException) -> str:
+    """The one line on standard error when the full receipt could not be built."""
+    if isinstance(error, decisions.ReceiptNotBuilt):
+        why = "fields refused: " + "; ".join(error.problems)
+    else:
+        why = type(error).__name__
+    return " ".join(
+        f"shuttle: the full receipt could not be built ({why}); the minimal receipt, with "
+        "'cannot tell' for every field but the ending, was written instead".split()
+    )
+
+
+def conclude_run(state: RunState) -> Conclusion:
     """The conclusion: decide, build the receipt, write the record. Each part has its own fallback."""
     facts = state["facts"]
     kind = decisions.outcome_kind(facts)
@@ -304,9 +327,10 @@ def conclude_run(state: State) -> Conclusion:
         )
     try:
         receipt = _full_receipt(state, decision)
-    except BaseException:
+    except BaseException as error:
         receipt = decisions.minimal_receipt(decision)
-    source = facts["header_source"]
+        state["err"].write(_minimal_receipt_line(error) + "\n")
+    source = _header_source(state)
     try:
         world = state["world"]
         header = decisions.build_header(
@@ -330,7 +354,7 @@ def conclude_run(state: State) -> Conclusion:
     return decisions.conclude({"kind": "written", "decision": decision, "path": path})
 
 
-def step_write_outcome_record(state: State) -> None:
+def step_write_outcome_record(state: RunState) -> None:
     state["conclusion"] = conclude_run(state)
 
 
@@ -356,7 +380,7 @@ STEPS = (
 )
 
 
-def guarded(name: str, step: Callable[[State], None], state: State) -> None:
+def guarded(name: str, step: Callable[[RunState], None], state: RunState) -> None:
     """Run one step. An error becomes a fact; it never escapes."""
     facts = state["facts"]
     try:
@@ -375,7 +399,7 @@ def guarded(name: str, step: Callable[[State], None], state: State) -> None:
             )
 
 
-def _install_handlers(state: State) -> Callable[[], None]:
+def _install_handlers(state: RunState) -> Callable[[], None]:
     """Signals only record which one came first. They never raise. Returns the undo."""
 
     def note(name: str) -> None:
@@ -395,7 +419,7 @@ def run(document_path: str, out: TextIO, err: TextIO, world: Operations) -> int:
 
 
 def run_steps(
-    steps: Sequence[tuple[str, Callable[[State], None]]],
+    steps: Sequence[tuple[str, Callable[[RunState], None]]],
     document_path: str,
     out: TextIO,
     err: TextIO,
@@ -408,7 +432,7 @@ def run_steps(
     (gates, set-up, fingerprints, stop confirmation, closing, delivery, tidying, tear-down)
     stands: they touch nothing, so no operation can be made to fail inside them.
     """
-    state: State = {
+    state: RunState = {
         "document_path": document_path,
         "out": out,
         "err": err,
