@@ -5,7 +5,13 @@ Where a module sits is its classification. Nothing is registered anywhere:
 - `shuttle/core/` (sub-folders included) decides and touches nothing. A module there may
   import only other modules under `shuttle/core/` and the short allow-list of standard
   library modules below, and may not mention the built-ins that reach the world.
-- `shuttle/shell/` (sub-folders included) reaches the world and may import the core.
+- `shuttle/shell/` (sub-folders included) orchestrates: it calls the operations it is handed,
+  calls the core and acts on the answer. It may import the core and other shell modules, and
+  only `shell/cli.py`, where the real operations are wired in, may import the world.
+- `shuttle/world/` (sub-folders included) is the real set of operations, thin, holding no
+  decisions. It is the only place that may import the libraries on the linter's banned list.
+  It may import only the standard library, other world modules and `shuttle.core.shapes` (the
+  type of the operations).
 - At the package root only `__init__.py` (the version string; judged as core) and
   `__main__.py` (hands to the shell; judged as shell) may sit. A module anywhere else
   fails with the file's name and what to do.
@@ -57,6 +63,10 @@ CORE_STDLIB_ALLOWED = frozenset(
     }
 )
 
+# Where an allow-list holds, a standard library module not on it is refused. Only the core has
+# one so far; the world may import anything the linter does not ban.
+STDLIB_ALLOWED = {"core": CORE_STDLIB_ALLOWED}
+
 # Built-ins that reach the world, or reach it by import. A core module may not mention
 # them at all: called, assigned (f = open) or passed.
 FORBIDDEN_NAMES = frozenset(
@@ -78,11 +88,12 @@ FORBIDDEN_NAMES = frozenset(
 # Classification is by the file's place, a path relative to shuttle/ with "/" separators
 # ("core/decisions.py"), never by a dotted name: shuttle/core.py and shuttle/core/ share a name.
 ROOT_FILES = {"__init__.py": "core", "__main__.py": "shell"}
-FOLDERS = ("core", "shell")
+FOLDERS = ("core", "shell", "world")
+SHAPES = "shuttle.core.shapes"  # the one core module the world may import: the operations' type
 
 
 def classify(path):
-    """ "core", "shell", or None when the file sits where neither rule covers it."""
+    """ "core", "shell", "world", or None when the file sits where no rule covers it."""
     parts = path.split("/")
     if len(parts) == 1:
         return ROOT_FILES.get(path)
@@ -202,7 +213,7 @@ def noqa_problems(source, path):
             problems.append(
                 f"shuttle/{path} line {token.start[0]} carries a lint ignore ({token.string.strip()}) "
                 f"that covers the banned-import rule {BANNED_IMPORT_RULE}: take it out; code that "
-                "needs a banned library belongs in shuttle/shell/"
+                "needs a banned library belongs in shuttle/world/"
             )
     return problems
 
@@ -215,9 +226,10 @@ def check_module(source, path):
     classification = classify(path)
     if classification is None:
         return [
-            f"shuttle/{path} sits outside the two folders: move it into "
-            "shuttle/core/ (it decides, touching nothing) or shuttle/shell/ (it reaches the "
-            "world). Only __init__.py and __main__.py may sit at the package root",
+            f"shuttle/{path} sits outside the three folders: move it into "
+            "shuttle/core/ (it decides, touching nothing), shuttle/shell/ (it calls the "
+            "operations and the core) or shuttle/world/ (it reaches the world, with no "
+            "decisions). Only __init__.py and __main__.py may sit at the package root",
             *noqa_problems(source, path),
         ]
     problems = noqa_problems(source, path)
@@ -226,7 +238,7 @@ def check_module(source, path):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
             for target in _targets(node, path):
-                problems += _import_problems(target, classification)
+                problems += _import_problems(target, classification, path)
         elif classification == "core" and isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
             problems.append(
                 f"the core mentions {node.id}, which reaches the world: "
@@ -236,40 +248,88 @@ def check_module(source, path):
 
 
 def _place(target):
-    """Where the module a dotted target names sits: root, core, shell, entry or other."""
+    """Where the module a dotted target names sits: root, core, shell, world, entry or other."""
     parts = target.split(".")
     if len(parts) == 1:
         return "root"
-    return {"core": "core", "shell": "shell", "__main__": "entry"}.get(parts[1], "other")
+    return {"core": "core", "shell": "shell", "world": "world", "__main__": "entry"}.get(
+        parts[1], "other"
+    )
 
 
-def _import_problems(target, classification):
+def _core_target_problems(target, classification):
+    if classification == "world" and not (target + ".").startswith(SHAPES + "."):
+        return [
+            f"the world imports {target}, a core module: the world holds no decisions and "
+            f"may import only {SHAPES} (the type of the operations)"
+        ]
+    return []
+
+
+def _world_target_problems(target, classification, path):
+    if classification == "world" or path == "shell/cli.py":
+        return []
+    if classification == "core":
+        return [
+            f"the core imports {target}, a world module: the core touches nothing; "
+            "ask for the value through an argument"
+        ]
+    return [
+        f"the shell imports {target}, a world module: only shell/cli.py (where the real "
+        "operations are wired in) may; everything else takes the operations as an argument"
+    ]
+
+
+def _shell_target_problems(target, classification):
+    if classification == "shell":
+        return []
+    if classification == "world":
+        return [
+            f"the world imports {target}, a shell module: the world holds no decisions and "
+            "never calls up into the shell"
+        ]
+    return [
+        f"the core imports {target}, a shell module: "
+        "move the code that needs it into the shell and pass the value in"
+    ]
+
+
+def _package_import_problems(target, classification, path):
+    """What a module of the package may import from the package itself."""
+    place = _place(target)
+    if place == "core":
+        return _core_target_problems(target, classification)
+    if place == "world":
+        return _world_target_problems(target, classification, path)
+    if place == "shell":
+        return _shell_target_problems(target, classification)
+    if place == "entry":
+        if classification == "shell":
+            return []
+        return [
+            f"the {classification} imports {target}, the entry file, which belongs to the shell "
+            "(a shell module): move the code that needs it into the shell"
+        ]
+    if place == "other":
+        return [
+            f"imports {target}, which is in neither shuttle/core/, shuttle/shell/ nor "
+            "shuttle/world/: import from one of the three folders"
+        ]
+    return []
+
+
+def _import_problems(target, classification, path):
     top = target.split(".")[0]
     if top == "shuttle":
-        place = _place(target)
-        if place in ("root", "core") or (place in ("shell", "entry") and classification == "shell"):
-            return []
-        if place == "shell":
-            return [
-                f"the core imports {target}, a shell module: "
-                "move the code that needs it into the shell and pass the value in"
-            ]
-        if place == "entry":
-            return [
-                f"the core imports {target}, the entry file, which belongs to the shell "
-                "(a shell module): move the code that needs it into the shell"
-            ]
-        return [
-            f"imports {target}, which is in neither shuttle/core/ nor shuttle/shell/: "
-            "import from one of the two folders"
-        ]
+        return _package_import_problems(target, classification, path)
     if top not in sys.stdlib_module_names:
         return [f"imports {top}, a third-party package: the package uses the standard library only"]
-    if classification == "core" and top not in CORE_STDLIB_ALLOWED:
+    allowed = STDLIB_ALLOWED.get(classification)
+    if allowed is not None and top not in allowed:
         return [
-            f"the core imports {top}, which is not on the allow-list of standard library "
-            "modules that touch nothing: move that code to the shell, or justify the module "
-            "in CORE_STDLIB_ALLOWED"
+            f"the {classification} imports {top}, which is not on the allow-list of standard "
+            "library modules that touch nothing: move that code to the world, or justify the "
+            f"module in {classification.upper()}_STDLIB_ALLOWED"
         ]
     return []
 
@@ -312,6 +372,7 @@ def check_package(files):
 
 CORE = "core/decisions.py"
 SHELL = "shell/run.py"
+WORLD = "world/files.py"
 
 
 def problems_of(source, path=CORE):
@@ -319,19 +380,23 @@ def problems_of(source, path=CORE):
 
 
 class TestClassification(unittest.TestCase):
-    def test_the_two_folders_and_the_two_entry_files_are_classified_by_path(self):
+    def test_the_three_folders_and_the_two_entry_files_are_classified_by_path(self):
         self.assertEqual(classify("core/decisions.py"), "core")
         self.assertEqual(classify("core/drivers/command.py"), "core")
         self.assertEqual(classify("core/__init__.py"), "core")
         self.assertEqual(classify("__init__.py"), "core")
         self.assertEqual(classify("shell/run.py"), "shell")
         self.assertEqual(classify("shell/deep/er/thing.py"), "shell")
+        self.assertEqual(classify("world/files.py"), "world")
+        self.assertEqual(classify("world/deep/er/thing.py"), "world")
+        self.assertEqual(classify("world/__init__.py"), "world")
         self.assertEqual(classify("__main__.py"), "shell")
 
     def test_a_new_file_in_each_folder_is_covered_with_nothing_to_register(self):
         self.assertEqual(problems_of("import math", "core/brand_new.py"), [])
         self.assertTrue(problems_of("import os", "core/brand_new.py"))
-        self.assertEqual(problems_of("import os", "shell/brand_new.py"), [])
+        self.assertEqual(problems_of("import os", "world/brand_new.py"), [])
+        self.assertTrue(problems_of("import yaml", "world/brand_new.py"))
         self.assertTrue(problems_of("import yaml", "shell/brand_new.py"))
 
     def test_a_new_sub_folder_in_each_folder_is_covered_with_nothing_to_register(self):
@@ -339,26 +404,28 @@ class TestClassification(unittest.TestCase):
         self.assertTrue(problems_of("print(1)", "core/fresh/thing.py"))
         self.assertEqual(problems_of("import math", "core/fresh/thing.py"), [])
         self.assertTrue(problems_of("from shuttle.shell import run", "core/fresh/thing.py"))
-        self.assertEqual(problems_of("import os\nprint(1)", "shell/fresh/thing.py"), [])
+        self.assertEqual(problems_of("import os\nprint(1)", "world/fresh/thing.py"), [])
+        self.assertTrue(problems_of("import yaml", "world/fresh/thing.py"))
         self.assertTrue(problems_of("import yaml", "shell/fresh/thing.py"))
 
     def test_a_stray_module_at_the_package_root_is_refused_naming_the_file_and_the_fix(self):
         (problem,) = problems_of("x = 1", "stray.py")
-        self.assertIn("shuttle/stray.py sits outside the two folders", problem)
+        self.assertIn("shuttle/stray.py sits outside the three folders", problem)
         self.assertIn("move it into shuttle/core/", problem)
         self.assertIn("shuttle/shell/", problem)
+        self.assertIn("shuttle/world/", problem)
 
     def test_a_root_file_named_like_a_folder_is_refused_whatever_its_name(self):
-        for name in ("core.py", "shell.py", "decisions.py", "cli.py", "__version__.py"):
+        for name in ("core.py", "shell.py", "world.py", "decisions.py", "cli.py", "__version__.py"):
             with self.subTest(name=name):
                 (problem,) = problems_of("X = 1", name)
-                self.assertIn(f"shuttle/{name} sits outside the two folders", problem)
+                self.assertIn(f"shuttle/{name} sits outside the three folders", problem)
 
     def test_a_module_in_a_third_folder_is_refused_naming_the_file_and_the_fix(self):
         (problem,) = problems_of("import yaml", "extra/thing.py")
-        self.assertIn("shuttle/extra/thing.py sits outside the two folders", problem)
+        self.assertIn("shuttle/extra/thing.py sits outside the three folders", problem)
         (problem,) = problems_of("", "extra/__init__.py")
-        self.assertIn("shuttle/extra/__init__.py sits outside the two folders", problem)
+        self.assertIn("shuttle/extra/__init__.py sits outside the three folders", problem)
 
     def test_where_a_name_is_not_a_place(self):
         # A folder named like a module, or a folder name only starting like a classified one.
@@ -372,6 +439,9 @@ class TestClassification(unittest.TestCase):
         self.assertEqual(classify("shell/core/x.py"), "shell")
         self.assertEqual(problems_of("import os", "shell/core/x.py"), [])
         self.assertEqual(classify("shell/core.py"), "shell")
+        self.assertEqual(classify("world/core.py"), "world")
+        self.assertIsNone(classify("worlds/thing.py"))
+        self.assertIsNone(classify("world.py/x.py"))
         # A root __init__.py or __main__.py in a sub-folder is not the package's own entry file.
         self.assertEqual(classify("extra/__main__.py"), None)
         # Only exactly __init__.py and __main__.py sit at the root.
@@ -431,6 +501,7 @@ class TestTheRootFilesStayThin(unittest.TestCase):
     def test_other_files_are_not_held_to_the_thin_rule(self):
         self.assertEqual(problems_of("x = 1\ny = 2\n", "core/__init__.py"), [])
         self.assertEqual(problems_of("x = 1\ny = 2\n", "shell/__init__.py"), [])
+        self.assertEqual(problems_of("x = 1\ny = 2\n", "world/__init__.py"), [])
 
 
 class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
@@ -486,7 +557,7 @@ class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
         for source in ("from shuttle import run", "import shuttle.stray"):
             with self.subTest(source=source):
                 (problem,) = problems_of(source)
-                self.assertIn("neither shuttle/core/ nor shuttle/shell/", problem)
+                self.assertIn("neither shuttle/core/", problem)
 
     def test_a_relative_import_from_a_sub_folder_resolves_to_its_real_module(self):
         drivers = "core/drivers/command.py"
@@ -505,6 +576,82 @@ class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
                 self.assertIn("allow-list", problems[0])
 
 
+class TestTheWorldHoldsNoDecisionsAndTheShellReachesItOnlyWhereItIsWiredIn(unittest.TestCase):
+    def test_the_world_may_import_the_standard_library_its_siblings_and_the_shapes_alone(self):
+        for source in (
+            "import os, subprocess, socket, signal",
+            "from shuttle.core.shapes import Operations",
+            "from shuttle.core import shapes",
+            "import shuttle.core.shapes",
+            "from shuttle.world import files",
+            "from . import files",
+            "from .files import FILES",
+            "from shuttle import __version__",
+            "print(open('f').read())",
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(problems_of(source, "world/real.py"), [])
+
+    def test_the_world_importing_any_other_core_module_is_refused(self):
+        for source in (
+            "from shuttle.core import decisions",
+            "from shuttle.core.decisions import build_header",
+            "import shuttle.core.fixed",
+            "from shuttle.core.drivers import command",
+            "from ..core import fixed",
+            "from ..core.decisions import conclude",
+        ):
+            with self.subTest(source=source):
+                (problem,) = problems_of(source, "world/files.py")
+                self.assertIn("the world imports shuttle.core", problem)
+                self.assertIn("holds no decisions", problem)
+
+    def test_the_world_importing_the_shell_or_the_entry_file_is_refused(self):
+        for source in (
+            "from shuttle.shell import run",
+            "import shuttle.shell.records",
+            "from shuttle import shell",
+            "from ..shell import run",
+            "from shuttle import __main__",
+        ):
+            with self.subTest(source=source):
+                (problem,) = problems_of(source, "world/files.py")
+                self.assertIn("the world imports shuttle.", problem)
+                self.assertIn("a shell module", problem)
+
+    def test_the_core_importing_the_world_in_any_form_is_refused(self):
+        for source in (
+            "from shuttle import world",
+            "import shuttle.world.files",
+            "from shuttle.world import real",
+            "from shuttle.world.real import OPERATIONS",
+            "from ..world import real",
+            "def f():\n    from shuttle.world import files\n    return files",
+        ):
+            with self.subTest(source=source):
+                (problem,) = problems_of(source, "core/new.py")
+                self.assertIn("the core imports shuttle.world", problem)
+                self.assertIn("a world module", problem)
+
+    def test_the_shell_importing_the_world_is_refused_except_in_the_command_line_module(self):
+        for source in (
+            "from shuttle.world import real",
+            "import shuttle.world.files",
+            "from shuttle import world",
+            "from ..world import real",
+            "from shuttle.world.real import OPERATIONS",
+        ):
+            with self.subTest(source=source):
+                (problem,) = problems_of(source, "shell/run.py")
+                self.assertIn("the shell imports shuttle.world", problem)
+                self.assertIn("only shell/cli.py", problem)
+        self.assertEqual(problems_of("from shuttle.world import real", "shell/cli.py"), [])
+        self.assertEqual(problems_of("from ..world import real", "shell/cli.py"), [])
+        self.assertTrue(problems_of("from shuttle.world import real", "shell/deep/cli.py"))
+        self.assertTrue(problems_of("from shuttle.world import real", "shell/x.py"))
+        self.assertTrue(problems_of("from shuttle.world import real", "__main__.py"))
+
+
 class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
     # Every spelling the rule test must refuse, from the suppression table
     # (tests/hostile/suppressions_table.py): all that ruff honours and the ones it does not.
@@ -512,13 +659,13 @@ class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
 
     def test_every_spelling_is_refused_naming_the_file_and_where_the_code_belongs(self):
         for source in self.SPELLINGS:
-            for path in (CORE, "core/drivers/x.py", SHELL, "__main__.py", "stray.py"):
+            for path in (CORE, "core/drivers/x.py", SHELL, WORLD, "__main__.py", "stray.py"):
                 with self.subTest(source=source, path=path):
                     problems = [p for p in problems_of(source, path) if "lint ignore" in p]
                     self.assertEqual(len(problems), 1, problems)
                     self.assertIn(f"shuttle/{path} line ", problems[0])
                     self.assertIn("TID251", problems[0])
-                    self.assertIn("belongs in shuttle/shell/", problems[0])
+                    self.assertIn("belongs in shuttle/world/", problems[0])
 
     def test_the_line_number_is_the_comments(self):
         (problem,) = noqa_problems("x = 1\ny = 2\nimport os  # noqa: TID251\n", CORE)
@@ -673,7 +820,7 @@ class TestTheCoreMentionsNoBuiltinThatReachesTheWorld(unittest.TestCase):
 
 class TestStandardLibraryOnly(unittest.TestCase):
     def test_a_third_party_import_is_refused_in_the_core_the_shell_and_sub_folders(self):
-        for name in (CORE, SHELL, "core/drivers/command.py", "shell/deep/thing.py"):
+        for name in (CORE, SHELL, WORLD, "core/drivers/command.py", "shell/deep/thing.py"):
             for source in ("import requests", "from yaml import safe_load", "import numpy.linalg"):
                 with self.subTest(name=name, source=source):
                     problems = problems_of(source, name)
@@ -687,10 +834,11 @@ class TestStandardLibraryOnly(unittest.TestCase):
 
     def test_the_standard_library_and_the_package_itself_are_fine(self):
         self.assertEqual(problems_of("import json\nfrom shuttle.core import fixed", SHELL), [])
+        self.assertEqual(problems_of("import json\nfrom shuttle.core import shapes", WORLD), [])
 
     def test_an_import_of_a_package_module_in_neither_folder_is_refused(self):
         problems = problems_of("from shuttle.ghost import x", SHELL)
-        self.assertIn("neither shuttle/core/ nor shuttle/shell/", problems[0])
+        self.assertIn("neither shuttle/core/", problems[0])
 
 
 class TestThePackageWalk(unittest.TestCase):
@@ -705,7 +853,7 @@ class TestThePackageWalk(unittest.TestCase):
         files = [("core/__init__.py", ""), ("core.py", "X = 1"), ("shell.py", "X = 1")]
         problems = check_package(files)
         self.assertEqual(len(problems), 2)
-        self.assertTrue(all("sits outside the two folders" in p for p in problems))
+        self.assertTrue(all("sits outside the three folders" in p for p in problems))
 
     def test_a_new_file_and_a_new_sub_folder_fail_the_walk_when_they_break_a_rule(self):
         files = [
@@ -804,7 +952,9 @@ class TestTheLinterAgreesWithTheFolders(unittest.TestCase):
         exempt = {
             path for path, rules in self.lint["per-file-ignores"].items() if "TID251" in rules
         }
-        self.assertEqual(exempt, {"shuttle/shell/**", "shuttle/__main__.py", "tests/**"})
+        self.assertEqual(
+            exempt, {"shuttle/shell/**", "shuttle/world/**", "shuttle/__main__.py", "tests/**"}
+        )
 
     def test_relative_imports_are_banned_so_the_ban_cannot_be_walked_around(self):
         self.assertEqual(self.lint["flake8-tidy-imports"]["ban-relative-imports"], "all")

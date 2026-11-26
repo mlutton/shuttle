@@ -91,6 +91,7 @@ ban-relative-imports = "all"
 # Where the world may be reached: the shell folder, the entry file that hands to it, and the tests.
 # Everything else under shuttle/ (the core folder, sub-folders included) is held to the ban.
 "shuttle/shell/**" = ["TID251"]  # the shell: clock, signals, files, environment, processes, streams
+"shuttle/world/**" = ["TID251"]  # the world: files, processes, the clock, signals, the environment, identity, streams
 "shuttle/__main__.py" = ["TID251"]  # hands straight to the shell's command line
 "tests/**" = ["TID251"]  # tests spawn processes and use temporary folders; the ban is for the package
 
