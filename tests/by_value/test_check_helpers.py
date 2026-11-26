@@ -1,5 +1,6 @@
 """The decisions inside the check's helper scripts (checks/*.py), as functions over plain data."""
 
+import ast
 import importlib
 import os
 import sys
@@ -19,7 +20,7 @@ class EscapeNameTest(unittest.TestCase):
         self.assertEqual(names.escape_name("a\nb\tc\\d\x01"), "a\\nb\\tc\\\\d\\x01")
 
     def test_c1_controls_and_bidirectional_controls_are_escaped(self):
-        self.assertEqual(names.escape_name("a\x85b\x9fc"), "a\\x85b\\x9fc")
+        self.assertEqual(names.escape_name("a\x85b\x9fc"), "a\\u0085b\\u009fc")
         self.assertEqual(
             names.escape_name("a\u202eb\u2066c\u200fd\u2029"), "a\\u202eb\\u2066c\\u200fd\\u2029"
         )
@@ -99,6 +100,186 @@ class GuardChangesTest(unittest.TestCase):
         # git diff --no-renames reports a move as a deletion and an addition
         listed = guards.guard_changes([("D", "pyproject.toml"), ("A", "old.toml")])
         self.assertEqual(listed, [("deleted", "pyproject.toml")])
+
+
+class TheAttackListsAreGuardFilesTest(unittest.TestCase):
+    TESTS = os.path.join(os.path.dirname(CHECKS), "tests")
+
+    def test_everything_in_the_hostile_folder_is_a_guard_file_whatever_it_is_called(self):
+        for path in (
+            "tests/hostile/names_table.py",
+            "tests/hostile/a_table_not_yet_written.py",
+            "tests/hostile/sub/deeper.py",
+            "tests/hostile/data.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(guards.is_guard(path))
+        for path in ("tests/hostile2/x.py", "tests/hostilex.py", "docs/tests/hostile/x.py"):
+            with self.subTest(path=path):
+                self.assertFalse(guards.is_guard(path))
+
+    def files_to_read(self):
+        return [
+            os.path.join(where, name)
+            for where, _, files in os.walk(self.TESTS)
+            for name in files
+            if name.endswith(".py")
+            and "hostile" not in os.path.relpath(os.path.join(where, name), self.TESTS)
+        ]
+
+    def reads_the_tables_in(self, path):
+        with open(path, encoding="utf-8") as f:
+            return any(self.reads_the_tables(node) for node in ast.walk(ast.parse(f.read())))
+
+    @staticmethod
+    def reads_the_tables(node):
+        """`from hostile... import`, `import hostile...` or importlib.import_module("hostile...")."""
+        if isinstance(node, ast.ImportFrom):
+            return (node.module or "").split(".")[0] == "hostile"
+        if isinstance(node, ast.Import):
+            return any(a.name.split(".")[0] == "hostile" for a in node.names)
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "import_module"
+            and bool(node.args)
+            and isinstance(node.args[0], ast.Constant)
+            and str(node.args[0].value).split(".")[0] == "hostile"
+        )
+
+    def test_each_test_file_that_is_a_rule_or_loops_a_table_is_a_guard_file(self):
+        # The rule: a test file under tests/ that imports from `hostile` (the attack lists) is
+        # a guard file, so a pull request that weakens it is listed. A file that is a rule
+        # without importing `hostile` has to be named in GUARD_FILES by hand.
+        found = [
+            os.path.relpath(path, os.path.dirname(self.TESTS))
+            for path in self.files_to_read()
+            if self.reads_the_tables_in(path)
+        ]
+        self.assertTrue(found)
+        for path in found:
+            with self.subTest(path=path):
+                self.assertTrue(
+                    guards.is_guard(path.replace(os.sep, "/")), "list it in GUARD_FILES"
+                )
+
+    def test_every_guard_file_named_by_hand_exists(self):
+        root = os.path.dirname(CHECKS)
+        for path in guards.GUARD_FILES:
+            with self.subTest(path=path):
+                self.assertTrue(os.path.exists(os.path.join(root, path)))
+
+
+class TableSourceTest(unittest.TestCase):
+    NAMES = 'NAMES = [{"label": "a", "name": "x" * 3, "path": False, "holdable": True}]\n'
+    SUPPRESSIONS = 'S = ("l", "src", True, False)\nSUPPRESSIONS = (("l", "s", True, False),)\n'
+
+    def test_a_table_is_read_as_data_with_constants_products_and_sums(self):
+        source = 'N = "n" * 2\nNAMES = [{"label": N + "!", "gaps": {"m.f": "why"}}]\n'
+        (row,) = guards.load_table("names", source)
+        self.assertEqual((row["label"], row["gaps"]), ("nn!", {"m.f": "why"}))
+
+    def test_tuples_become_rows_with_named_fields_and_a_known_gap_note_becomes_a_mark(self):
+        source = 'IMPORTS = (("l", "s", "core", None, "known gap: why", ""),)\n'
+        (row,) = guards.load_table("imports", source)
+        self.assertEqual(row["folder"], "core")
+        self.assertEqual(row["gaps"], {"import form": "known gap: why"})
+
+    def test_a_table_that_is_not_plain_data_is_refused_and_not_run(self):
+        for source in (
+            "import os\nNAMES = []\n",
+            "NAMES = [__import__('os').getcwd()]\n",
+            "NAMES = [x]\n",
+            "def f(): pass\nNAMES = []\n",
+            "NAMES = [",
+            "OTHER = []\n",
+        ):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                guards.load_table("names", source)
+
+    def test_a_name_that_is_not_valid_text_in_a_table_still_reads(self):
+        (row,) = guards.load_table("names", 'NAMES = [{"label": "\\udcff"}]\n')
+        self.assertEqual(row["label"], "\udcff")
+
+
+def rows(*labels, **changes):
+    return [{"label": label, "gaps": changes.get(label, {})} for label in labels]
+
+
+class TableReportTest(unittest.TestCase):
+    def report(self, base, head):
+        return guards.table_report(
+            {"names": base, "imports": None, "suppressions": None},
+            {"names": head, "imports": None, "suppressions": None},
+        )
+
+    def test_a_row_at_the_base_and_not_at_the_head_is_named_with_its_table(self):
+        lines = self.report(rows("a", "b", "c"), rows("a", "c"))
+        self.assertEqual(lines, ["names: row removed: b"])
+
+    def test_added_rows_are_counted_not_listed(self):
+        self.assertEqual(self.report(rows("a"), rows("a", "b", "c")), ["names: 2 rows added"])
+
+    def test_a_base_without_the_table_makes_every_row_new_and_removes_none(self):
+        self.assertEqual(
+            self.report(None, rows("a", "b")), ["names: no table at the base; all 2 rows are new"]
+        )
+
+    def test_a_table_gone_from_the_head_names_each_row_removed(self):
+        lines = self.report(rows("a", "b"), None)
+        self.assertEqual(
+            lines,
+            [
+                "names: the table is gone from the head",
+                "names: row removed: a",
+                "names: row removed: b",
+            ],
+        )
+
+    def test_a_row_whose_content_changed_is_named_with_the_fields(self):
+        base = [{"label": "a", "name": "x", "holdable": True, "gaps": {}}]
+        head = [{"label": "a", "name": "y", "holdable": False, "gaps": {}}]
+        self.assertEqual(self.report(base, head), ["names: row changed: a (holdable, name)"])
+
+    def test_a_mark_added_is_shown_as_new_with_its_reason_and_one_in_force_is_shown_again(self):
+        base = rows("a", "b", b={"m.f": "old reason"})
+        head = rows("a", "b", a={"m.g": "a new reason"}, b={"m.f": "old reason"})
+        self.assertEqual(
+            self.report(base, head),
+            [
+                "names: new known gap: a: m.g: a new reason",
+                "names: known gap: b: m.f: old reason",
+            ],
+        )
+
+    def test_a_reason_that_changed_counts_as_new(self):
+        base = rows("a", a={"m.f": "short"})
+        head = rows("a", a={"m.f": "a longer reason"})
+        self.assertEqual(self.report(base, head), ["names: new known gap: a: m.f: a longer reason"])
+
+    def test_nothing_to_say_is_no_lines(self):
+        self.assertEqual(self.report(rows("a"), rows("a")), [])
+        self.assertEqual(guards.table_report({}, {}), [])
+
+    def test_a_table_that_could_not_be_read_is_said_so_and_does_not_hide_the_others(self):
+        lines = guards.table_report(
+            {"names": "SyntaxError: line 1", "imports": rows("x"), "suppressions": None},
+            {"names": rows("a"), "imports": rows(), "suppressions": None},
+        )
+        self.assertEqual(
+            lines,
+            [
+                "names: the table at the base could not be read: SyntaxError: line 1",
+                "imports: row removed: x",
+            ],
+        )
+
+    def test_the_section_is_one_escaped_block_and_empty_for_no_lines(self):
+        self.assertEqual(guards.render_tables([]), "")
+        text = guards.render_tables(["names: row removed: x\n```\n# injected"])
+        fences = [line for line in text.splitlines() if line.startswith("`")]
+        self.assertEqual(len(fences), 2)
+        self.assertIn("x\\n", text)
 
 
 class RenderSummaryTest(unittest.TestCase):

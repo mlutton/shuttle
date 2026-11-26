@@ -5,6 +5,7 @@ wiring: two trees that each hold several cases, so few real ruff runs.
 Each tree carries the repository's own pyproject.toml, so the rules are the shipped rules.
 """
 
+import importlib
 import os
 import shutil
 import subprocess
@@ -14,6 +15,21 @@ import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPT = os.path.join(REPO, "checks", "all.sh")
+
+sys.path.insert(0, os.path.join(REPO, "tests"))
+sys.path.insert(0, os.path.join(REPO, "checks"))
+names = importlib.import_module("names")
+names_table = importlib.import_module("hostile.names_table")
+create_all = importlib.import_module("hostile.support").create_all
+unmade_note = importlib.import_module("hostile.support").unmade_note
+as_python = importlib.import_module("hostile.support").as_python
+# Rows of the names table that ruff itself refuses: it fails on a name that is not valid UTF-8
+# (test_a_name_that_is_not_valid_utf8_is_shown_escaped_and_ends_with_a_fix_line covers those).
+RUFF_REFUSES = {
+    row["label"]: "ruff 0.14.10 fails on a name that is not UTF-8"
+    for row in names_table.NAMES
+    if any(0xD800 <= ord(c) <= 0xDFFF for c in row["name"])
+}
 
 UNFORMATTED_WITH_UNUSED_IMPORT = "import os\ndef f( a ):\n  return a\n"
 TOO_DEEP = """def g(a):
@@ -94,16 +110,19 @@ class FixModeTest(TreeTest):
         with open(target, "w") as f:
             f.write("x  =  1\n")
         os.symlink(target, os.path.join(self.tree, "out.py"))
-        expected = [
-            "changed: __pycache__/cached.py",
-            "changed: a.py",
-            "changed: my file.py",
-            "changed: out.py",
-        ]
+        # every file name in the names table that this filesystem holds and ruff accepts
+        in_table, unexpected = create_all(
+            self.tree, names_table.NAMES, make=as_python, skip=RUFF_REFUSES, content="x  =  1\n"
+        )
+        if unexpected:
+            with self.subTest("some names are refused here"):
+                self.skipTest(unmade_note(unexpected))
+        changed = ["__pycache__/cached.py", "a.py", "my file.py", "out.py", "w.pyw"]
         if newline_name:
-            expected.append("changed: two\\nlines.py")
-        expected.append("changed: w.pyw")
-        expected.append(f"fix: changed {len(expected)} files; now run ./checks/all.sh")
+            changed.append("two\nlines.py")
+        changed += in_table.values()
+        expected = [f"changed: {names.escape_name(path)}" for path in sorted(changed)]
+        expected.append(f"fix: changed {len(changed)} files; now run ./checks/all.sh")
 
         result = self.script("--fix")
 
