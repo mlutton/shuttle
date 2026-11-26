@@ -5,6 +5,7 @@ passes or fails the stage it is told to, so these tests do not run the real suit
 """
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -114,9 +115,10 @@ class CheckScriptTest(unittest.TestCase):
         with open(SCRIPT) as f:
             script = f.read()
         run = [
-            line.split("-s ")[1].split(" ")[0]
+            folder
             for line in script.splitlines()
-            if "unittest discover -s " in line and not line.lstrip().startswith("#")
+            if not line.lstrip().startswith("#")
+            for folder in re.findall(r"unittest discover -s (\S+)", line)
         ]
         holding = sorted(
             os.path.join("tests", name)
