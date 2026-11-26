@@ -1,7 +1,7 @@
 """Stand-ins: steps of a run whose real work belongs to a later increment.
 
 Each has the signature the real step will have and returns a marked value, so
-a receipt field fed by it says "cannot tell" instead of an invented value.
+a receipt field fed by it says "not built" instead of an invented value.
 """
 
 from shuttle.core import fixed
