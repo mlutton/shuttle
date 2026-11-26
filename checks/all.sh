@@ -13,7 +13,7 @@
 #   check: failed: <stage>
 # The format stage adds how to fix it: "check: failed: format; fix it with: ./checks/all.sh --fix"
 # A tests stage ended by its time budget says so: "check: failed: tests (timed out after 20 seconds)".
-#   check: could not run: <tool> is not installed; install the tools with: <command>
+#   check: could not run: <tool> is not installed (ruff, mypy or, for the tests, coverage); install the tools with: <command>
 #
 # ./checks/all.sh --fix applies what ruff can change mechanically and says what changed:
 #   ruff check --fix --no-unsafe-fixes, then ruff format (checks/fixmode.py does the work).
@@ -24,6 +24,8 @@
 #   fix: changed <N> files ("1 file" for one); now run ./checks/all.sh
 #   fix: nothing to change
 #   fix: failed; ruff could not finish (its output is on standard error)
+# (the same last line is printed, exit 1, when checks/fixmode.py cannot run at all: missing, or
+# not parseable)
 # It does not run types or tests and does not say the change is sound. Lint findings it
 # cannot fix are left in place and shown on standard error; the check still fails on them.
 #
@@ -52,7 +54,7 @@ if [ -z "${PYTHON:-}" ]; then
 fi
 
 INSTALL="python3 -m pip install -r requirements-dev.txt"
-tools="ruff mypy"
+tools="ruff mypy coverage"
 [ "$mode" = fix ] && tools=ruff
 for tool in $tools; do
     if ! "$PYTHON" -m "$tool" --version >/dev/null 2>&1; then
@@ -62,8 +64,19 @@ for tool in $tools; do
 done
 
 if [ "$mode" = fix ]; then
-    "$PYTHON" checks/fixmode.py
-    exit $?
+    out=$("$PYTHON" checks/fixmode.py)
+    code=$?
+    # The only deciding here: no "fix:" last line, or an exit code other than 0 or 1, means failure.
+    case "$code:$(printf '%s\n' "$out" | tail -n 1)" in
+        [01]:"fix: "*) ;;
+        *)
+            [ -n "$out" ] && printf '%s\n' "$out"
+            echo "fix: failed; ruff could not finish (its output is on standard error)"
+            exit 1
+            ;;
+    esac
+    printf '%s\n' "$out"
+    exit "$code"
 fi
 
 output=$(mktemp) || exit 2

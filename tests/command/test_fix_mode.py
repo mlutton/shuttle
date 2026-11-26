@@ -84,7 +84,22 @@ class FixModeTest(TreeTest):
             newline_name = None
         self.write("w.pyw", "x  =  1\n")  # a file type only the configuration includes
         os.symlink("my file.py", os.path.join(self.tree, "link.py"))  # counted once, not twice
-        expected = ["changed: a.py", "changed: my file.py"]
+        # a source folder named __pycache__ is not one ruff skips, so it is not skipped here
+        os.mkdir(os.path.join(self.tree, "__pycache__"))
+        self.write("__pycache__/cached.py", "x  =  1\n")
+        # a link to a file outside the tree: ruff rewrites the target; the link is listed
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        target = os.path.join(outside.name, "outside.py")
+        with open(target, "w") as f:
+            f.write("x  =  1\n")
+        os.symlink(target, os.path.join(self.tree, "out.py"))
+        expected = [
+            "changed: __pycache__/cached.py",
+            "changed: a.py",
+            "changed: my file.py",
+            "changed: out.py",
+        ]
         if newline_name:
             expected.append("changed: two\\nlines.py")
         expected.append("changed: w.pyw")
@@ -96,6 +111,9 @@ class FixModeTest(TreeTest):
         self.assertEqual(result.stdout.splitlines(), expected)
         self.assertEqual(self.read("my file.py"), "def f(a):\n    return a\n")
         self.assertEqual(self.read("w.pyw"), "x = 1\n")
+        self.assertEqual(self.read("__pycache__/cached.py"), "x = 1\n")
+        with open(target) as f:
+            self.assertEqual(f.read(), "x = 1\n")
         self.assertEqual(self.read("deep.py"), TOO_DEEP)
         self.assertEqual(self.read("unused.py"), UNUSED_VARIABLE)
         self.assertEqual(self.read("clean.py"), CLEAN)
@@ -188,6 +206,18 @@ class FixModeTest(TreeTest):
         self.assertEqual(done.returncode, 1)
         self.assertEqual(done.stdout.splitlines()[-1], fixmode_failed_line())
         self.assertIn("ZeroDivisionError", done.stderr)
+
+    def test_a_helper_that_cannot_start_still_ends_with_the_fix_line(self):
+        helper = os.path.join(self.tree, "checks", "fixmode.py")
+        for what, content in (("missing", None), ("not parseable", "def f(:\n")):
+            with self.subTest(what=what):
+                if content is None:
+                    os.remove(helper)
+                else:
+                    self.write("checks/fixmode.py", content)
+                result = self.script("--fix")
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout.splitlines(), [fixmode_failed_line()])
 
     def test_an_unknown_argument_is_refused_with_one_line_on_standard_error(self):
         for args in (["--bogus"], ["--fix", "extra"]):

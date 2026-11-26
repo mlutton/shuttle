@@ -12,17 +12,19 @@ import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPT = os.path.join(REPO, "checks", "all.sh")
+FIX_FAILED = "fix: failed; ruff could not finish (its output is on standard error)"
 
 STAND_IN = """#!/bin/sh
-# Stand-in for python3. FAIL_STAGE is lint, format, types or tests; MISSING is ruff or mypy.
+# Stand-in for python3. FAIL_STAGE is lint, format, types or tests; MISSING is ruff, mypy or coverage.
 case "$*" in
   "-m ruff --version")  [ "$MISSING" = ruff ] && { echo "No module named ruff" >&2; exit 1; }; exit 0 ;;
   "-m mypy --version")  [ "$MISSING" = mypy ] && { echo "No module named mypy" >&2; exit 1; }; exit 0 ;;
+  "-m coverage --version")  [ "$MISSING" = coverage ] && { echo "No module named coverage" >&2; exit 1; }; exit 0 ;;
   "-m ruff check"*)     stage=lint ;;
   "-m ruff format"*)    stage=format ;;
   "-m mypy"*)           stage=types ;;
   "-m unittest"*)       stage=tests ;;
-  *fixmode.py)          echo "fix: stand-in"; exit 0 ;;
+  *fixmode.py)          echo "fix: stand-in"; exit "${FIX_EXIT:-0}" ;;
   *) echo "unexpected call: $*" >&2; exit 99 ;;
 esac
 echo "$stage: tool output"
@@ -91,7 +93,7 @@ class CheckScriptTest(unittest.TestCase):
         self.assertEqual(result.stdout.splitlines(), ["lint: failed", "check: failed: lint"])
 
     def test_a_missing_tool_exits_2_and_names_the_tool_and_the_install_command(self):
-        for tool in ("ruff", "mypy"):
+        for tool in ("ruff", "mypy", "coverage"):
             with self.subTest(tool=tool):
                 result = self.check(MISSING=tool)
                 self.assertEqual(result.returncode, 2)
@@ -104,6 +106,17 @@ class CheckScriptTest(unittest.TestCase):
         result = self.check_args("--fix", MISSING="mypy")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "fix: stand-in\n")
+
+    def test_fix_mode_does_not_need_coverage_either(self):
+        result = self.check_args("--fix", MISSING="coverage")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_helper_that_dies_by_signal_after_its_last_line_still_gives_a_documented_code(self):
+        for code in (139, 2):
+            with self.subTest(code=code):
+                result = self.check_args("--fix", FIX_EXIT=str(code))
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(self.last_line(result), FIX_FAILED)
 
     def test_fix_mode_without_ruff_could_not_run_exit_2(self):
         result = self.check_args("--fix", MISSING="ruff")
