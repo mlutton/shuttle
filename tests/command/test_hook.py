@@ -12,6 +12,7 @@ import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 HOOK = os.path.join(REPO, ".githooks", "pre-push")
+INTERPRETER = os.path.join(REPO, "checks", "interpreter.sh")
 
 GIT_ENV = {
     "PATH": os.environ["PATH"],
@@ -36,6 +37,7 @@ class PrePushHookTest(unittest.TestCase):
         os.makedirs(os.path.join(self.work, ".githooks"))
         os.makedirs(os.path.join(self.work, "checks"))
         shutil.copy(HOOK, os.path.join(self.work, ".githooks", "pre-push"))
+        shutil.copy(INTERPRETER, os.path.join(self.work, "checks", "interpreter.sh"))
         self.git("config", "core.hooksPath", ".githooks", cwd=self.work)
         self.git("remote", "add", "origin", self.remote, cwd=self.work)
         with open(os.path.join(self.work, "file.txt"), "w") as f:
@@ -198,6 +200,24 @@ class PrePushHookTest(unittest.TestCase):
         self.commit_python_reporting_check()
         _, output = self.push_feature(self.linked_worktree())
         self.assertIn("python=none", output)
+
+    def test_a_lookup_file_that_is_missing_empty_or_a_folder_refuses_the_push_and_says_why(self):
+        self.commit_python_reporting_check()
+        lookup = os.path.join(self.work, "checks", "interpreter.sh")
+        for what in ("missing", "empty", "folder"):
+            with self.subTest(what=what):
+                os.remove(lookup) if os.path.isfile(lookup) else shutil.rmtree(lookup, True)
+                if what == "empty":
+                    open(lookup, "w").close()
+                elif what == "folder":
+                    os.mkdir(lookup)
+                result = self.git("push", "origin", "main", cwd=self.work)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "push refused: checks/interpreter.sh is missing or unusable; "
+                    "set PYTHON or restore the file",
+                    result.stderr,
+                )
 
     def test_a_push_from_the_main_working_tree_still_uses_its_own_environment(self):
         self.commit_python_reporting_check()

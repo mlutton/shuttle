@@ -22,11 +22,16 @@ from names import escape_name, fenced
 # it is a guard folder and a file put there needs no listing by hand. The files named below are
 # the tests that are themselves rules, or that loop a table: a test file that imports from
 # `hostile` must be named here (tests/by_value/test_check_helpers.py pins that).
-GUARD_FOLDERS = ("checks/", ".githooks/", ".github/", "tests/hostile/")
+GUARD_FOLDERS = ("checks/", ".githooks/", ".github/", ".claude/agents/", "tests/hostile/")
 GUARD_FILES = (
     "pyproject.toml",
     "requirements-dev.txt",
     "tests/by_value/test_rules.py",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CODING_STANDARDS.md",
+    "docs/process.md",
+    "tests/by_value/test_agent_documents.py",
     "tests/by_value/test_check_helpers.py",
     "tests/by_value/test_name_functions.py",
     "tests/by_value/test_names_table.py",

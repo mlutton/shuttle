@@ -2,23 +2,21 @@
 # Refuses a push unless the check script passes on each commit being pushed.
 # It runs checks/all.sh and nothing else, on a copy of that commit's files in a
 # temporary folder, so uncommitted changes in the working folder neither pass nor
-# fail a push. A deleted branch has nothing to check.
+# fail a push; the one exception is checks/interpreter.sh, read from the working folder.
+# A deleted branch has nothing to check.
 # Switch it on, once per clone:  git config core.hooksPath .githooks
 root=$(git rev-parse --show-toplevel) || exit 1
 zero=0000000000000000000000000000000000000000
 
-# The tools live in a virtual environment the copy does not have: this working tree's, else
-# the main working tree's (a linked worktree has none of its own). PYTHON, if set, wins.
+# The tools live in a virtual environment the copy does not have; checks/interpreter.sh finds
+# it (this working tree's, else the main working tree's). PYTHON, if set, wins.
 if [ -z "${PYTHON:-}" ]; then
-    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-    main=
-    [ "$(basename "$common")" = .git ] && main=$(dirname "$common")
-    for candidate in "$root" "$main"; do
-        [ -n "$candidate" ] && [ -x "$candidate/.venv/bin/python" ] || continue
-        PYTHON="$candidate/.venv/bin/python"
-        export PYTHON
-        break
-    done
+    unusable="push refused: checks/interpreter.sh is missing or unusable; set PYTHON or restore the file"
+    [ -f "$root/checks/interpreter.sh" ] || { echo "$unusable" >&2; exit 1; }
+    . "$root/checks/interpreter.sh"
+    command -v choose_python >/dev/null 2>&1 || { echo "$unusable" >&2; exit 1; }
+    found=$(choose_python "$root")
+    [ -n "$found" ] && PYTHON=$found && export PYTHON
 fi
 
 scratch=$(mktemp -d) || exit 1
