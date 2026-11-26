@@ -126,6 +126,12 @@ class CheckReferences(RefusalCase):
             "input_check",
         )
 
+    def test_a_reference_that_is_a_folder_is_refused_as_missing_and_says_so(self):
+        got = refusals.check_references([self.A], {"runbook": {"folder": True}})
+        self.assertRefusal(got, "reference_missing", "input_check")
+        self.assertIn("is a folder", got["problem"])
+        self.assertIn("runbook", got["problem"])
+
     def test_a_reference_whose_hash_or_size_differs_is_reference_hash_mismatch(self):
         cases = (
             ("hash", {"runbook": {"hash": digest("z"), "size": 1}}),
@@ -162,10 +168,19 @@ class CheckStatementLocation(RefusalCase):
             refusals.check_statement_location(True, None, False), "missing_setting", "input_check"
         )
 
-    def test_a_kind_that_expects_none_is_not_asked_about_the_location(self):
-        for location, occupied in ((None, False), ("/out/s.json", True), ("/out/s.json", False)):
-            with self.subTest((location, occupied)):
-                self.assertIsNone(refusals.check_statement_location(False, location, occupied))
+    def test_a_kind_that_expects_none_and_is_given_no_location_is_accepted(self):
+        for occupied in (True, False):
+            with self.subTest(occupied):
+                self.assertIsNone(refusals.check_statement_location(False, None, occupied))
+
+    def test_a_kind_that_expects_none_and_is_given_a_location_is_refused_whether_or_not_it_is_taken(
+        self,
+    ):
+        for occupied in (True, False):
+            with self.subTest(occupied):
+                got = refusals.check_statement_location(False, "/out/s.json", occupied)
+                self.assertRefusal(got, "unknown_field", "input_check")
+                self.assertIn("expects no statement", got["problem"])
 
 
 class CheckReach(RefusalCase):

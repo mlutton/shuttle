@@ -15,11 +15,15 @@ from shuttle.shell import kinds
 
 
 def _found_references(world: Operations, references: list[Document]) -> dict[str, dict[str, Any]]:
-    """The hash and size of each reference's file; a reference that cannot be read is left out."""
+    """The hash and size of each reference's file, {"folder": True} for a folder; a reference
+    that cannot be read is left out."""
     found: dict[str, dict[str, Any]] = {}
     for reference in references:
         try:
             data = world.files.read(reference["path"])
+        except IsADirectoryError:
+            found[reference["name"]] = {"folder": True}
+            continue
         except OSError:
             continue
         found[reference["name"]] = {"hash": hashlib.sha256(data).hexdigest(), "size": len(data)}

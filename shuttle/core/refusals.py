@@ -82,12 +82,20 @@ def check_instruction(instruction: str | None, claimed_hash: str | None) -> Foun
 def check_references(
     references: Sequence[Mapping[str, Any]], found: Mapping[str, Mapping[str, Any]]
 ) -> Found | None:
-    """Each reference against what was found: {"hash", "size"} by name, absent when unreadable."""
+    """Each reference against what was found: {"hash", "size"} by name, {"folder": True} for a
+    folder, and absent when unreadable."""
     for reference in references:
         name = reference["name"]
         seen = found.get(name)
         if seen is None:
             return _found("reference_missing", _INPUT, f"reference {name!r} could not be read")
+        if seen.get("folder"):
+            return _found(
+                "reference_missing",
+                _INPUT,
+                f"reference {name!r} is a folder, and a folder has no hash yet: "
+                "it is refused as missing; name a file",
+            )
         if seen["hash"] != reference["hash"] or seen["size"] != reference["size"]:
             return _found(
                 "reference_hash_mismatch",
@@ -101,7 +109,13 @@ def check_statement_location(
     expects_statement: bool, location: str | None, occupied: bool
 ) -> Found | None:
     if not expects_statement:
-        return None
+        if location is None:
+            return None
+        return _found(
+            "unknown_field",
+            _INPUT,
+            "this kind expects no statement: statement_location is not a field it takes",
+        )
     if location is None:
         return _found(
             "missing_setting", _INPUT, "this kind expects a statement: statement_location is needed"

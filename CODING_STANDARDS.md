@@ -12,6 +12,7 @@ Read in full at review; a builder reads the rules its definition names. A machin
 ## Tests
 - **Behaviour only.** The core is tested by value; the shell through the real command, failure paths included. A test asserts what a caller can see.
 - **Waits are isolated.** Test everything that needs no wait fully and by value; one test covers the full flow. No test keeps time.
+- **Tests bound their own resources.** A test that hands the command an input without an end (a device, a pipe, a file of any size) runs under the harness's file-size and address-space limits (`tests/rehearsal/real_run.py`), so a regression is a failed assertion in seconds, never a machine out of memory or disk; a time limit is not a resource limit. A reviewer checks that such a test starts the command through the harness, and that any limit it raises says why.
 - **Red first.** Each new test of changed behaviour fails on the base commit; the builder says how that was shown. A test that pins unchanged behaviour says so in its name.
 
 ## Words

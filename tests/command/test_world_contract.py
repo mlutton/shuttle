@@ -85,6 +85,30 @@ class RealHarness:
     def make_a_name_that_leads_nowhere(self, path):
         os.symlink(os.path.join(self.root, "nowhere"), path)
 
+    def make_a_link(self, path, leads_to):
+        os.symlink(leads_to, path)
+        return path
+
+    def make_a_pipe(self, path):
+        """A named pipe nobody writes. A call that waits on it fails after a bounded wait (an
+        alarm that raises) instead of hanging the run; the alarm is put away with the test."""
+        os.mkfifo(path)
+        self.guard_against_waiting()
+        return path
+
+    def a_device(self):
+        self.guard_against_waiting()
+        return "/dev/zero"  # reads without end
+
+    def guard_against_waiting(self):
+        def blocked(number, frame):
+            raise AssertionError("a call waited on, or read without end from, a pipe or device")
+
+        was = signal.signal(signal.SIGALRM, blocked)
+        signal.alarm(60)
+        self.case.addCleanup(signal.signal, signal.SIGALRM, was)
+        self.case.addCleanup(signal.alarm, 0)
+
     def host_name(self):
         return socket.gethostname()
 

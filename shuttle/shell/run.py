@@ -37,6 +37,7 @@ from shuttle.shell import (
     gates,
     input_checks,
     launch_executor,
+    move_kept_files,
     records,
     stand_ins,
     stop_and_confirm_empty,
@@ -211,10 +212,6 @@ def step_deliver(state: RunState) -> None:  # stand-in
     state["facts"]["delivery"] = decisions.result_status(state["stand_ins"]["delivery"])
 
 
-def step_move_kept_files(state: RunState) -> None:  # stand-in
-    state["stand_ins"]["kept_files"] = stand_ins.keep_files([])
-
-
 def step_tear_down(state: RunState) -> None:  # stand-in
     state["stand_ins"]["teardown"] = stand_ins.tear_down(None)
 
@@ -237,6 +234,9 @@ def _full_receipt(state: RunState, decision: Decision) -> Receipt:
             "executor_driver_observations": state.get("executor_driver_observations"),
             "stand_ins": state["stand_ins"],
             "reason_text": decisions.reason_text(decision, state["problems"]),
+            "reference_hashes": decisions.verified_reference_hashes(
+                state.get("raw"), facts.get("input_check")
+            ),
         },
     )
 
@@ -314,7 +314,7 @@ STEPS = (
     ("observe", step_observe),
     ("take_closing_freeze", step_take_closing_freeze),
     ("deliver", step_deliver),
-    ("move_kept_files", step_move_kept_files),
+    ("move_kept_files", move_kept_files.step),
     ("tear_down", step_tear_down),
     ("write_outcome_record", step_write_outcome_record),
 )

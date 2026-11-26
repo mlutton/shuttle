@@ -497,6 +497,30 @@ class EveryFieldHasTheStateTheRunEarnedIt(unittest.TestCase):
         receipt = core.build_receipt(ENDED, ran_facts())
         self.assertEqual(self.states(receipt), LAUNCHED_RUN)
 
+    def test_a_launched_run_whose_kept_files_step_is_real_but_builds_no_list(self):
+        # The step looked at the statement and found nothing; no step builds the list of changed
+        # files yet, so that field is "not built" ("cannot tell" is for a look that failed).
+        kept = {
+            "statement_state": "",
+            "statement_hash": "",
+            "statement_location": "",
+            "claim": "",
+            "session_file": "",
+        }
+        receipt = core.build_receipt(ENDED, ran_facts(stand_ins={**STAND_INS, "kept_files": kept}))
+        states = self.states(receipt)
+        self.assertEqual(states["execution"]["files_list_kept_file"], "not built")
+        self.assertEqual(states["execution"]["session_file_kept_at"], "none")
+        self.assertEqual(
+            {name: states["executor"][name] for name in kept if name != "session_file"},
+            {name: "none" for name in kept if name != "session_file"},
+        )
+        expected = {group: {**rows} for group, rows in LAUNCHED_RUN.items()}
+        expected["execution"]["files_list_kept_file"] = "not built"
+        expected["execution"]["session_file_kept_at"] = "none"
+        expected["executor"].update({n: "none" for n in kept if n != "session_file"})
+        self.assertEqual(states, expected)
+
     def test_a_run_that_was_refused_before_anything_started(self):
         facts = ran_facts(
             launched=False,
