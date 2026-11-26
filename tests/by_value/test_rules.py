@@ -20,6 +20,7 @@ start no process and write nothing.
 """
 
 import ast
+import importlib
 import io
 import os
 import re
@@ -30,6 +31,8 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PACKAGE = os.path.join(ROOT, "shuttle")
+sys.path.insert(0, os.path.join(ROOT, "checks"))
+report = importlib.import_module("report")  # find_markers: the one definition of a marker
 
 # Standard library modules a core module may import: each touches nothing. A module not on
 # this list is refused in the core, so a module nobody thought of (codecs, zipfile, fcntl)
@@ -682,6 +685,31 @@ class TestThePackageItself(unittest.TestCase):
             for name in files
         )
         self.assertEqual(len(package_files()), counted)
+
+
+class TestNotTestedMarkers(unittest.TestCase):
+    """A line left deliberately untested says why: `# not tested: <reason>` (see report.py)."""
+
+    def test_a_marker_with_a_reason_is_fine_and_one_without_fails_naming_the_file(self):
+        self.assertEqual(report.find_markers("shuttle/a.py", "x = 1  # not tested: why\n")[1], [])
+        problems = report.find_markers("shuttle/a.py", "x = 1  # not tested:\n")[1]
+        self.assertEqual(len(problems), 1)
+        self.assertIn("shuttle/a.py line 1", problems[0])
+        self.assertIn("no reason", problems[0])
+
+    def test_every_marker_in_the_package_and_the_checks_has_a_reason(self):
+        paths = [
+            os.path.join(where, name)
+            for folder in ("shuttle", "checks")
+            for where, _, names in os.walk(os.path.join(ROOT, folder))
+            for name in sorted(names)
+            if name.endswith(".py")
+        ]
+        problems = []
+        for path in paths:
+            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+            problems += report.find_markers(rel, _read(path))[1]
+        self.assertEqual(problems, [])
 
 
 class TestTheLinterAgreesWithTheFolders(unittest.TestCase):

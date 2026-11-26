@@ -2,3 +2,4 @@
 # Install: python3 -m pip install -r requirements-dev.txt
 ruff==0.14.10
 mypy==1.19.1
+coverage==7.13.0

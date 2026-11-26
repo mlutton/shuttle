@@ -20,6 +20,21 @@ jobs:
         run: python3 -m pip install -r requirements-dev.txt
       - name: Run the check
         run: ./checks/all.sh
+      - name: Report tests, time, memory and coverage
+        # A second run of the suite, under coverage (see checks/report.py). It never changes
+        # whether the job passes; if the report cannot be made, it says so in one line. The
+        # same bytes go to the job summary and to the artifact below.
+        if: always()
+        run: |
+          ./checks/report.sh > "$RUNNER_TEMP/report.md" || true
+          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the report as a build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: ${{ runner.temp }}/report.md
+          retention-days: 7
 
   base-check:
     name: base check (unittest)
@@ -39,10 +54,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
       - name: List the guard files this pull request changes
         # The listing never fails the job; if it cannot be made, the summary says so.
-        run: ./checks/guard-files.sh "$BASE_SHA" >> "$GITHUB_STEP_SUMMARY" || true
+        # The same bytes go to the job summary and to the artifact below.
+        run: |
+          ./checks/guard-files.sh "$BASE_SHA" > "$RUNNER_TEMP/guard-files.md" || true
+          cat "$RUNNER_TEMP/guard-files.md" >> "$GITHUB_STEP_SUMMARY"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
       - name: Run the base branch's check on this tree
         run: ./checks/base-check.sh "$BASE_SHA"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      - name: Keep the guard listing as a build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guard-files
+          path: ${{ runner.temp }}/guard-files.md
+          retention-days: 7

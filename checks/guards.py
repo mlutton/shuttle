@@ -14,7 +14,7 @@ import subprocess
 import sys
 import traceback
 
-from names import escape_name
+from names import escape_name, fenced
 
 GUARD_FOLDERS = ("checks/", ".githooks/", ".github/")
 GUARD_FILES = ("pyproject.toml", "requirements-dev.txt", "tests/by_value/test_rules.py")
@@ -46,31 +46,17 @@ def guard_changes(changes: list[tuple[str, str]]) -> list[tuple[str, str]]:
     )
 
 
-def longest_run(text: str, char: str) -> int:
-    best = run = 0
-    for c in text:
-        run = run + 1 if c == char else 0
-        best = max(best, run)
-    return best
-
-
 def render_summary(guards: list[tuple[str, str]]) -> str:
     """Markdown. Names sit in one fenced block, escaped to one line each, so no name can
     close the block or start markup: the fence is longer than any run of backticks inside."""
     if not guards:
         return NONE_CHANGED + "\n"
     lines = [f"{what:<8}{escape_name(path)}" for what, path in guards]
-    fence = "`" * max(3, longest_run("\n".join(lines), "`") + 1)
     return (
         "## This pull request changes the guardrails\n\n"
         "The reviewer should read these files "
         "(one per line; a backslash or control character in a name is shown as an escape):\n\n"
-        + fence
-        + "\n"
-        + "\n".join(lines)
-        + "\n"
-        + fence
-        + "\n"
+        + fenced(lines)
     )
 
 

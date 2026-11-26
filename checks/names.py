@@ -34,3 +34,18 @@ def escape_name(name: str) -> str:
     """Backslash, control characters (a newline, say), bidirectional controls and bytes that
     are not valid UTF-8 become escapes; the rest is kept. The result is safe to print."""
     return "".join(escape_char(char) for char in name)
+
+
+def longest_run(text: str, char: str) -> int:
+    best = run = 0
+    for c in text:
+        run = run + 1 if c == char else 0
+        best = max(best, run)
+    return best
+
+
+def fenced(lines: list[str]) -> str:
+    """The lines (already escaped, one per line) in one fenced Markdown block whose fence is
+    longer than any run of backticks inside, so no line can close the block or start markup."""
+    fence = "`" * max(3, longest_run("\n".join(lines), "`") + 1)
+    return fence + "\n" + "\n".join(lines) + "\n" + fence + "\n"

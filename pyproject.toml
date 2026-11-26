@@ -94,6 +94,20 @@ ban-relative-imports = "all"
 "shuttle/__main__.py" = ["TID251"]  # hands straight to the shell's command line
 "tests/**" = ["TID251"]  # tests spawn processes and use temporary folders; the ban is for the package
 
+[tool.coverage.run]
+# Read by checks/report.py (the per-run report), never by ./checks/all.sh. It writes these out
+# with absolute paths and a data file outside the tree. patch = subprocess measures the child
+# processes the command tests start (coverage.py 7.10 and later), parallel keeps one data file
+# per process until they are combined.
+source = ["shuttle", "checks"]
+parallel = true
+patch = ["subprocess"]
+
+[tool.coverage.report]
+# A line (or a block it opens) ending in "# not tested: <reason>" is deliberately untested; the
+# rule test refuses an empty reason and the report lists every one.
+exclude_also = ["# not tested:"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
