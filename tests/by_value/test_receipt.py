@@ -322,59 +322,169 @@ class CheckReceipt(unittest.TestCase):
         self.assertNotEqual(core.check_receipt(receipt), [])
 
 
+# The state each field earns, one row for every field and no default: a field of the receipt
+# with no row fails the test that reads these tables.
+LAUNCHED_RUN = {
+    "ending": {
+        "ending": "value",
+        "reason": "none",
+        "failed_step": "none",
+        "reason_text": "none",
+        "receipt_id": "value",
+        "everything_stopped": "not built",
+    },
+    "execution": {
+        "execution_version": "value",
+        "host": "value",
+        "started_at": "value",
+        "ended_at": "value",
+        "observed_runtime": "not built",
+        "duration_gates_seconds": "not built",
+        "duration_opening_freeze_seconds": "not built",
+        "duration_executor_seconds": "value",
+        "duration_closing_freeze_seconds": "not built",
+        "duration_delivery_seconds": "not built",
+        "input_hash": "value",
+        "reference_hashes": "none",
+        "fingerprint_before": "not built",
+        "fingerprint_after": "not built",
+        "changed_nothing": "not built",
+        "files_added": "not built",
+        "files_changed": "not built",
+        "files_deleted": "not built",
+        "files_list_kept_file": "not built",
+        "delivered": "not built",
+        "delivery_branch": "not built",
+        "delivery_branch_reason": "not built",
+        "exit_code": "value",
+        "signal": "none",
+        "peak_memory_bytes": "not built",
+        "processor_time_seconds": "not built",
+        "session_file_kept_at": "not built",
+        "teardown_failure": "not built",
+        "stop_reason": "not built",
+        "stop_asker": "not built",
+    },
+    "executor_driver": {
+        "executor_driver_name": "value",
+        "executor_driver_version": "value",
+        "tool_version": "none",
+        "model": "none",
+        "effort": "none",
+        "tokens_in": "none",
+        "tokens_out": "none",
+        "tokens_cached": "none",
+        "activity": "none",
+        "session_id": "none",
+        "refused_actions": "none",
+        "quota_level": "none",
+        "vendor_limit_reached": "none",
+        "vendor_limit_reset": "none",
+        "tool_made_own_commits": "cannot tell",
+        "load_lists_differ": "none",
+        "load_lists_kept_file": "none",
+        "changed_self_loaded_file": "none",
+        "waiting_question": "none",
+    },
+    "executor": {
+        "statement_state": "not built",
+        "statement_hash": "not built",
+        "statement_location": "not built",
+        "claim": "not built",
+    },
+}
+
+REFUSED_RUN = {
+    "ending": {
+        "ending": "value",
+        "reason": "value",
+        "failed_step": "value",
+        "reason_text": "value",
+        "receipt_id": "value",
+        "everything_stopped": "none",
+    },
+    "execution": {
+        "execution_version": "value",
+        "host": "value",
+        "started_at": "none",
+        "ended_at": "none",
+        "observed_runtime": "none",
+        "duration_gates_seconds": "none",
+        "duration_opening_freeze_seconds": "none",
+        "duration_executor_seconds": "none",
+        "duration_closing_freeze_seconds": "none",
+        "duration_delivery_seconds": "none",
+        "input_hash": "value",
+        "reference_hashes": "none",
+        "fingerprint_before": "none",
+        "fingerprint_after": "none",
+        "changed_nothing": "none",
+        "files_added": "none",
+        "files_changed": "none",
+        "files_deleted": "none",
+        "files_list_kept_file": "none",
+        "delivered": "none",
+        "delivery_branch": "none",
+        "delivery_branch_reason": "none",
+        "exit_code": "none",
+        "signal": "none",
+        "peak_memory_bytes": "none",
+        "processor_time_seconds": "none",
+        "session_file_kept_at": "none",
+        "teardown_failure": "none",
+        "stop_reason": "none",
+        "stop_asker": "none",
+    },
+    "executor_driver": {
+        "executor_driver_name": "none",
+        "executor_driver_version": "none",
+        "tool_version": "none",
+        "model": "none",
+        "effort": "none",
+        "tokens_in": "none",
+        "tokens_out": "none",
+        "tokens_cached": "none",
+        "activity": "none",
+        "session_id": "none",
+        "refused_actions": "none",
+        "quota_level": "none",
+        "vendor_limit_reached": "none",
+        "vendor_limit_reset": "none",
+        "tool_made_own_commits": "none",
+        "load_lists_differ": "none",
+        "load_lists_kept_file": "none",
+        "changed_self_loaded_file": "none",
+        "waiting_question": "none",
+    },
+    "executor": {
+        "statement_state": "none",
+        "statement_hash": "none",
+        "statement_location": "none",
+        "claim": "none",
+    },
+}
+
+
 class EveryFieldHasTheStateTheRunEarnedIt(unittest.TestCase):
     """A table of field to state, over a launched run and a refused one. The states are read from
     the pairs, never through `flat`, which cannot tell the state "none" from the word "none"."""
 
     def states(self, receipt):
         return {
-            (group, name): held["state"]
+            group: {name: held["state"] for name, held in fields.items()}
             for group, fields in receipt.items()
-            for name, held in fields.items()
         }
 
-    def expected(self, default, **overrides):
-        """Every field of the four groups: `default`, with the (group, field) overrides."""
-        table = {(g, n): default for g, names in fixed.RECEIPT_GROUPS.items() for n in names}
-        for key, state in overrides.items():
-            group, name = key.split("__", 1)
-            self.assertIn((group, name), table, key)
-            table[(group, name)] = state
-        return table
+    def test_every_field_of_the_receipt_has_a_row_in_each_table(self):
+        for table in (LAUNCHED_RUN, REFUSED_RUN):
+            self.assertEqual(
+                {g: sorted(rows) for g, rows in table.items()},
+                {g: sorted(names) for g, names in fixed.RECEIPT_GROUPS.items()},
+            )
 
     def test_a_launched_run_that_ended_by_itself(self):
         receipt = core.build_receipt(ENDED, ran_facts())
-        expected = self.expected(
-            fixed.NOT_BUILT,
-            ending__ending="value",
-            ending__reason="none",
-            ending__failed_step="none",
-            ending__reason_text="none",
-            ending__receipt_id="value",
-            execution__execution_version="value",
-            execution__host="value",
-            execution__started_at="value",
-            execution__ended_at="value",
-            execution__duration_executor_seconds="value",
-            execution__input_hash="value",
-            execution__reference_hashes="none",
-            execution__exit_code="value",
-            execution__signal="none",
-            executor_driver__executor_driver_name="value",
-            executor_driver__executor_driver_version="value",
-            executor_driver__tool_made_own_commits="cannot tell",
-            **{
-                f"executor_driver__{name}": "none"
-                for name in fixed.RECEIPT_GROUPS["executor_driver"]
-                if name
-                not in (
-                    "executor_driver_name",
-                    "executor_driver_version",
-                    "tool_made_own_commits",
-                )
-            },
-        )
-        self.assertEqual(self.states(receipt), expected)
+        self.assertEqual(self.states(receipt), LAUNCHED_RUN)
 
     def test_a_run_that_was_refused_before_anything_started(self):
         facts = ran_facts(
@@ -389,18 +499,7 @@ class EveryFieldHasTheStateTheRunEarnedIt(unittest.TestCase):
             reason_text="unknown field: surprise",
         )
         receipt = core.build_receipt(REFUSED, facts)
-        expected = self.expected(
-            fixed.NONE,
-            ending__ending="value",
-            ending__reason="value",
-            ending__failed_step="value",
-            ending__reason_text="value",
-            ending__receipt_id="value",
-            execution__execution_version="value",
-            execution__host="value",
-            execution__input_hash="value",
-        )
-        self.assertEqual(self.states(receipt), expected)
+        self.assertEqual(self.states(receipt), REFUSED_RUN)
 
     def test_a_refused_run_whose_reason_text_is_not_known_says_cannot_tell_for_it(self):
         receipt = core.build_receipt(REFUSED, ran_facts(launched=False, reason_text=None))

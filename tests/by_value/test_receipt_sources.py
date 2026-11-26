@@ -29,6 +29,10 @@ def a_loop():
 
 # Values a source might hand over: an empty text and odd things, each with the state it must get.
 ODD = {
+    # A fact that is None looked and found nothing; a step that returns None, or leaves its key
+    # out, could not say, so for a step's key None is "cannot tell". False is a value.
+    "a missing value (None)": (None, fixed.NONE),
+    "false": (False, fixed.VALUE),
     "empty text": ("", fixed.NONE),
     "empty list": ([], fixed.NONE),
     "empty dictionary": ({}, fixed.NONE),
@@ -163,6 +167,16 @@ SOURCES = [
 ]
 
 
+REAL_STEP_OF = {}
+for _source, _, _field in SOURCES:
+    if "step returns" in _source:
+        _key, _step = (
+            _source[len("the ") :].split(" the ")[0],
+            _source.split(" the ")[1].split(" step")[0],
+        )
+        REAL_STEP_OF[_source] = (_step, _key)
+
+
 def every_field(receipt):
     return {
         (group, name): held for group, fields in receipt.items() for name, held in fields.items()
@@ -183,9 +197,28 @@ class AnOddValueCostsOnlyItsOwnField(unittest.TestCase):
     def test_the_one_field_says_none_for_nothing_and_cannot_tell_for_what_cannot_be_held(self):
         for source, make, field in SOURCES:
             for what, (odd, state) in ODD.items():
+                if odd is None and ("step returns" in source or source == "the input hash"):
+                    state = fixed.CANNOT_TELL
+                expected = {"state": state, "value": odd if state == fixed.VALUE else None}
                 with self.subTest(source=source, odd=what):
                     held = every_field(core.build_receipt(ENDED, make(odd)))[field]
-                    self.assertEqual(held, {"state": state, "value": None})
+                    self.assertEqual(held, expected)
+
+    def test_a_step_that_leaves_its_key_out_says_cannot_tell_for_that_field_only(self):
+        baseline = every_field(core.build_receipt(ENDED, facts()))
+        for source, _, field in SOURCES:
+            if "step returns" not in source:
+                continue
+            step, key = REAL_STEP_OF[source]
+            steps = copy.deepcopy(REAL_STEPS)
+            del steps[step][key]
+            receipt = every_field(core.build_receipt(ENDED, facts(stand_ins=steps)))
+            with self.subTest(source):
+                self.assertEqual(receipt[field], {"state": fixed.CANNOT_TELL, "value": None})
+                self.assertEqual(
+                    {k: v for k, v in receipt.items() if k != field},
+                    {k: v for k, v in baseline.items() if k != field},
+                )
 
     def test_the_baseline_has_every_source_as_a_value(self):
         baseline = every_field(core.build_receipt(ENDED, facts()))

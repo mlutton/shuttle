@@ -607,25 +607,11 @@ def build_environment(
 def record_name(request_id: str, kind: str) -> str:
     """The name of a request id's record of one kind (a kind on `fixed.RECORD_KINDS`).
 
-    The one place record names are made. A request id holds no dot, so no id makes one kind's
-    name another kind's.
+    The one place record names are made.
     """
     if kind not in fixed.RECORD_KINDS:
         raise ValueError(f"{kind!r} is not a kind of record")
     return f"{request_id}.{kind}.json"
-
-
-def read_record_name(name: str) -> tuple[str, str] | None:
-    """(request id, kind) of a record's name, or None when it is not one.
-
-    Matches the name against each kind's ending; the name is never cut at a separator.
-    """
-    for kind in fixed.RECORD_KINDS:
-        ending = f".{kind}.json"
-        request_id = name[: -len(ending)]
-        if name.endswith(ending) and _valid_request_id(request_id):
-            return request_id, kind
-    return None
 
 
 def temporary_name(name: str, process_number: int) -> str:
