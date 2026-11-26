@@ -442,8 +442,28 @@ def run_steps(
         "problems": {},
         "signal": None,
     }
-    restore = _install_handlers(state)
+    conclusion = _the_run(steps, state)
+    for line in conclusion["stdout"]:
+        out.write(line + "\n")
+    for line in conclusion["stderr"]:
+        err.write(line + "\n")
+    exit_code: int = conclusion["exit"]
+    return exit_code
+
+
+def _the_run(
+    steps: Sequence[tuple[str, Callable[[RunState], None]]], state: RunState
+) -> Conclusion:
+    """The outermost guard of the run: whatever happens inside it, it owes a conclusion.
+
+    Installing the handlers, every step and the final clean-up (ending the child, concluding,
+    restoring the handlers) are inside it. The conclusion is the outcome record, or before a claim
+    the one-line refusal. The per-step guards (`guarded`) are inside it only to name the step
+    that failed.
+    """
+    restore: Callable[[], None] | None = None
     try:
+        restore = _install_handlers(state)
         for name, step in steps:
             state["facts"].update(decisions.facts_after_signal(state["facts"], state["signal"]))
             if decisions.step_runs(name, state["facts"]):
@@ -451,13 +471,11 @@ def run_steps(
     finally:
         boundary = state["stand_ins"].get("boundary")
         if boundary and boundary.get("process") is not None:
-            end_child(world, boundary["process"])  # whatever went wrong, nothing is left running
+            end_child(
+                state["world"], boundary["process"]
+            )  # whatever went wrong, nothing is left running
         if "conclusion" not in state:  # the last step did not run, or did not finish
             state["conclusion"] = conclude_run(state)
-        restore()
-    for line in state["conclusion"]["stdout"]:
-        out.write(line + "\n")
-    for line in state["conclusion"]["stderr"]:
-        err.write(line + "\n")
-    exit_code: int = state["conclusion"]["exit"]
-    return exit_code
+        if restore is not None:
+            restore()
+    return state["conclusion"]
