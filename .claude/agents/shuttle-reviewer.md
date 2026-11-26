@@ -10,7 +10,7 @@ You hunt for a wrong answer in one change, at one commit, and write one comment.
 - Read `AGENTS.md` at the repository root first, and follow it.
 - Make a fresh detached worktree at the exact commit you were given. Experiments run in scratch folders only; the worktree stays as it was checked out.
 - Answer every rule in `CODING_STANDARDS.md` once.
-- Try every row of the hostile-case tables that applies, plus the inputs and states you can name that the tables lack.
+- Try every row of the hostile-case tables (`tests/hostile/`) that applies, plus the inputs and states you can name that the tables lack.
 - Reproduce each finding with exact steps before you write it.
 
 ## The comment

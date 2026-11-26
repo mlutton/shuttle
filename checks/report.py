@@ -193,7 +193,19 @@ def _toml_value(value: object) -> str:
         return str(value)
     if isinstance(value, list):
         return "[" + ", ".join(_toml_value(v) for v in value) + "]"
-    return json.dumps(str(value))  # JSON string escapes are valid in a TOML basic string
+    return _toml_string(str(value))
+
+
+def _toml_string(text: str) -> str:
+    """A TOML basic string: a quote, a backslash and the control characters (and DEL) escaped,
+    everything else as it is (TOML is UTF-8; JSON's escapes would split a character outside the
+    basic plane into two surrogates, which TOML refuses)."""
+    escapes = {'"': '\\"', "\\": "\\\\"}
+    return '"' + "".join(escapes.get(c) or _escape_control(c) for c in text) + '"'
+
+
+def _escape_control(char: str) -> str:
+    return f"\\u{ord(char):04x}" if ord(char) < 0x20 or ord(char) == 0x7F else char
 
 
 def coverage_config(pyproject: dict[str, Any], root: str, data_file: str) -> str:
@@ -336,8 +348,11 @@ def render_report(facts: Facts) -> str:
     skipped = [f"{escape_name(t.id)}: {escape_name(t.reason)}" for t in facts.tests if t.reason]
     slow = [f"{t.seconds:8.3f} s  {escape_name(t.id)}" for t in slowest(facts.tests)]
     folders = [
-        f"{name:<10}{count:>5} tests{seconds:>10.3f} s" if count else f"{name:<10}none yet"
-        for name, count, seconds in time_per_folder(facts.tests)
+        f"{shown:<10}{count:>5} tests{seconds:>10.3f} s" if count else f"{shown:<10}none yet"
+        for shown, count, seconds in (
+            (escape_name(name), count, seconds)
+            for name, count, seconds in time_per_folder(facts.tests)
+        )
     ]
     copies = [f.path for f in facts.files if f.path in RUN_FROM_COPIES]
     out = [

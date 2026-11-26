@@ -7,7 +7,7 @@ Read at review, not while building. These are judgement rules: what a machine en
 - **Humble object.** The shell gathers facts, hands them to the core, acts on the answer. A decision found in the shell, or in a script under `checks/`, moves to a tested function.
 - **Fail closed.** A guard that cannot establish the fact it guards on refuses, in one line that names what was not done, what could not be established, and what would fix it. A helper ends with its documented last line on every path, its own crash included.
 - **One meaning per exit code.** Listed in the script's header.
-- **Names are data.** A file name is never split, quoted by a tool, or pasted raw into rendered text.
+- **Names are data.** A file name is never split, quoted by a tool, or pasted raw into rendered text; the names table in `tests/hostile/` holds the awkward names.
 
 ## Tests
 - **Behaviour only.** The core is tested by value; the shell through the real command, failure paths included. A test asserts what a caller can see.

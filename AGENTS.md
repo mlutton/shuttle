@@ -10,5 +10,5 @@
 Read when:
 - planning or sequencing a change: `docs/process.md`
 - reviewing: `CODING_STANDARDS.md`
-- writing code that takes a file name or judges an import: the hostile-case tables
+- writing code that takes a file name or judges an import: the hostile-case tables in `tests/hostile/`
 - you need to know what the checks do: `README.md`
