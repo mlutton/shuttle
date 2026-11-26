@@ -151,7 +151,7 @@ class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
                 doc = self.document(script, [location, given, row["leaves"]], request_id=request_id)
                 doc["kind"], doc["statement_location"] = "judge", location
                 # `communicate` has a limit, so a run that waits on the thing fails, not hangs.
-                code, lines, err = self.run_to_the_end(doc, limits=True)
+                code, lines, err = self.run_to_the_end(doc)
                 self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
                 got = flat(self.outcome(request_id)["receipt"])["executor"]
                 self.assertEqual(
@@ -210,9 +210,7 @@ class AReferenceThatIsNotAFileCannotMakeTheCheckWait(real_run.RealRun):
     def run_with(self, path, request_id):
         doc = self.document(self.script("noop.py", LEAVES_NOTHING), request_id=request_id)
         doc["references"] = [self.reference(path)]
-        code, lines, err = self.run_to_the_end(
-            doc, limits=True
-        )  # `communicate` has a limit: a wait fails
+        code, lines, err = self.run_to_the_end(doc)  # `communicate` has a limit: a wait fails
         return code, err, lines[-1], flat(self.outcome(request_id)["receipt"])
 
     def test_a_pipe_and_a_link_to_a_device_are_refused_as_missing_and_end_at_once(self):
