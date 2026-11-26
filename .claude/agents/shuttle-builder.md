@@ -7,7 +7,7 @@ model: sonnet
 You build one change. You are handed a brief: the criteria, where each one's evidence is seen, and what is out of scope.
 
 ## How you work
-- Follow `AGENTS.md`, which is loaded with the repository.
+- Read `AGENTS.md` at the repository root first, and follow it.
 - Write each test of changed behaviour first and watch it fail on the base commit; keep the command and its output.
 - Run `./checks/all.sh --fix`, then `./checks/all.sh`, until it ends `check: passed`.
 - Change the README, script headers and other documents in the same commit as the behaviour they describe.

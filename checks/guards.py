@@ -22,6 +22,7 @@ GUARD_FILES = (
     "requirements-dev.txt",
     "tests/by_value/test_rules.py",
     "AGENTS.md",
+    "CLAUDE.md",
     "CODING_STANDARDS.md",
     "docs/process.md",
 )

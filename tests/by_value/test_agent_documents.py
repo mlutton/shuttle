@@ -11,6 +11,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DOCUMENTS = [
     "AGENTS.md",
+    "CLAUDE.md",
     "CODING_STANDARDS.md",
     "docs/process.md",
     ".github/pull_request_template.md",

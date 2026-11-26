@@ -2,9 +2,9 @@
 # Lists the guard files a pull request changes, as a job-summary section on standard output.
 # Usage: checks/guard-files.sh <base commit>   (run inside the pull request's tree)
 # Guard files: anything under checks/, .githooks/, .github/ or .claude/agents/, pyproject.toml,
-# requirements-dev.txt, tests/by_value/test_rules.py, AGENTS.md, CODING_STANDARDS.md and
-# docs/process.md. Each is marked changed, added or deleted; a moved file shows as deleted from its old path. Names are shown escaped, one per
-# line. The work is in checks/guards.py.
+# requirements-dev.txt, tests/by_value/test_rules.py, AGENTS.md, CLAUDE.md, CODING_STANDARDS.md
+# and docs/process.md. Each is marked changed, added or deleted; a moved file shows as deleted
+# from its old path. Names are shown escaped, one per line. The work is in checks/guards.py.
 # Exit codes: 0 listed (or none changed); 1 it could not be produced (standard output then
 # says so in one line, also when the helper itself could not run, could not be parsed or
 # printed nothing); 2 misuse (checked here, since python's own exit 2 means "cannot open file").

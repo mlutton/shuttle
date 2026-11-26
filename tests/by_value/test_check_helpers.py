@@ -68,6 +68,7 @@ class GuardChangesTest(unittest.TestCase):
             "requirements-dev.txt",
             "tests/by_value/test_rules.py",
             "AGENTS.md",
+            "CLAUDE.md",
             "CODING_STANDARDS.md",
             "docs/process.md",
             ".claude/agents/shuttle-builder.md",
@@ -82,6 +83,7 @@ class GuardChangesTest(unittest.TestCase):
             )
             + self.guards_in(
                 "docs/AGENTS.md",
+                "docs/CLAUDE.md",
                 "docs/process.md.bak",
                 "docs/other.md",
                 ".claude/settings.json",

@@ -36,8 +36,8 @@
 #   2  the check could not run: a tool is missing (the last line names it and the command)
 #   3  the argument was not recognised (one line on standard error names the two forms)
 #
-# PYTHON names the interpreter that has the tools. By default it is .venv/bin/python
-# when that exists, else python3. There are no retries: a failed stage stays failed.
+# PYTHON names the interpreter that has the tools. By default it is this tree's
+# .venv/bin/python, else the main working tree's (for a linked worktree), else python3. There are no retries: a failed stage stays failed.
 
 mode=check
 [ "$#" -eq 1 ] && [ "$1" = --fix ] && mode=fix
@@ -49,8 +49,18 @@ fi
 root=$(cd "$(dirname "$0")/.." && pwd) || exit 2
 cd "$root" || exit 2
 
+# Same lookup as .githooks/pre-push (keep the two identical): this tree's .venv, else the main
+# working tree's (a linked worktree has none of its own), else python3.
 if [ -z "${PYTHON:-}" ]; then
-    if [ -x .venv/bin/python ]; then PYTHON=.venv/bin/python; else PYTHON=python3; fi
+    PYTHON=python3
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    main=
+    [ "$(basename "$common")" = .git ] && main=$(dirname "$common")
+    for candidate in "$root" "$main"; do
+        [ -n "$candidate" ] && [ -x "$candidate/.venv/bin/python" ] || continue
+        PYTHON="$candidate/.venv/bin/python"
+        break
+    done
 fi
 
 INSTALL="python3 -m pip install -r requirements-dev.txt"

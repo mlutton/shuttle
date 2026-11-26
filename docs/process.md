@@ -9,8 +9,6 @@ Four roles. Each role on a change is held by a different agent.
 
 ## Steps
 
-Each step ends on its completion criterion.
-
 1. **Brief.** Done when every criterion names where its evidence is seen, and the brief says what is out of scope.
 2. **Build.** Done when every hosted check is green at the head commit and the sections of `.github/pull_request_template.md` are filled.
 3. **Review.** Done when every row of the hostile-case tables that applies is tried, every rule in `CODING_STANDARDS.md` is answered once, and the comment gives one verdict for the exact commit. The standards file also holds the round rule.

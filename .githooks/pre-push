@@ -9,6 +9,7 @@ zero=0000000000000000000000000000000000000000
 
 # The tools live in a virtual environment the copy does not have: this working tree's, else
 # the main working tree's (a linked worktree has none of its own). PYTHON, if set, wins.
+# checks/all.sh makes the same lookup (keep the two identical).
 if [ -z "${PYTHON:-}" ]; then
     common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
     main=
