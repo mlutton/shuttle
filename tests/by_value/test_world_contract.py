@@ -27,16 +27,32 @@ class SimulatedHarness:
     def names_in(self, folder):
         return self.world.names_in(folder)
 
-    def argv(self, kind, ready=None):
+    def argv(self, kind, ready=None, report=None):
         behaviours = {
             "exits_at_once": {"exits_after": 0},
             "exits_with_three": {"exits_after": 0, "exit_code": 3},
             "sleeps": {},
+            "reports_streams": {"exits_after": 0},
+            "reports_session": {"exits_after": 0},
             "ignores_the_ask": {"obeys": ("kill",), "creates": (ready,) if ready else ()},
         }
         if kind in behaviours:
             self.world.program(kind, **behaviours[kind])
         return [kind]  # "not_a_program" is never registered
+
+    # The simulated world runs no program, so what a started child sees of its streams and
+    # session is what the simulated `start` is declared to give it: the same as the real one.
+    def streams_the_child_saw(self):
+        return ("null", "null", "null")
+
+    def session_the_child_saw(self):
+        return (True, True)
+
+    def make_a_name_that_leads_nowhere(self, path):
+        self.world.put_a_name_that_leads_nowhere(path)
+
+    def host_name(self):
+        return self.world.host
 
     def environment(self):
         return {"PATH": "/bin"}
@@ -56,6 +72,14 @@ class SimulatedWorldHoldsTheContract(contract.ContractCases, unittest.TestCase):
         self.simulated = simulated.SimulatedWorld()
         self.world = self.simulated.operations
         self.harness = SimulatedHarness(self.simulated)
+
+    def test_a_signal_other_than_the_three_is_not_handed_to_the_handler(self):
+        # the real half shows that only these three are installed (it cannot send the others)
+        calls = []
+        self.world.signals.install(calls.append)
+        for name in ("SIGUSR1", "SIGQUIT", "SIGCHLD"):
+            self.simulated.deliver(name)
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

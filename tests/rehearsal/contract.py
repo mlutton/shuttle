@@ -47,6 +47,16 @@ def until(world, done, seconds=5.0):
 
 
 class ContractCases:
+    def assertRaisesExactly(self, expected, function, *arguments):
+        """The call raises `expected` itself, not a parent or a sibling class: the run prints the
+        class's name in lines a caller reads, so the two halves must agree on it."""
+        try:
+            function(*arguments)
+        except BaseException as error:
+            self.assertIs(type(error), expected, f"{type(error).__name__}: {error}")
+            return
+        self.fail(f"nothing was raised; expected {expected.__name__}")
+
     # ------------------------------------------------------------------ files
 
     def fresh(self, name="a-file"):
@@ -70,19 +80,23 @@ class ContractCases:
     ):
         path = self.fresh()
         self.world.files.write_new(path, "first")
-        with self.assertRaises(FileExistsError):
-            self.world.files.write_new(path, "second")
+        self.assertRaisesExactly(FileExistsError, self.world.files.write_new, path, "second")
         self.assertEqual(self.world.files.read(path), b"first")
 
     def test_writing_a_new_file_in_a_folder_that_is_not_there_raises_and_makes_nothing(self):
         folder = self.harness.folder()
-        with self.assertRaises(OSError):
-            self.world.files.write_new(f"{folder}/absent/file", "x")
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.write_new, f"{folder}/absent/file", "x"
+        )
         self.assertEqual(self.harness.names_in(folder), [])
 
     def test_a_text_that_cannot_be_encoded_raises_a_value_error(self):
-        with self.assertRaises(ValueError):
-            self.world.files.write_new(self.fresh(), "lone surrogate \ud800")
+        path = self.fresh()
+        self.assertRaisesExactly(
+            UnicodeEncodeError, self.world.files.write_new, path, "lone surrogate \ud800"
+        )
+        # the name was made before the text was encoded, and is left there, empty
+        self.assertEqual(self.world.files.read(path), b"")
 
     def test_a_linked_name_reads_the_same_and_outlives_the_removal_of_the_first(self):
         first, second = self.fresh("first"), self.fresh("second")
@@ -97,28 +111,51 @@ class ContractCases:
         first, second = self.fresh("first"), self.fresh("second")
         self.world.files.write_new(first, "one")
         self.world.files.write_new(second, "two")
-        with self.assertRaises(FileExistsError):
-            self.world.files.link(first, second)
+        self.assertRaisesExactly(FileExistsError, self.world.files.link, first, second)
         self.assertEqual(self.world.files.read(first), b"one")
         self.assertEqual(self.world.files.read(second), b"two")
 
     def test_linking_from_a_name_that_is_not_there_raises_and_makes_nothing(self):
         folder = self.harness.folder()
-        with self.assertRaises(OSError):
-            self.world.files.link(f"{folder}/absent", f"{folder}/new")
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.link, f"{folder}/absent", f"{folder}/new"
+        )
         self.assertEqual(self.harness.names_in(folder), [])
 
     def test_removing_a_name_that_is_not_there_raises_file_not_found(self):
-        with self.assertRaises(FileNotFoundError):
-            self.world.files.remove(self.fresh("absent"))
+        self.assertRaisesExactly(FileNotFoundError, self.world.files.remove, self.fresh("absent"))
 
     def test_reading_a_name_that_is_not_there_raises_file_not_found(self):
-        with self.assertRaises(FileNotFoundError):
-            self.world.files.read(self.fresh("absent"))
+        self.assertRaisesExactly(FileNotFoundError, self.world.files.read, self.fresh("absent"))
 
-    def test_reading_a_folder_raises_an_os_error(self):
-        with self.assertRaises(OSError):
-            self.world.files.read(self.harness.folder())
+    def test_reading_a_folder_raises_is_a_directory(self):
+        self.assertRaisesExactly(IsADirectoryError, self.world.files.read, self.harness.folder())
+
+    def test_a_folder_is_there_and_cannot_be_written_over_linked_from_or_removed(self):
+        folder, other = self.harness.folder(), self.fresh("other")
+        self.assertTrue(self.world.files.exists(folder))
+        self.assertRaisesExactly(FileExistsError, self.world.files.write_new, folder, "x")
+        self.assertRaisesExactly(PermissionError, self.world.files.link, folder, other)
+        self.assertRaisesExactly(IsADirectoryError, self.world.files.remove, folder)
+        self.assertTrue(self.world.files.exists(folder))
+
+    def test_a_name_that_leads_nowhere_is_there_cannot_be_read_or_written_over_and_can_be_removed(
+        self,
+    ):
+        path, other = self.fresh("dangling"), self.fresh("other")
+        self.harness.make_a_name_that_leads_nowhere(path)
+        self.assertTrue(self.world.files.exists(path))
+        self.assertRaisesExactly(FileNotFoundError, self.world.files.read, path)
+        self.assertRaisesExactly(FileExistsError, self.world.files.write_new, path, "x")
+        self.world.files.write_new(other, "x")
+        self.assertRaisesExactly(FileExistsError, self.world.files.link, other, path)
+        self.world.files.remove(path)
+        self.assertFalse(self.world.files.exists(path))
+
+    def test_a_file_of_a_hundred_thousand_bytes_reads_back_whole(self):
+        path, text = self.fresh(), "0123456789" * 10000
+        self.world.files.write_new(path, text)
+        self.assertEqual(self.world.files.read(path), text.encode("utf-8"))
 
     def test_a_record_put_in_place_under_every_name_the_filesystem_will_hold_reads_back_whole(self):
         # tests/hostile/names_table.py: the rows that are one name (not a path of several parts)
@@ -166,18 +203,21 @@ class ContractCases:
                 self.assertEqual(self.world.processes.poll(process), status)
                 self.assertEqual(self.world.processes.poll(process), status)
 
-    def test_starting_a_program_that_cannot_be_found_raises_an_os_error(self):
-        with self.assertRaises(OSError):
-            self.world.processes.start(
-                self.harness.argv("not_a_program"), self.harness.environment()
-            )
+    def test_starting_a_program_that_cannot_be_found_raises_file_not_found(self):
+        self.assertRaisesExactly(
+            FileNotFoundError,
+            self.world.processes.start,
+            self.harness.argv("not_a_program"),
+            self.harness.environment(),
+        )
 
     def test_starting_a_program_with_an_argument_holding_a_null_character_raises_a_value_error(
         self,
     ):
         argv = [*self.harness.argv("exits_at_once"), "a\0b"]
-        with self.assertRaises(ValueError):
-            self.world.processes.start(argv, self.harness.environment())
+        self.assertRaisesExactly(
+            ValueError, self.world.processes.start, argv, self.harness.environment()
+        )
 
     def test_a_running_program_polls_none_and_ends_with_the_ask_by_the_terminate_signal(self):
         process = self.start("sleeps")
@@ -205,6 +245,16 @@ class ContractCases:
         self.world.processes.kill(process)
         self.assertEqual(self.world.processes.poll(process), 3)
 
+    def test_a_started_child_has_all_three_standard_streams_at_the_null_device(self):
+        process = self.start("reports_streams", report=self.fresh("report"))
+        self.assertTrue(self.ended(process))
+        self.assertEqual(self.harness.streams_the_child_saw(), ("null", "null", "null"))
+
+    def test_a_started_child_is_in_the_callers_session_and_process_group(self):
+        process = self.start("reports_session", report=self.fresh("report"))
+        self.assertTrue(self.ended(process))
+        self.assertEqual(self.harness.session_the_child_saw(), (True, True))
+
     # ------------------------------------------------------------------ clock
 
     def test_the_clock_only_goes_forward_and_waiting_moves_it_by_at_least_the_wait(self):
@@ -213,6 +263,16 @@ class ContractCases:
         after = self.world.clock.now()
         self.assertGreaterEqual(after - before, 0.02 - 0.001)
         self.assertGreaterEqual(self.world.clock.now(), after)
+
+    def test_waiting_takes_about_the_time_asked_not_twice_it(self):
+        before = self.world.clock.now()
+        self.world.clock.wait(0.1)
+        taken = self.world.clock.now() - before
+        self.assertGreaterEqual(taken, 0.1 - 0.001)
+        self.assertLess(taken, 0.19)
+
+    def test_waiting_a_negative_time_raises_value_error(self):
+        self.assertRaisesExactly(ValueError, self.world.clock.wait, -1)
 
     def test_a_timestamp_is_utc_iso_with_milliseconds(self):
         self.assertRegex(
@@ -245,6 +305,8 @@ class ContractCases:
         self.assertEqual(self.world.signals.name_of(9), "SIGKILL")
         self.assertEqual(self.world.signals.name_of(2), "SIGINT")
         self.assertIsNone(self.world.signals.name_of(99999))
+        for not_a_signal in (0, -2, -15):
+            self.assertIsNone(self.world.signals.name_of(not_a_signal))
 
     # ------------------------------------------------- environment and identity
 
@@ -253,15 +315,16 @@ class ContractCases:
     ):
         self.harness.set_variable("SHUTTLE_CONTRACT_SET", "a value = with \u00e9")
         self.harness.set_variable("SHUTTLE_CONTRACT_EMPTY", "")
+        self.harness.set_variable("SHUTTLE_CONTRACT_PADDED", "  Mixed Case \t")
         read = self.world.environment.read_variable
         self.assertEqual(read("SHUTTLE_CONTRACT_SET"), "a value = with \u00e9")
         self.assertEqual(read("SHUTTLE_CONTRACT_EMPTY"), "")
+        self.assertEqual(read("SHUTTLE_CONTRACT_PADDED"), "  Mixed Case \t")
+        self.assertIsNone(read("shuttle_contract_set"))  # a name is not case-folded
         self.assertIsNone(read("SHUTTLE_CONTRACT_NOT_SET"))
 
-    def test_the_host_name_is_some_text(self):
-        name = self.world.identity.host_name()
-        self.assertIsInstance(name, str)
-        self.assertTrue(name)
+    def test_the_host_name_is_exactly_the_one_the_harness_says_this_host_has(self):
+        self.assertEqual(self.world.identity.host_name(), self.harness.host_name())
 
     def test_new_ids_are_32_lower_case_hex_digits_and_never_the_same_twice(self):
         ids = [self.world.identity.new_id() for _ in range(50)]

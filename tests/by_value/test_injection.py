@@ -285,6 +285,19 @@ class Injection(unittest.TestCase):
         self.assertEqual(len(err.strip().splitlines()), 1)
         self.assertEqual(world.names_in(scenes.RECORDS), [])
 
+    def test_a_name_that_leads_nowhere_in_the_outcome_records_place_refuses_the_id_and_nothing_starts(
+        self,
+    ):
+        # a dangling link is "there": the id is used, so the executor must not run under it
+        world = scenes.scene()
+        world.put_a_name_that_leads_nowhere(f"{scenes.RECORDS}/inj-1.outcome.json")
+        code, lines, err = scenes.run_in(world)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(lines, ["inj-1", CNS])
+        self.assertIn("already used", err)
+        self.assertEqual(world.started, [])
+        self.assertEqual(world.names_in(scenes.RECORDS), [])
+
     def test_a_document_that_cannot_be_built_into_a_request_record_spends_no_id_and_writes_nothing(
         self,
     ):

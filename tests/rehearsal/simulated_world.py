@@ -30,6 +30,7 @@ from shuttle.core.shapes import (
     SignalOperations,
 )
 
+HANDLED = ("SIGINT", "SIGTERM", "SIGHUP")
 EPOCH = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
 
@@ -48,6 +49,7 @@ class SimulatedWorld:
         self.pid = 4242  # what the simulated process is numbered
         self.variables = dict(environment or {})
         self.folders = set()
+        self.dangling = set()  # names that lead nowhere
         self.files = {}  # name -> bytearray; a linked name shares the bytearray
         self.programs = {}  # command -> behaviour
         self.started = []  # (argv, environment) of every start
@@ -87,12 +89,19 @@ class SimulatedWorld:
     # ------------------------------------------------------------ setting the scene
 
     def make_folder(self, path):
-        self.folders.add(path)
+        """The folder and every folder above it; returns the path."""
+        above = path
+        while above:
+            self.folders.add(above)
+            above = above.rpartition("/")[0]
         return path
 
     def put_file(self, path, text):
         data = text if isinstance(text, bytes) else text.encode("utf-8")
         self.files[path] = bytearray(data)
+
+    def put_a_name_that_leads_nowhere(self, path):
+        self.dangling.add(path)
 
     def text_of(self, path):
         return bytes(self.files[path]).decode("utf-8")
@@ -137,7 +146,7 @@ class SimulatedWorld:
 
     def deliver(self, name):
         """A signal arrives now: the handler installed last is called with its name."""
-        if self._handlers:
+        if self._handlers and name in HANDLED:  # the real handlers are for these three only
             self._handlers[-1](name)
 
     def have_previous_handler(self, handler):
@@ -179,13 +188,13 @@ class SimulatedWorld:
 
     def _exists(self, path):
         self._enter("files.exists", path)
-        return path in self.files or path in self.folders
+        return path in self.files or path in self.folders or path in self.dangling
 
     def _write_new(self, path, text):
         how, error = self._enter("files.write_new", path, text)
         if not self._parent_exists(path):
             raise FileNotFoundError(path)
-        if path in self.files or path in self.folders:
+        if path in self.files or path in self.folders or path in self.dangling:
             raise FileExistsError(path)
         self.files[path] = bytearray()
         data = text.encode("utf-8")  # a lone surrogate raises here, after the file is made
@@ -202,7 +211,7 @@ class SimulatedWorld:
             raise PermissionError(existing)
         if existing not in self.files or not self._parent_exists(new):
             raise FileNotFoundError(existing)
-        if new in self.files or new in self.folders:
+        if new in self.files or new in self.folders or new in self.dangling:
             raise FileExistsError(new)
         self.files[new] = self.files[existing]
 
@@ -210,6 +219,9 @@ class SimulatedWorld:
         self._enter("files.remove", path)
         if path in self.folders:
             raise IsADirectoryError(path)
+        if path in self.dangling:
+            self.dangling.remove(path)
+            return
         if path not in self.files:
             raise FileNotFoundError(path)
         del self.files[path]
@@ -263,6 +275,8 @@ class SimulatedWorld:
 
     def _wait(self, seconds):
         self._enter("clock.wait", seconds)
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")
         self.t += seconds
         while self._events and self._events[0][0] <= self.t:
             self._events.pop(0)[1]()
