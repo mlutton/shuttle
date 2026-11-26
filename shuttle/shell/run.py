@@ -412,7 +412,13 @@ def guarded(name: str, step: Callable[[RunState], None], state: RunState) -> Non
 
 
 def _install_handlers(state: RunState) -> Callable[[], None]:
-    """Signals only record which one came first. They never raise. Returns the undo."""
+    """Signals only record which one came first. They never raise.
+
+    Returns the undo, which the run itself never calls (only a test that installs them in its own
+    process does): the handlers are never given back: the run is the command's whole life, and a signal that
+    arrives after the conclusion (during the final flush, the exit or the interpreter's shutdown)
+    must be caught, not end the process by that signal with the record already written.
+    """
 
     def note(name: str) -> None:
         if state["signal"] is None:
@@ -461,13 +467,12 @@ def _the_run(steps: Sequence[tuple[str, Callable[[RunState], None]]], state: Run
     """The outermost guard of the run: whatever happens inside it, it owes a conclusion.
 
     Installing the handlers, every step, the final clean-up (ending the child, concluding) and the
-    final print are inside it, and the handlers stay until the print is done. The conclusion is the
+    final print are inside it, and the handlers stay installed to the end of the process. The conclusion is the
     outcome record, or before a claim the one-line refusal. The per-step guards (`guarded`) are
     inside it only to name the step that failed. Returns the exit code.
     """
-    restore: Callable[[], None] | None = None
     try:
-        restore = _install_handlers(state)
+        _install_handlers(state)
         for name, step in steps:
             state["facts"].update(decisions.facts_after_signal(state["facts"], state["signal"]))
             if decisions.step_runs(name, state["facts"]):
@@ -478,11 +483,7 @@ def _the_run(steps: Sequence[tuple[str, Callable[[RunState], None]]], state: Run
                 f"the run could not be set up ({type(error).__name__}); nothing was done"
             )
     _clean_up(state)
-    exit_code = _print_the_conclusion(state)
-    if restore is not None:
-        with contextlib.suppress(Exception):
-            restore()
-    return exit_code
+    return _print_the_conclusion(state)
 
 
 def _clean_up(state: RunState) -> None:

@@ -99,6 +99,24 @@ class ASignalDuringTheFinalPrint(unittest.TestCase):
         self.assertEqual(out.getvalue().splitlines(), ["inj-1", OUTCOME, "ended_by_itself"])
 
 
+class ASignalAfterTheConclusion(unittest.TestCase):
+    def test_is_still_caught_and_changes_neither_the_exit_code_nor_the_records(self):
+        world = scenes.scene()
+        out = io.StringIO()
+        code, err = run_with(world, out)
+        before = {
+            n: bytes(world.files[f"{scenes.RECORDS}/{n}"]) for n in world.names_in(scenes.RECORDS)
+        }
+        # what is left of the process: the final flush, the exit, the interpreter's shutdown
+        self.assertTrue(world.deliver("SIGTERM"), "the signal's default action would have applied")
+        self.assertEqual(code, 0, err)
+        after = {
+            n: bytes(world.files[f"{scenes.RECORDS}/{n}"]) for n in world.names_in(scenes.RECORDS)
+        }
+        self.assertEqual(after, before)
+        self.assertEqual(ending_of(world), "ended_by_itself")
+
+
 class TheReaderOfStandardOutputGoingAway(unittest.TestCase):
     """Settled from the spec: "The exit code is zero when an outcome record was written"
     (The command), so a print that fails after the record is written changes neither the
