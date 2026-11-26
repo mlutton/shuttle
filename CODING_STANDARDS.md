@@ -1,6 +1,6 @@
 # Coding standards
 
-Read in full at review; a builder reads the rules its definition names. A machine enforces lint, format, types, nesting depth, the import rules between the package's folders, ignore comments for the import ban and the suite's time budget; those are not repeated here. The rules below are judgement: the reviewer answers each rule about the change once, follows the rules about the review, and cites a rule by its bold name.
+Read in full at review; a builder reads the rules its definition names. A machine enforces lint, format, types, nesting depth, the import rules between the package's folders, ignore comments for the import ban and the suite's time budget; those are not repeated here. The rules below are judgement: the reviewer answers once each rule under the headings other than "The review" (those are about the change), follows the rules under the heading "The review" (those are about the review itself), and cites a rule by its bold name.
 
 ## Design
 - **Functional core.** Every decision is a pure function: arguments in, a value out. Files, the clock, the environment and processes belong to the shell.

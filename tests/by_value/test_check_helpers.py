@@ -74,6 +74,11 @@ class GuardChangesTest(unittest.TestCase):
             "docs/process.md",
             ".claude/agents/shuttle-builder.md",
             ".claude/agents/deeper/x.md",
+            "tests/command/test_base_check.py",
+            "tests/command/test_check_script.py",
+            "tests/command/test_hook.py",
+            "tests/by_value/test_report.py",
+            "tests/command/test_report.py",
         ]
         self.assertEqual(self.guards_in(*paths), sorted(paths))
 
@@ -135,38 +140,74 @@ class TheAttackListsAreGuardFilesTest(unittest.TestCase):
                 self.assertFalse(guards.is_guard(path))
 
     def files_to_read(self):
+        """Every test file except those in tests/hostile/, which is a guard folder already (they
+        name the tables in every line, so they would say nothing here)."""
         return [
             os.path.join(where, name)
             for where, _, files in os.walk(self.TESTS)
             for name in files
             if name.endswith(".py")
-            and "hostile" not in os.path.relpath(os.path.join(where, name), self.TESTS)
+            and os.path.relpath(where, self.TESTS).split(os.sep)[0] != "hostile"
         ]
+
+    @staticmethod
+    def mentions_the_tables(source):
+        """Whether any name, attribute, import or text constant in the source mentions
+        `hostile`, whatever the import form (`import_module("hostile.x")` after a bare
+        `from importlib import import_module`, `from . import hostile`, a path in a string)."""
+        for node in ast.walk(ast.parse(source)):
+            words = []
+            if isinstance(node, ast.Name):
+                words = [node.id]
+            elif isinstance(node, ast.Attribute):
+                words = [node.attr]
+            elif isinstance(node, ast.ImportFrom):
+                words = [node.module or "", *(a.name for a in node.names)]
+            elif isinstance(node, ast.Import):
+                words = [a.name for a in node.names]
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                words = [node.value]
+            if any("hostile" in word for word in words):
+                return True
+        return False
 
     def reads_the_tables_in(self, path):
         with open(path, encoding="utf-8") as f:
-            return any(self.reads_the_tables(node) for node in ast.walk(ast.parse(f.read())))
+            return self.mentions_the_tables(f.read())
 
-    @staticmethod
-    def reads_the_tables(node):
-        """`from hostile... import`, `import hostile...` or importlib.import_module("hostile...")."""
-        if isinstance(node, ast.ImportFrom):
-            return (node.module or "").split(".")[0] == "hostile"
-        if isinstance(node, ast.Import):
-            return any(a.name.split(".")[0] == "hostile" for a in node.names)
-        return (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "import_module"
-            and bool(node.args)
-            and isinstance(node.args[0], ast.Constant)
-            and str(node.args[0].value).split(".")[0] == "hostile"
-        )
+    def test_every_way_of_mentioning_the_tables_is_seen_and_a_file_that_does_not_is_not(self):
+        for source in (
+            "from hostile import x",
+            "import hostile.registry",
+            "from tests.hostile.names_table import NAMES",
+            "from tests import hostile",
+            "from tests import (by_value, hostile)",
+            "import tests.hostile.registry as r",
+            "from . import hostile",
+            "from .. import hostile",
+            "from ..hostile import registry",
+            "from importlib import import_module\nimport_module('hostile.names_table')",
+            "importlib.import_module('tests.hostile.registry')",
+            "__import__('hostile')",
+            "open('tests/hostile/names_table.py')",
+            "x = hostile.NAMES",
+            "x = tests.hostile",
+        ):
+            with self.subTest(source=source):
+                self.assertTrue(self.mentions_the_tables(source))
+        for source in (
+            "from tests import by_value",
+            "from tests.by_value import x",
+            "import os\nimport tests",
+            "x = 'names'",
+        ):
+            with self.subTest(source=source):
+                self.assertFalse(self.mentions_the_tables(source))
 
     def test_each_test_file_that_is_a_rule_or_loops_a_table_is_a_guard_file(self):
-        # The rule: a test file under tests/ that imports from `hostile` (the attack lists) is
-        # a guard file, so a pull request that weakens it is listed. A file that is a rule
-        # without importing `hostile` has to be named in GUARD_FILES by hand.
+        # The rule: a test file under tests/ that mentions `hostile` (the attack lists) is a
+        # guard file, so a pull request that weakens it is listed. A file that is a rule
+        # without mentioning `hostile` has to be named in GUARD_FILES by hand.
         found = [
             os.path.relpath(path, os.path.dirname(self.TESTS))
             for path in self.files_to_read()
@@ -223,11 +264,15 @@ def rows(*labels, **changes):
 
 
 class TableReportTest(unittest.TestCase):
-    def report(self, base, head):
+    def both(self, base, head):
+        """(changes, standing) for the names table alone."""
         return guards.table_report(
             {"names": base, "imports": None, "suppressions": None},
             {"names": head, "imports": None, "suppressions": None},
         )
+
+    def report(self, base, head):
+        return self.both(base, head)[0]
 
     def test_a_row_at_the_base_and_not_at_the_head_is_named_with_its_table(self):
         lines = self.report(rows("a", "b", "c"), rows("a", "c"))
@@ -257,15 +302,58 @@ class TableReportTest(unittest.TestCase):
         head = [{"label": "a", "name": "y", "holdable": False, "gaps": {}}]
         self.assertEqual(self.report(base, head), ["names: row changed: a (holdable, name)"])
 
-    def test_a_mark_added_is_shown_as_new_with_its_reason_and_one_in_force_is_shown_again(self):
+    def test_two_fields_that_swapped_values_are_a_changed_row_naming_both(self):
+        base = [{"label": "a", "name": "x", "source": "y", "gaps": {}}]
+        head = [{"label": "a", "name": "y", "source": "x", "gaps": {}}]
+        self.assertEqual(self.report(base, head), ["names: row changed: a (name, source)"])
+
+    def test_a_row_with_the_same_values_under_swapped_field_names_is_a_changed_row(self):
+        base = [{"label": "a", "first": 1, "second": 2, "gaps": {}}]
+        head = [{"label": "a", "first": 2, "second": 1, "gaps": {}}]
+        self.assertEqual(self.report(base, head), ["names: row changed: a (first, second)"])
+
+    def test_a_row_that_only_got_a_new_label_is_relabelled_not_removed_and_added(self):
+        base = [{"label": "old", "name": "x", "holdable": True, "gaps": {}}]
+        head = [{"label": "new", "name": "x", "holdable": True, "gaps": {}}]
+        self.assertEqual(self.report(base, head), ["names: row relabelled: old \u2192 new"])
+
+    def test_a_new_label_and_another_field_changed_is_removed_plus_added(self):
+        base = [{"label": "old", "name": "x", "gaps": {}}]
+        head = [{"label": "new", "name": "y", "gaps": {}}]
+        self.assertEqual(
+            self.report(base, head), ["names: row removed: old", "names: 1 rows added"]
+        )
+
+    def test_two_equal_rows_relabelled_are_matched_once_each(self):
+        base = [{"label": "a", "name": "x", "gaps": {}}, {"label": "b", "name": "x", "gaps": {}}]
+        head = [{"label": "c", "name": "x", "gaps": {}}]
+        self.assertEqual(
+            self.report(base, head), ["names: row relabelled: a \u2192 c", "names: row removed: b"]
+        )
+
+    def test_a_relabelled_row_keeps_its_mark_without_calling_it_new(self):
+        base = rows("old", old={"m.f": "why"})
+        head = rows("new", new={"m.f": "why"})
+        self.assertEqual(
+            self.both(base, head),
+            (
+                ["names: row relabelled: old \u2192 new"],
+                ["names: known gap: new: m.f: why"],
+            ),
+        )
+
+    def test_a_mark_added_is_a_change_and_every_mark_in_force_stands(self):
         base = rows("a", "b", b={"m.f": "old reason"})
         head = rows("a", "b", a={"m.g": "a new reason"}, b={"m.f": "old reason"})
         self.assertEqual(
-            self.report(base, head),
-            [
-                "names: new known gap: a: m.g: a new reason",
-                "names: known gap: b: m.f: old reason",
-            ],
+            self.both(base, head),
+            (
+                ["names: new known gap: a: m.g: a new reason"],
+                [
+                    "names: known gap: a: m.g: a new reason",
+                    "names: known gap: b: m.f: old reason",
+                ],
+            ),
         )
 
     def test_a_reason_that_changed_counts_as_new(self):
@@ -273,15 +361,35 @@ class TableReportTest(unittest.TestCase):
         head = rows("a", a={"m.f": "a longer reason"})
         self.assertEqual(self.report(base, head), ["names: new known gap: a: m.f: a longer reason"])
 
+    def test_a_mark_removed_with_its_row_kept_is_a_closed_gap_and_no_longer_stands(self):
+        base = rows("a", "b", b={"m.f": "why f"})
+        head = rows("a", "b")
+        self.assertEqual(self.both(base, head), (["names: known gap closed: b: m.f: why f"], []))
+
+    def test_a_mark_that_went_with_its_removed_row_is_not_also_called_closed(self):
+        base = rows("a", "b", b={"m.f": "why f"})
+        self.assertEqual(self.both(base, rows("a")), (["names: row removed: b"], []))
+
+    def test_a_table_unreadable_at_the_base_still_lists_the_marks_standing_at_the_head(self):
+        changes, standing = self.both("SyntaxError: line 1", rows("a", a={"m.f": "why"}))
+        self.assertEqual(
+            changes, ["names: the table at the base could not be read: SyntaxError: line 1"]
+        )
+        self.assertEqual(standing, ["names: known gap: a: m.f: why"])
+
+    def test_a_standing_mark_alone_is_no_change(self):
+        both = rows("a", a={"m.f": "why"})
+        self.assertEqual(self.both(both, both), ([], ["names: known gap: a: m.f: why"]))
+
     def test_nothing_to_say_is_no_lines(self):
-        self.assertEqual(self.report(rows("a"), rows("a")), [])
-        self.assertEqual(guards.table_report({}, {}), [])
+        self.assertEqual(self.both(rows("a"), rows("a")), ([], []))
+        self.assertEqual(guards.table_report({}, {}), ([], []))
 
     def test_a_table_that_could_not_be_read_is_said_so_and_does_not_hide_the_others(self):
         lines = guards.table_report(
             {"names": "SyntaxError: line 1", "imports": rows("x"), "suppressions": None},
             {"names": rows("a"), "imports": rows(), "suppressions": None},
-        )
+        )[0]
         self.assertEqual(
             lines,
             [
@@ -290,12 +398,66 @@ class TableReportTest(unittest.TestCase):
             ],
         )
 
-    def test_the_section_is_one_escaped_block_and_empty_for_no_lines(self):
-        self.assertEqual(guards.render_tables([]), "")
-        text = guards.render_tables(["names: row removed: x\n```\n# injected"])
+    def test_each_section_is_one_escaped_block_and_empty_for_no_lines(self):
+        self.assertEqual(guards.render_tables([], []), "")
+        text = guards.render_tables(["names: row removed: x\n```\n# injected"], [])
         fences = [line for line in text.splitlines() if line.startswith("`")]
         self.assertEqual(len(fences), 2)
         self.assertIn("x\\n", text)
+
+
+class RenderTablesTest(unittest.TestCase):
+    CHANGES = "## What this pull request does to the hostile-case tables"
+    STANDING = "## Known gaps in the tables, as they stand"
+
+    def rendered(self, base, head):
+        return guards.render_tables(
+            *guards.table_report(
+                {"names": base, "imports": None, "suppressions": None},
+                {"names": head, "imports": None, "suppressions": None},
+            )
+        )
+
+    def test_a_pull_request_that_touches_no_table_prints_only_the_standing_marks(self):
+        both = rows("a", a={"m.f": "why"})
+        text = self.rendered(both, both)
+        self.assertNotIn(self.CHANGES, text)
+        self.assertIn(self.STANDING, text)
+        self.assertIn("names: known gap: a: m.f: why", text)
+
+    def test_a_pull_request_that_touches_no_table_and_no_mark_prints_nothing(self):
+        self.assertEqual(self.rendered(rows("a"), rows("a")), "")
+
+    def test_a_pull_request_that_adds_rows_prints_the_changes_heading(self):
+        text = self.rendered(rows("a"), rows("a", "b"))
+        self.assertIn(self.CHANGES, text)
+        self.assertIn("names: 1 rows added", text)
+        self.assertNotIn(self.STANDING, text)
+
+    def test_a_pull_request_that_removes_a_row_prints_the_changes_heading(self):
+        text = self.rendered(rows("a", "b"), rows("a"))
+        self.assertIn(self.CHANGES, text)
+        self.assertIn("names: row removed: b", text)
+
+    def test_a_pull_request_that_adds_a_mark_prints_both_headings_changes_first(self):
+        text = self.rendered(rows("a"), rows("a", a={"m.f": "why"}))
+        self.assertIn("names: new known gap: a: m.f: why", text)
+        self.assertIn("names: known gap: a: m.f: why", text)
+        self.assertLess(text.index(self.CHANGES), text.index(self.STANDING))
+
+    def test_a_pull_request_that_closes_a_mark_prints_the_changes_heading(self):
+        text = self.rendered(rows("a", a={"m.f": "why"}), rows("a"))
+        self.assertIn(self.CHANGES, text)
+        self.assertIn("names: known gap closed: a: m.f: why", text)
+        self.assertNotIn(self.STANDING, text)
+
+    def test_a_standing_mark_is_not_listed_under_the_changes_heading(self):
+        text = self.rendered(
+            rows("a", "b", b={"m.f": "why"}), rows("a", "b", "c", b={"m.f": "why"})
+        )
+        changes, _, standing = text.partition(self.STANDING)
+        self.assertNotIn("known gap", changes)
+        self.assertIn("names: known gap: b: m.f: why", standing)
 
 
 class RenderSummaryTest(unittest.TestCase):

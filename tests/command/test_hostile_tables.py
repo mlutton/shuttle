@@ -234,12 +234,21 @@ class GuardListingOfEveryNameTest(unittest.TestCase):
             for rel in looks_alike:
                 self.assertNotIn(names.escape_name(os.fsdecode(rel)), text)
 
-    def check_tables_section(self, section):
-        """What the listing says about the tables: a row the base had, a table that did not
-        parse at the base, a table the base lacked, and every known-gap mark."""
+    @staticmethod
+    def block_lines(section):
+        """The lines inside the one fenced block of a section."""
         block = section.split("\n")
         fence = next(line for line in block if line.startswith("`"))
-        shown = block[block.index(fence) + 1 : block.index(fence, block.index(fence) + 1)]
+        return block[block.index(fence) + 1 : block.index(fence, block.index(fence) + 1)]
+
+    def check_tables_section(self, section):
+        """What the listing says about the tables: under the changes heading a row the base had,
+        a table that did not parse at the base, a table the base lacked and each mark added;
+        under its own heading, every known-gap mark."""
+        changes, heading, standing = section.partition("## Known gaps in the tables, as they stand")
+        self.assertTrue(heading, "the standing marks have their own heading")
+        shown = self.block_lines(changes)
+        held = self.block_lines(standing)
         self.assertIn("names: row removed: a row only the base had", shown)
         self.assertTrue(
             any(
@@ -250,11 +259,13 @@ class GuardListingOfEveryNameTest(unittest.TestCase):
         self.assertIn(f"imports: no table at the base; all {imports} rows are new", shown)
         for row in names_table.NAMES:
             for key, reason in row.get("gaps", {}).items():
-                self.assertIn(f"names: known gap: {row['label']}: {key}: {reason}", shown)
+                self.assertIn(f"names: known gap: {row['label']}: {key}: {reason}", held)
+                self.assertNotIn(f"names: known gap: {row['label']}: {key}: {reason}", shown)
         for label, _, _, _, note, _ in imports_table.IMPORTS:
             if "known gap" in note:
                 self.assertIn(f"imports: new known gap: {label}: import form: {note}", shown)
-        self.assertFalse([line for line in shown if support.unsafe(line)])
+                self.assertIn(f"imports: known gap: {label}: import form: {note}", held)
+        self.assertFalse([line for line in shown + held if support.unsafe(line)])
 
 
 if __name__ == "__main__":
