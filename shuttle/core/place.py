@@ -161,7 +161,8 @@ def opening_result(refusal: Found | None, facts: PlaceFacts | None, seconds: flo
 # so an attribute naming a driver does nothing and a file is stored as the bytes on disk.
 # `info/attributes` and `info/exclude` are copied in, so the ignore and attribute rules are the
 # place's as before. Only `update-ref` works in the place's own repository: it runs no filter.
-# The script is the whole of the freeze's git work, so one scope with
+# A folder git cannot enter is a warning and not an error, so it is turned into a failure here,
+# as an unreadable file is. The script is the whole of the freeze's git work, so one scope with
 # one limit holds it. It is given the place, the opening commit, the reference and the message
 # as arguments, never pasted into the text of the script. It ends by printing `done`.
 FREEZE_SCRIPT = (
@@ -184,7 +185,8 @@ done
 export GIT_DIR="$scratch/git/.git" GIT_WORK_TREE="$1" GIT_OBJECT_DIRECTORY="$objects"
 export GIT_INDEX_FILE="$scratch/index"
 git read-tree "$2"
-git add -A
+git add -A 2> "$scratch/warnings"
+if grep -q "^warning: could not open directory" "$scratch/warnings"; then exit 1; fi
 tree=$(git write-tree)
 commit=$2
 if [ "$tree" != "$(git rev-parse "$2^{tree}")" ]; then

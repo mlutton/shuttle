@@ -55,6 +55,14 @@ open(path, "w").write("hidden\\n")
 os.chmod(path, 0)
 """
 
+LEAVES_A_FOLDER_NOBODY_CAN_ENTER = """
+import os, sys
+folder = os.path.join(sys.argv[1], "d")
+os.mkdir(folder)
+open(os.path.join(folder, "f"), "w").write("hidden\\n")
+os.chmod(folder, 0)
+"""
+
 CLONES_A_REPOSITORY_INTO_THE_PLACE = """
 import os, subprocess, sys
 inner = os.path.join(sys.argv[1], "cloned")
@@ -434,6 +442,18 @@ class FreezeEdgeCases(FingerprintCase):
         found = outcome_fields(self)
         self.assertEqual(found["ending"]["reason"], "closing_freeze_failed")
         self.assertEqual(found["execution"]["fingerprint_before"], self.head)
+        self.assertEqual(found["execution"]["fingerprint_after"], "cannot tell")
+        self.assertEqual(self.git("for-each-ref", "refs/shuttle"), "")
+
+    def test_a_folder_that_cannot_be_entered_fails_the_freeze_as_an_unreadable_file_does(self):
+        if os.geteuid() == 0:
+            self.skipTest("a file mode cannot keep a folder from the superuser")
+        folder = os.path.join(self.place, "d")
+        self.addCleanup(lambda: os.path.isdir(folder) and os.chmod(folder, 0o700))
+        code, lines, err = self.run_to_the_end(self.document_for(LEAVES_A_FOLDER_NOBODY_CAN_ENTER))
+        self.assertEqual((code, err, lines[-1]), (0, "", "execution_failed"))
+        found = outcome_fields(self)
+        self.assertEqual(found["ending"]["reason"], "closing_freeze_failed")
         self.assertEqual(found["execution"]["fingerprint_after"], "cannot tell")
         self.assertEqual(self.git("for-each-ref", "refs/shuttle"), "")
 
