@@ -65,7 +65,7 @@ The tests are sorted by seam, all run by that one command:
 - `tests/command/`: the real command, the check script and the hook, run as child processes or against a temporary folder.
 - `tests/boundary/`: tests of the boundary; none yet.
 
-The `tests (unittest)` workflow runs the check on every pull request. Its `base check (unittest)` job also runs the base branch's copy of `checks/all.sh` against the pull request's files, so a pull request cannot pass by weakening the script, and lists in the job summary any guard files (changed, added or deleted; a moved file shows as deleted from its old path) the pull request changes (`checks/`, `.githooks/`, `.github/`, `pyproject.toml`, `requirements-dev.txt`, `tests/by_value/test_rules.py`). It does not cover the workflow file or the lint configuration, which still come from the pull request; the summary is how a reviewer sees them.
+The `tests (unittest)` workflow runs the check on every pull request. Its `base check (unittest)` job also runs the base branch's copy of `checks/all.sh` against the pull request's files, so a pull request cannot pass by weakening the script, and lists in the job summary any guard files (changed, added or deleted; a moved file shows as deleted from its old path) the pull request changes (`checks/`, `.githooks/`, `.github/`, `.claude/agents/`, `pyproject.toml`, `requirements-dev.txt`, `tests/by_value/test_rules.py`, and the documents that steer agents: `AGENTS.md`, `CODING_STANDARDS.md`, `docs/process.md`). It does not cover the workflow file or the lint configuration, which still come from the pull request; the summary is how a reviewer sees them.
 
 ## The per-run report
 
@@ -80,6 +80,6 @@ Prints, as Markdown, what a run of the suite looks like before a reviewer looks:
 - A line, or the block it opens, that is left untested on purpose ends with `# not tested: <reason>`. The report lists each with its file, line and reason; a marker with an empty reason fails the rule test, and so does the marker text inside a string or docstring (coverage would exclude that line without listing it; the report also shows a visible line if the two ever disagree). Lines without a marker are simply reported as never run.
 - The hosted `tests (unittest)` job runs it after the check (a second run of the suite, which never changes whether the job passes), appends it to the job summary and keeps the same Markdown as the build artifact `report`. The `base check (unittest)` job keeps its guard file listing as the artifact `guard-files`. Download either with `gh run download <run id> -n report` (or `-n guard-files`).
 
-## Contributing
+## Working on Shuttle
 
-Issues and pull requests are open to collaborators only for now.
+Start with `AGENTS.md`. How a change goes from brief to merge is in `docs/process.md`.

@@ -67,6 +67,11 @@ class GuardChangesTest(unittest.TestCase):
             "pyproject.toml",
             "requirements-dev.txt",
             "tests/by_value/test_rules.py",
+            "AGENTS.md",
+            "CODING_STANDARDS.md",
+            "docs/process.md",
+            ".claude/agents/shuttle-builder.md",
+            ".claude/agents/deeper/x.md",
         ]
         self.assertEqual(self.guards_in(*paths), sorted(paths))
 
@@ -74,6 +79,15 @@ class GuardChangesTest(unittest.TestCase):
         self.assertEqual(
             self.guards_in(
                 ".githubx/w.yml", "checks2/a.sh", "docs/pyproject.toml", "checks.md", "old.toml"
+            )
+            + self.guards_in(
+                "docs/AGENTS.md",
+                "docs/process.md.bak",
+                "docs/other.md",
+                ".claude/settings.json",
+                ".claude/agentsx/a.md",
+                "CODING_STANDARDS.md.orig",
+                "agents/AGENTS.md",
             ),
             [],
         )

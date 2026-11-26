@@ -16,8 +16,15 @@ import traceback
 
 from names import escape_name, fenced
 
-GUARD_FOLDERS = ("checks/", ".githooks/", ".github/")
-GUARD_FILES = ("pyproject.toml", "requirements-dev.txt", "tests/by_value/test_rules.py")
+GUARD_FOLDERS = ("checks/", ".githooks/", ".github/", ".claude/agents/")
+GUARD_FILES = (
+    "pyproject.toml",
+    "requirements-dev.txt",
+    "tests/by_value/test_rules.py",
+    "AGENTS.md",
+    "CODING_STANDARDS.md",
+    "docs/process.md",
+)
 NONE_CHANGED = "No guard files changed in this pull request."
 COULD_NOT_LIST = "The guard file listing could not be produced; see the job log for why."
 
