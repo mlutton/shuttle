@@ -213,8 +213,10 @@ class AnOddValueCostsOnlyItsOwnField(unittest.TestCase):
             steps = copy.deepcopy(REAL_STEPS)
             del steps[step][key]
             receipt = every_field(core.build_receipt(ENDED, facts(stand_ins=steps)))
+            # No step builds the list of changed files yet: a step that gives none has not built it.
+            state = fixed.NOT_BUILT if key == "files_list" else fixed.CANNOT_TELL
             with self.subTest(source):
-                self.assertEqual(receipt[field], {"state": fixed.CANNOT_TELL, "value": None})
+                self.assertEqual(receipt[field], {"state": state, "value": None})
                 self.assertEqual(
                     {k: v for k, v in receipt.items() if k != field},
                     {k: v for k, v in baseline.items() if k != field},

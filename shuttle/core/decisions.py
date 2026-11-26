@@ -713,6 +713,14 @@ def _from_step(result: StepResult | None, key: str) -> Pair:
     return pairs.observed(values[key])
 
 
+def _files_list(result: StepResult | None) -> Pair:
+    """The list of files kept. No step builds it yet, so a step that did not give one has not
+    built it ("not built"); "cannot tell" is for a step that tried to build it and could not."""
+    if result is not None and not is_stand_in(result) and "files_list" not in result:
+        return pairs.not_built()
+    return _from_step(result, "files_list")
+
+
 def _changed_nothing(steps: Mapping[str, StepResult]) -> Pair:
     before, after = steps.get("opening_fingerprint"), steps.get("closing_freeze")
     if before is None or after is None:
@@ -871,14 +879,14 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "input_hash": pairs.cannot_tell()
         if facts["input_hash"] is None
         else pairs.observed(facts["input_hash"]),
-        "reference_hashes": pairs.none(),
+        "reference_hashes": pairs.observed(facts.get("reference_hashes", {})),
         "fingerprint_before": _from_step(steps.get("opening_fingerprint"), "fingerprint"),
         "fingerprint_after": _from_step(steps.get("closing_freeze"), "fingerprint"),
         "changed_nothing": _changed_nothing(steps),
         "files_added": _from_step(steps.get("closing_freeze"), "files_added"),
         "files_changed": _from_step(steps.get("closing_freeze"), "files_changed"),
         "files_deleted": _from_step(steps.get("closing_freeze"), "files_deleted"),
-        "files_list_kept_file": _from_step(steps.get("kept_files"), "files_list"),
+        "files_list_kept_file": _files_list(steps.get("kept_files")),
         "delivered": _from_step(steps.get("delivery"), "delivered"),
         "delivery_branch": _from_step(steps.get("delivery"), "branch"),
         "delivery_branch_reason": _from_step(steps.get("delivery"), "branch_reason"),
@@ -906,6 +914,14 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "executor_driver": driver,
         "executor": _executor_group_of(steps, launched),
     }
+
+
+def verified_reference_hashes(raw: object, input_check: str | None) -> dict[str, str]:
+    """The hash of each reference by name, when the input checks passed and so found each file
+    to hold the hash the document gave; empty when a check refused the run, or there are none."""
+    if input_check or not isinstance(raw, dict):
+        return {}
+    return {reference["name"]: reference["hash"] for reference in raw.get("references", [])}
 
 
 def _text_of(decision: Mapping[str, object], key: str) -> str:

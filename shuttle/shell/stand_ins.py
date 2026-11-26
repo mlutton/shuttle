@@ -26,9 +26,5 @@ def deliver(destination: object, closing_freeze: object) -> StepResult:
     return _stand_in("delivery")
 
 
-def keep_files(kept: object) -> StepResult:
-    return _stand_in("kept_files")
-
-
 def tear_down(run_area: object) -> StepResult:
     return _stand_in("teardown")

@@ -23,6 +23,8 @@ CALLS = {
     "files.exists": ("/f",),
     "files.write_new": ("/f", "text"),
     "files.link": ("/f", "/g"),
+    "files.copy": ("/f", "/h"),
+    "files.hash": ("/f",),
     "files.remove": ("/f",),
     "files.usable_folder": ("/f",),
     "processes.find_program": ("tool",),

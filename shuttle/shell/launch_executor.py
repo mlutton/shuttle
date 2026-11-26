@@ -36,7 +36,11 @@ def step(state: RunState) -> None:
     if source is None:
         raise RuntimeError("no header source: the document was not read")
     name = boundary.scope_name(source["request_id"])
-    protected = [world.boundary.resolve(source["records_location"])]
+    # The records (and the files kept beside them) and every reference are read-only to the executor.
+    protected = [
+        world.boundary.resolve(path)
+        for path in [source["records_location"], *(r["path"] for r in raw.get("references", []))]
+    ]
     report = world.processes.open_report()
     argv = boundary.launch_argv(
         name,

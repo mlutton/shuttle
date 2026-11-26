@@ -179,7 +179,6 @@ class CommandSeam(unittest.TestCase):
             ("execution", "delivered"),
             ("execution", "teardown_failure"),
             ("execution", "peak_memory_bytes"),
-            ("executor", "claim"),
         ]:
             self.assertEqual(receipt[group][field], {"state": "not built", "value": None}, field)
         self.assertEqual(receipt["ending"]["everything_stopped"], {"state": "value", "value": True})

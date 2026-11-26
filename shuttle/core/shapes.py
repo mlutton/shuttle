@@ -7,7 +7,7 @@ until the validation code has looked at it) and what `records.read_record` reads
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, Protocol, TextIO, TypedDict
+from typing import Any, NamedTuple, NotRequired, Protocol, TextIO, TypedDict
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 
@@ -108,6 +108,12 @@ class StepResult(TypedDict, total=False):
     stop_reason: str
     stop_asker: str
     duration_seconds: float  # a real step that took time says how much
+    # what the step that moves kept files found; a key left out reads "cannot tell", "" reads "none"
+    statement_state: str
+    statement_hash: str
+    statement_location: str
+    claim: str
+    session_file: str
 
 
 class Facts(TypedDict, total=False):
@@ -235,6 +241,8 @@ class ReceiptFacts(TypedDict):
     executor_driver_observations: ExecutorDriverGroup | None
     stand_ins: dict[str, StepResult]  # step name to result; a step not reached is absent
     reason_text: str | None
+    # name to hash of each reference execution checked before the start; empty when it did not
+    reference_hashes: NotRequired[dict[str, str]]
 
 
 class OutcomeRecord(TypedDict):
@@ -279,13 +287,31 @@ class RunState(TypedDict, total=False):
 Process = Any  # a handle the process operations made and understand; nothing else looks inside
 
 
+class NotARegularFile(OSError):
+    """The name holds a link, a named pipe, a device, a socket or anything else that is not a
+    regular file (a folder raises IsADirectoryError instead). Both worlds raise it, by this
+    class, so the shell can tell "not a file" from a look that failed."""
+
+
 class FileOperations(NamedTuple):
     """Files, by name. Text is UTF-8."""
 
-    read: Callable[[str], bytes]  # raises OSError (FileNotFoundError, IsADirectoryError, ...)
+    read: Callable[[str], bytes]  # a regular file, or a link to one; raises OSError
+    # (FileNotFoundError, IsADirectoryError, NotARegularFile for a pipe, a device, a socket, a
+    # link to one of those), and never waits on what is there
     exists: Callable[[str], bool]  # a name is there, even if it leads nowhere
     write_new: Callable[[str, str], None]  # create, write, flush to disk; FileExistsError if there
     link: Callable[[str, str], None]  # (existing name, new name); FileExistsError if new is there
+    copy: Callable[
+        [str, str], None
+    ]  # (existing name, new name): the same bytes, flushed; FileExistsError if new is there,
+    # FileNotFoundError if existing is not, IsADirectoryError if existing is a folder,
+    # NotARegularFile if existing is a link (to anything, a missing name too), a pipe, a device
+    # or a socket: a link is never followed and nothing waits on what is there. At most the
+    # size seen when it opened is copied. Nothing is left under the new name when it raises
+    hash: Callable[
+        [str], str
+    ]  # the sha256 of the file's bytes, as 64 lower-case hex digits; raises as read
     remove: Callable[[str], None]  # FileNotFoundError when there is no such name
     usable_folder: Callable[
         [str], bool

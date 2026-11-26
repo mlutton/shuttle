@@ -12,12 +12,14 @@ Each case's name says the invariant. The waits are the processes' own, bounded b
 tries, and end as soon as what is waited for has happened; no test reads a clock or sleeps.
 """
 
+import hashlib
 import importlib
 import os
 import re
 import sys
 
 from shuttle.core import boundary, place
+from shuttle.core.shapes import NotARegularFile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NAMES = importlib.import_module("hostile.names_table").NAMES
@@ -126,6 +128,133 @@ class ContractCases:
             FileNotFoundError, self.world.files.link, f"{folder}/absent", f"{folder}/new"
         )
         self.assertEqual(self.harness.names_in(folder), [])
+
+    def test_a_copy_reads_the_same_and_outlives_the_removal_of_the_first(self):
+        first, second = self.fresh("first"), self.fresh("second")
+        text = "no final newline, crlf\r\n, trailing spaces   "
+        self.world.files.write_new(first, text)
+        self.world.files.copy(first, second)
+        self.assertEqual(self.world.files.read(second), text.encode("utf-8"))
+        self.assertEqual(self.world.files.read(first), text.encode("utf-8"))
+        self.world.files.remove(first)
+        self.assertEqual(self.world.files.read(second), text.encode("utf-8"))
+
+    def test_a_copy_of_an_empty_file_is_an_empty_file(self):
+        first, second = self.fresh("first"), self.fresh("second")
+        self.world.files.write_new(first, "")
+        self.world.files.copy(first, second)
+        self.assertEqual(self.world.files.read(second), b"")
+
+    def test_copying_onto_a_name_that_is_there_raises_file_exists_and_changes_neither(self):
+        first, second = self.fresh("first"), self.fresh("second")
+        self.world.files.write_new(first, "one")
+        self.world.files.write_new(second, "two")
+        self.assertRaisesExactly(FileExistsError, self.world.files.copy, first, second)
+        self.assertEqual(self.world.files.read(first), b"one")
+        self.assertEqual(self.world.files.read(second), b"two")
+
+    def test_copying_from_a_name_that_is_not_there_raises_and_makes_nothing(self):
+        folder = self.harness.folder()
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.copy, f"{folder}/absent", f"{folder}/new"
+        )
+        self.assertEqual(self.harness.names_in(folder), [])
+
+    def test_copying_into_a_folder_that_is_not_there_raises_and_makes_nothing(self):
+        first = self.fresh("first")
+        self.world.files.write_new(first, "one")
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.copy, first, f"{self.fresh('absent')}/new"
+        )
+
+    def test_copying_a_folder_raises_is_a_directory_and_makes_nothing(self):
+        folder, other = self.harness.folder(), self.harness.folder()
+        self.assertRaisesExactly(IsADirectoryError, self.world.files.copy, folder, f"{other}/new")
+        self.assertEqual(self.harness.names_in(other), [])
+
+    def test_a_copy_of_a_name_that_leads_nowhere_raises_not_a_regular_file_and_makes_nothing(self):
+        path, other = self.fresh("dangling"), self.fresh("other")
+        self.harness.make_a_name_that_leads_nowhere(path)
+        self.assertRaisesExactly(NotARegularFile, self.world.files.copy, path, other)
+        self.assertFalse(self.world.files.exists(other))
+
+    def not_regular_things(self):
+        """One of each thing that is not a regular file, as (label, name). The harness makes
+        each so that a call that waits on it or reads it without end fails instead of hanging."""
+        target, folder = self.fresh("target"), self.harness.folder()
+        self.world.files.write_new(target, TEXT)
+        things = {
+            "a link to a file": (self.harness.make_a_link, target),
+            "a link to a folder": (self.harness.make_a_link, folder),
+            "a link to a missing name": (self.harness.make_a_link, self.fresh("missing")),
+            "a link to a link to a file": (
+                self.harness.make_a_link,
+                self.harness.make_a_link(self.fresh("inner"), target),
+            ),
+            "a link to a device": (self.harness.make_a_link, self.harness.a_device()),
+            "a link to a named pipe": (
+                self.harness.make_a_link,
+                self.harness.make_a_pipe(self.fresh("target-pipe")),
+            ),
+        }
+        made = []
+        for label, (make, leads_to) in things.items():
+            made.append((label, make(self.fresh("thing"), leads_to)))
+        made.append(("a named pipe", self.harness.make_a_pipe(self.fresh("pipe"))))
+        made.append(("a device", self.harness.a_device()))
+        return made
+
+    def test_copying_a_link_a_pipe_or_a_device_raises_not_a_regular_file_and_makes_nothing(self):
+        for label, path in self.not_regular_things():
+            with self.subTest(label):
+                new = self.fresh("new")
+                self.assertRaisesExactly(NotARegularFile, self.world.files.copy, path, new)
+                self.assertFalse(self.world.files.exists(new))
+
+    def test_reading_or_hashing_a_pipe_or_a_device_raises_not_a_regular_file(self):
+        things = dict(self.not_regular_things())
+        for label in ("a named pipe", "a device", "a link to a device", "a link to a named pipe"):
+            for operation in (self.world.files.read, self.world.files.hash):
+                with self.subTest(label, operation=operation):
+                    self.assertRaisesExactly(NotARegularFile, operation, things[label])
+
+    def test_reading_and_hashing_a_link_to_a_file_follow_it(self):
+        target, link = self.fresh("target"), self.fresh("link")
+        self.world.files.write_new(target, TEXT)
+        self.harness.make_a_link(link, target)
+        self.assertEqual(self.world.files.read(link), TEXT.encode("utf-8"))
+        self.assertEqual(self.world.files.hash(link), self.world.files.hash(target))
+
+    def test_a_file_put_in_place_under_every_name_the_filesystem_will_hold_copies_and_hashes(self):
+        folder = self.harness.folder()
+        for row in HOLDABLE_NAMES:
+            with self.subTest(label=row["label"]):
+                path, alias = f"{folder}/{row['name']}", f"{folder}/copy-of-it"
+                self.world.files.write_new(path, TEXT)
+                self.world.files.copy(path, alias)
+                self.assertEqual(self.world.files.read(alias), TEXT.encode("utf-8"))
+                self.assertEqual(self.world.files.hash(path), self.world.files.hash(alias))
+                self.world.files.remove(alias)
+                self.world.files.copy(path, alias)  # into a name that was just freed
+                self.world.files.remove(alias)
+                self.world.files.remove(path)
+
+    def test_the_hash_is_the_sha256_of_the_bytes_in_lower_case_hex(self):
+        empty, text, big = self.fresh("empty"), self.fresh("text"), self.fresh("big")
+        self.world.files.write_new(empty, "")
+        self.world.files.write_new(text, TEXT)
+        self.world.files.write_new(big, "0123456789" * 300000)  # more than one read of any size
+        self.assertEqual(self.world.files.hash(empty), hashlib.sha256(b"").hexdigest())
+        self.assertEqual(self.world.files.hash(text), hashlib.sha256(TEXT.encode()).hexdigest())
+        self.assertEqual(
+            self.world.files.hash(big), hashlib.sha256(b"0123456789" * 300000).hexdigest()
+        )
+
+    def test_hashing_a_name_that_is_not_there_raises_file_not_found_and_a_folder_is_a_directory(
+        self,
+    ):
+        self.assertRaisesExactly(FileNotFoundError, self.world.files.hash, self.fresh("absent"))
+        self.assertRaisesExactly(IsADirectoryError, self.world.files.hash, self.harness.folder())
 
     def test_removing_a_name_that_is_not_there_raises_file_not_found(self):
         self.assertRaisesExactly(FileNotFoundError, self.world.files.remove, self.fresh("absent"))

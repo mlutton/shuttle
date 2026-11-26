@@ -32,6 +32,7 @@ from shuttle.core.shapes import (
     FreezeAnswer,
     GitOperations,
     IdentityOperations,
+    NotARegularFile,
     Operations,
     ProcessOperations,
     SignalOperations,
@@ -72,6 +73,8 @@ class SimulatedWorld:
         self.variables = dict(environment or {})
         self.folders = set()
         self.dangling = set()  # names that lead nowhere
+        self.links = {}  # name -> the name it leads to (which may be missing)
+        self.special = set()  # names of named pipes, devices and sockets: not regular files
         self.files = {}  # name -> bytearray; a linked name shares the bytearray
         self.programs = {}  # command -> behaviour
         self.started = []  # (argv, environment) of every start
@@ -95,6 +98,8 @@ class SimulatedWorld:
                 exists=self._exists,
                 write_new=self._write_new,
                 link=self._link,
+                copy=self._copy,
+                hash=self._hash,
                 remove=self._remove,
                 usable_folder=self._usable_folder,
             ),
@@ -136,7 +141,11 @@ class SimulatedWorld:
 
     def put_shipped_data(self):
         """The data files shipped with the package, which a run reads (the kinds)."""
-        for name in ("kinds_with_statement.txt", "kinds_without_statement.txt"):
+        for name in (
+            "kinds_with_statement.txt",
+            "kinds_without_statement.txt",
+            "statement_schema.json",
+        ):
             path, data = _shipped(name)
             self.files[path] = bytearray(data)
 
@@ -174,6 +183,15 @@ class SimulatedWorld:
 
     def put_a_name_that_leads_nowhere(self, path):
         self.dangling.add(path)
+
+    def put_link(self, path, leads_to):
+        self.links[path] = leads_to
+
+    def put_pipe(self, path):
+        self.special.add(path)
+
+    def put_device(self, path):
+        self.special.add(path)
 
     def text_of(self, path):
         return bytes(self.files[path]).decode("utf-8")
@@ -266,17 +284,54 @@ class SimulatedWorld:
         parent = path.rpartition("/")[0]
         return parent == "" or parent in self.folders
 
+    def _look(self, path, follow):
+        """What the name holds, as the real world looks: "file", "folder", "special" (a pipe, a
+        device, a socket) or "link" (when not following); FileNotFoundError when nothing is
+        there, or a followed link leads nowhere."""
+        for _ in range(40):
+            if path in self.dangling:
+                if follow:
+                    break
+                return "link", path
+            if path in self.links:
+                if not follow:
+                    return "link", path
+                path = self.links[path]
+                continue
+            if path in self.files:
+                return "file", path
+            if path in self.folders:
+                return "folder", path
+            if path in self.special:
+                return "special", path
+            break
+        raise FileNotFoundError(path)
+
+    def _regular(self, path, follow):
+        """The name of the regular file behind `path`; what the real world raises otherwise."""
+        kind, name = self._look(path, follow)
+        if kind == "folder":
+            raise IsADirectoryError(path)
+        if kind != "file":
+            raise NotARegularFile(path)
+        return name
+
     def _read(self, path):
         self._enter("files.read", path)
-        if path in self.files:
-            return bytes(self.files[path])
-        if path in self.folders:
-            raise IsADirectoryError(path)
-        raise FileNotFoundError(path)
+        return bytes(self.files[self._regular(path, True)])
 
     def _exists(self, path):
         self._enter("files.exists", path)
-        return path in self.files or path in self.folders or path in self.dangling
+        return self._taken(path)
+
+    def _taken(self, path):
+        return (
+            path in self.files
+            or path in self.folders
+            or path in self.dangling
+            or path in self.links
+            or path in self.special
+        )
 
     def _usable_folder(self, path):
         self._enter("files.usable_folder", path)
@@ -286,7 +341,7 @@ class SimulatedWorld:
         how, error = self._enter("files.write_new", path, text)
         if not self._parent_exists(path):
             raise FileNotFoundError(path)
-        if path in self.files or path in self.folders or path in self.dangling:
+        if self._taken(path):
             raise FileExistsError(path)
         self.files[path] = bytearray()
         data = text.encode("utf-8")  # a lone surrogate raises here, after the file is made
@@ -303,16 +358,33 @@ class SimulatedWorld:
             raise PermissionError(existing)
         if existing not in self.files or not self._parent_exists(new):
             raise FileNotFoundError(existing)
-        if new in self.files or new in self.folders or new in self.dangling:
+        if self._taken(new):
             raise FileExistsError(new)
         self.files[new] = self.files[existing]
+
+    def _copy(self, existing, new):
+        self._enter("files.copy", existing, new)
+        source = self._regular(existing, False)
+        if not self._parent_exists(new):
+            raise FileNotFoundError(existing)
+        if self._taken(new):
+            raise FileExistsError(new)
+        self.files[new] = bytearray(self.files[source])  # its own bytes, not a shared name
+
+    def _hash(self, path):
+        self._enter("files.hash", path)
+        return hashlib.sha256(bytes(self.files[self._regular(path, True)])).hexdigest()
 
     def _remove(self, path):
         self._enter("files.remove", path)
         if path in self.folders:
             raise IsADirectoryError(path)
-        if path in self.dangling:
-            self.dangling.remove(path)
+        for names in (self.dangling, self.special):
+            if path in names:
+                names.remove(path)
+                return
+        if path in self.links:
+            del self.links[path]
             return
         if path not in self.files:
             raise FileNotFoundError(path)

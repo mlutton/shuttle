@@ -1,6 +1,6 @@
 """The end-to-end test: one real request through every piece that is real so far: an input check,
-a gate, the opening fingerprint of a real place, the boundary, the closing freeze and the outcome
-record.
+a gate, the opening fingerprint of a real place, the boundary, the statement the script leaves,
+the closing freeze, the kept statement and the outcome record.
 
 From the input document, through the real command and the real boundary, to the outcome record,
 asserting only what a caller can see: the exit code, what is printed, the record files, and what
@@ -8,6 +8,8 @@ is left running. It keeps no time: the limit is the boundary's, the script says 
 a pipe, and the run's end is waited for, not slept to. It skips, with its reason, on a machine
 that lacks the boundary, and fails there instead when SHUTTLE_REQUIRE_BOUNDARY is set (the
 hosted runner sets it).
+
+The statement (#48) is left by the script before it hangs and reads "right shape".
 
 #47 (delivery) extends this test when its piece becomes real; it does not add one of its own.
 """
@@ -23,9 +25,18 @@ flat = importlib.import_module("rehearsal.receipts").flat
 real_run = importlib.import_module("rehearsal.real_run")
 real_place = importlib.import_module("rehearsal.real_place")
 
+# The statement the script leaves, right-shaped and untidy (no final newline): a kept copy that
+# was tidied or completed would differ from it.
+STATEMENT_TEXT = (
+    '{"claim": "partly_done", "summary": "Started; still running.", "evidence":'
+    ' [{"claim": "it ran", "command": "true"}], "not_tested": ["everything"],'
+    ' "feedback": "none"}'
+)
+
 HANGS_WITH_A_CHILD = """
 import subprocess, sys, time
 subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)", sys.argv[2]])
+open(sys.argv[3], "w").write(sys.argv[4])  # the statement, before the hang
 open(sys.argv[1], "w").write("up")
 time.sleep(600)
 """
@@ -46,7 +57,9 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         script = self.script("hangs.py", HANGS_WITH_A_CHILD)
         asked = os.path.join(self.root, "asked")
         runbook = self.script("runbook.txt", REFERENCE_TEXT)
-        doc = self.document(script, [up, marker], limit=1)
+        statement = os.path.join(self.root, "statement.json")
+        doc = self.document(script, [up, marker, statement, STATEMENT_TEXT], limit=1)
+        doc["kind"], doc["statement_location"] = "judge", statement  # a kind that expects one
         # the place is a linked working copy of the caller's repository, as it is in use
         callers = os.path.join(self.root, "callers-repo")
         real_place.make_checkout(callers)
@@ -102,3 +115,15 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertNotEqual(self.scope_state(), "active")
         self.assertTrue(os.path.exists(asked))  # the gate was asked, said yes, and the run went on
         self.assertEqual(self.units_left(), [])  # no scope of the run, a gate or the freeze is left
+        kept = os.path.join(self.records, "r-1.statement.kept")
+        with open(kept, "rb") as f:  # the statement is kept as written, even at the time limit
+            self.assertEqual(f.read(), STATEMENT_TEXT.encode())
+        self.assertEqual(
+            receipt["executor"],
+            {
+                "statement_state": "right_shape",
+                "statement_hash": hashlib.sha256(STATEMENT_TEXT.encode()).hexdigest(),
+                "statement_location": kept,
+                "claim": "partly_done",
+            },
+        )

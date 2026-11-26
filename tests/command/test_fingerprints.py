@@ -87,8 +87,9 @@ os.symlink("/nowhere/at/all", os.path.join(place, "to-nothing"))
 
 # A file of this many bytes, made as a hole (it takes no room on the disk, and git still reads
 # every byte of it): large enough to be the file that is too large for anything that reads a
-# file whole into a small buffer, small enough that hashing it takes a fraction of a second.
-VERY_LARGE = 32 * 1024 * 1024
+# file whole into a small buffer (a pipe holds 64 KiB), small enough that hashing it takes a
+# fraction of a second, and under the 16 MB file limit every real-command test runs with.
+VERY_LARGE = 15 * 1024 * 1024
 
 MAKES_A_VERY_LARGE_FILE = """
 import os, sys

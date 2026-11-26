@@ -6,6 +6,7 @@ scripts. A script says it is up through a named pipe the test reads, so no test 
 
 import json
 import os
+import resource
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,15 @@ import unittest
 
 import rehearsal.real_place as real_place
 import rehearsal.the_boundary as the_boundary
+
+# The one place the limits of a real command live. A test whose input has no end (a device, a
+# pipe, a file of any size) must fail an assertion in seconds, not grow until the machine gives
+# out: no file the command or its executor makes can pass 16 MB, and no process of theirs can
+# map more than 1 GB.
+DEFAULT_LIMITS = {
+    resource.RLIMIT_FSIZE: 16 * 1024 * 1024,
+    resource.RLIMIT_AS: 1024 * 1024 * 1024,
+}
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -22,6 +32,7 @@ class RealRun(unittest.TestCase):
 
     def setUp(self):
         the_boundary.require(self)
+        self.limits = dict(DEFAULT_LIMITS)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = os.path.realpath(tmp.name)
@@ -57,10 +68,22 @@ class RealRun(unittest.TestCase):
             },
         }
 
+    def limited(self):
+        """Runs in the child just before it execs: the limits are inherited by what it starts,
+        through the scope tool and the boundary, so the executor is held to them too."""
+        for which, size in self.limits.items():
+            resource.setrlimit(which, (size, size))
+
+    def raise_limit(self, which, size, why):
+        """One test's own larger limit. `why` is the reason, stated at the call."""
+        assert why, "a raised limit needs its reason"
+        self.limits[which] = size
+
     def start(self, doc, path_first=None, variables=None):
         """The real command, started; the caller waits for it with `communicate`. With
-        `path_first`, that folder comes first on the command's PATH; `variables` are added to
-        its environment."""
+        `path_first`, that folder comes first on the command's PATH; `variables` are added to its
+        environment. The command and what it starts run under `self.limits` (DEFAULT_LIMITS unless the
+        test raised one)."""
         path = os.path.join(self.root, f"{doc['request_id']}.input.json")
         with open(path, "w") as f:
             json.dump(doc, f)
@@ -71,6 +94,7 @@ class RealRun(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            preexec_fn=self.limited,
         )
         self.addCleanup(self.end, doc["request_id"], proc)
         return proc
