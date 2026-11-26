@@ -5,7 +5,15 @@ Where a module sits is its classification. Nothing is registered anywhere:
 - `shuttle/core/` (sub-folders included) decides and touches nothing. A module there may
   import only other modules under `shuttle/core/` and the short allow-list of standard
   library modules below, and may not mention the built-ins that reach the world.
-- `shuttle/shell/` (sub-folders included) reaches the world and may import the core.
+- `shuttle/shell/` (sub-folders included) orchestrates: it calls the operations it is handed,
+  calls the core and acts on the answer. It touches nothing itself: like the core it may import
+  only the short allow-list of standard library modules below and may not mention the
+  built-ins that reach the world. It may import the core and other shell modules, and only
+  `shell/cli.py`, where the real operations are wired in, may import the world.
+- `shuttle/world/` (sub-folders included) is the real set of operations, thin, holding no
+  decisions. It is the only place that may import the libraries on the linter's banned list.
+  It may import only the standard library, other world modules and `shuttle.core.shapes` (the
+  type of the operations).
 - At the package root only `__init__.py` (the version string; judged as core) and
   `__main__.py` (hands to the shell; judged as shell) may sit. A module anywhere else
   fails with the file's name and what to do.
@@ -13,6 +21,8 @@ Where a module sits is its classification. Nothing is registered anywhere:
 - No file under shuttle/ carries a lint ignore that covers the banned-import rule (TID251):
   without this, a file could start with `# ruff: noqa: TID251` and import what it likes,
   and the linter would pass it. See `noqa_problems` for the spellings.
+- No test patches anything: see `mocking_problems`. A stand-in is passed in (the simulated
+  world, tests/rehearsal/), never put in by name.
 
 `check_module` is the checking logic: source text and a module's name in, a list of
 problems out. The file walking is a thin layer over it. These tests read source text; they
@@ -20,6 +30,7 @@ start no process and write nothing.
 """
 
 import ast
+import functools
 import importlib
 import io
 import os
@@ -57,7 +68,17 @@ CORE_STDLIB_ALLOWED = frozenset(
     }
 )
 
-# Built-ins that reach the world, or reach it by import. A core module may not mention
+# The shell touches nothing itself, so it gets the core's list and two more that touch nothing.
+SHELL_STDLIB_ALLOWED = CORE_STDLIB_ALLOWED | {
+    "contextlib",  # suppress, and the like: control flow only
+    "hashlib",  # a hash of bytes it was handed
+}
+
+# Where an allow-list holds, a standard library module not on it is refused. The world may
+# import anything the linter does not ban: it is where the libraries that reach the world live.
+STDLIB_ALLOWED = {"core": CORE_STDLIB_ALLOWED, "shell": SHELL_STDLIB_ALLOWED}
+
+# Built-ins that reach the world, or reach it by import. A core or shell module may not mention
 # them at all: called, assigned (f = open) or passed.
 FORBIDDEN_NAMES = frozenset(
     {
@@ -78,11 +99,12 @@ FORBIDDEN_NAMES = frozenset(
 # Classification is by the file's place, a path relative to shuttle/ with "/" separators
 # ("core/decisions.py"), never by a dotted name: shuttle/core.py and shuttle/core/ share a name.
 ROOT_FILES = {"__init__.py": "core", "__main__.py": "shell"}
-FOLDERS = ("core", "shell")
+FOLDERS = ("core", "shell", "world")
+SHAPES = "shuttle.core.shapes"  # the one core module the world may import: the operations' type
 
 
 def classify(path):
-    """ "core", "shell", or None when the file sits where neither rule covers it."""
+    """ "core", "shell", "world", or None when the file sits where no rule covers it."""
     parts = path.split("/")
     if len(parts) == 1:
         return ROOT_FILES.get(path)
@@ -202,7 +224,7 @@ def noqa_problems(source, path):
             problems.append(
                 f"shuttle/{path} line {token.start[0]} carries a lint ignore ({token.string.strip()}) "
                 f"that covers the banned-import rule {BANNED_IMPORT_RULE}: take it out; code that "
-                "needs a banned library belongs in shuttle/shell/"
+                "needs a banned library belongs in shuttle/world/"
             )
     return problems
 
@@ -215,9 +237,10 @@ def check_module(source, path):
     classification = classify(path)
     if classification is None:
         return [
-            f"shuttle/{path} sits outside the two folders: move it into "
-            "shuttle/core/ (it decides, touching nothing) or shuttle/shell/ (it reaches the "
-            "world). Only __init__.py and __main__.py may sit at the package root",
+            f"shuttle/{path} sits outside the three folders: move it into "
+            "shuttle/core/ (it decides, touching nothing), shuttle/shell/ (it calls the "
+            "operations and the core) or shuttle/world/ (it reaches the world, with no "
+            "decisions). Only __init__.py and __main__.py may sit at the package root",
             *noqa_problems(source, path),
         ]
     problems = noqa_problems(source, path)
@@ -226,52 +249,234 @@ def check_module(source, path):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
             for target in _targets(node, path):
-                problems += _import_problems(target, classification)
-        elif classification == "core" and isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
+                problems += _import_problems(target, classification, path)
+        elif (
+            classification in ("core", "shell")
+            and isinstance(node, ast.Name)
+            and node.id in FORBIDDEN_NAMES
+        ):
             problems.append(
-                f"the core mentions {node.id}, which reaches the world: "
-                "move that code to the shell and pass the value in"
+                f"the {classification} mentions {node.id}, which reaches the world: "
+                "move that code to the world and reach it through the operations"
             )
     return sorted(set(problems))
 
 
 def _place(target):
-    """Where the module a dotted target names sits: root, core, shell, entry or other."""
+    """Where the module a dotted target names sits: root, core, shell, world, entry or other."""
     parts = target.split(".")
     if len(parts) == 1:
         return "root"
-    return {"core": "core", "shell": "shell", "__main__": "entry"}.get(parts[1], "other")
+    return {"core": "core", "shell": "shell", "world": "world", "__main__": "entry"}.get(
+        parts[1], "other"
+    )
 
 
-def _import_problems(target, classification):
-    top = target.split(".")[0]
-    if top == "shuttle":
-        place = _place(target)
-        if place in ("root", "core") or (place in ("shell", "entry") and classification == "shell"):
-            return []
-        if place == "shell":
-            return [
-                f"the core imports {target}, a shell module: "
-                "move the code that needs it into the shell and pass the value in"
-            ]
-        if place == "entry":
-            return [
-                f"the core imports {target}, the entry file, which belongs to the shell "
-                "(a shell module): move the code that needs it into the shell"
-            ]
+def _core_target_problems(target, classification):
+    if classification == "world" and not (target + ".").startswith(SHAPES + "."):
         return [
-            f"imports {target}, which is in neither shuttle/core/ nor shuttle/shell/: "
-            "import from one of the two folders"
-        ]
-    if top not in sys.stdlib_module_names:
-        return [f"imports {top}, a third-party package: the package uses the standard library only"]
-    if classification == "core" and top not in CORE_STDLIB_ALLOWED:
-        return [
-            f"the core imports {top}, which is not on the allow-list of standard library "
-            "modules that touch nothing: move that code to the shell, or justify the module "
-            "in CORE_STDLIB_ALLOWED"
+            f"the world imports {target}, a core module: the world holds no decisions and "
+            f"may import only {SHAPES} (the type of the operations)"
         ]
     return []
+
+
+def _world_target_problems(target, classification, path):
+    if classification == "world" or path == "shell/cli.py":
+        return []
+    if classification == "core":
+        return [
+            f"the core imports {target}, a world module: the core touches nothing; "
+            "ask for the value through an argument"
+        ]
+    return [
+        f"the shell imports {target}, a world module: only shell/cli.py (where the real "
+        "operations are wired in) may; everything else takes the operations as an argument"
+    ]
+
+
+def _shell_target_problems(target, classification):
+    if classification == "shell":
+        return []
+    if classification == "world":
+        return [
+            f"the world imports {target}, a shell module: the world holds no decisions and "
+            "never calls up into the shell"
+        ]
+    return [
+        f"the core imports {target}, a shell module: "
+        "move the code that needs it into the shell and pass the value in"
+    ]
+
+
+def _package_import_problems(target, classification, path):
+    """What a module of the package may import from the package itself."""
+    place = _place(target)
+    if place == "core":
+        return _core_target_problems(target, classification)
+    if place == "world":
+        return _world_target_problems(target, classification, path)
+    if place == "shell":
+        return _shell_target_problems(target, classification)
+    if place == "entry":
+        if classification == "shell":
+            return []
+        return [
+            f"the {classification} imports {target}, the entry file, which belongs to the shell "
+            "(a shell module): move the code that needs it into the shell"
+        ]
+    if place == "other":
+        return [
+            f"imports {target}, which is in neither shuttle/core/, shuttle/shell/ nor "
+            "shuttle/world/: import from one of the three folders"
+        ]
+    return []
+
+
+def _import_problems(target, classification, path):
+    top = target.split(".")[0]
+    if top == "shuttle":
+        return _package_import_problems(target, classification, path)
+    if top not in sys.stdlib_module_names:
+        return [f"imports {top}, a third-party package: the package uses the standard library only"]
+    allowed = STDLIB_ALLOWED.get(classification)
+    if allowed is not None and top not in allowed:
+        return [
+            f"the {classification} imports {top}, which is not on the allow-list of standard "
+            "library modules that touch nothing: move that code to the world and reach it through the "
+            f"operations, or justify the module in {classification.upper()}_STDLIB_ALLOWED"
+        ]
+    return []
+
+
+# ----------------------------------------------------------- tests patch nothing
+
+# A test file that still patches, and why. The test fails if a file here stops patching, so a
+# mark cannot go stale. Key: the file's place under tests/.
+MOCKING_EXEMPT = {
+    "by_value/test_names_table.py": (
+        "it tests checks/report.py's main(), which takes no arguments and reaches its `run` and "
+        "the standard streams as module-level names; passing them in is a change to checks/, not "
+        "to the package"
+    )
+}
+
+
+def _imported_names(nodes):
+    """Names a file binds by importing: a module, or what `from m import x` takes."""
+    names = set()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            names |= {a.asname or a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            names |= {a.asname or a.name for a in node.names}
+        elif isinstance(node, ast.Assign) and _is_import_module(node.value):
+            names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+    return names
+
+
+def _is_import_module(node):
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "import_module"
+    )
+
+
+def _leftmost(node):
+    while isinstance(node, ast.Attribute | ast.Subscript | ast.Call):
+        node = node.value if not isinstance(node, ast.Call) else node.func
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _names_in_chain(node):
+    """Every name along a call's function: `mock.patch.object` gives mock, patch, object."""
+    found = []
+    while isinstance(node, ast.Attribute):
+        found.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        found.append(node.id)
+    return found
+
+
+def _mock_imports(node):
+    if isinstance(node, ast.Import):
+        return [
+            a.name
+            for a in node.names
+            if a.name.split(".")[0] in ("mock", "unittest.mock")
+            or a.name.startswith("unittest.mock")
+        ]
+    if isinstance(node, ast.ImportFrom):
+        module = node.module or ""
+        if module.split(".")[0] == "mock" or module.startswith("unittest.mock"):
+            return [module]
+        if module == "unittest" and any(a.name == "mock" for a in node.names):
+            return ["unittest.mock"]
+    return []
+
+
+def _attribute_stores(node):
+    """The attribute targets of an assignment, deletion or augmented assignment, or []."""
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, ast.AugAssign | ast.AnnAssign | ast.For | ast.AsyncFor):
+        targets = [node.target]
+    elif isinstance(node, ast.Delete):
+        targets = node.targets
+    elif isinstance(node, ast.With | ast.AsyncWith):
+        targets = [item.optional_vars for item in node.items if item.optional_vars]
+    else:
+        return []
+    return [
+        x
+        for t in targets
+        for x in ast.walk(t)
+        if isinstance(x, ast.Attribute) and not isinstance(x.ctx, ast.Load)
+    ]
+
+
+def mocking_problems(source, path):
+    """How a test file puts a stand-in in by name rather than being handed it: it imports
+    unittest.mock (or mock), calls patch (any `patch` or `patch.object`, as a call or a
+    decorator), or assigns to, deletes or setattr()s an attribute of something it imported.
+    Setting an item (`os.environ[name] = value`) is not an attribute and is not refused."""
+    nodes = list(ast.walk(ast.parse(source)))  # once: this runs over every test file
+    imported = _imported_names(nodes)
+    problems = []
+    for node in nodes:
+        for module in _mock_imports(node):
+            problems.append(f"tests/{path} line {node.lineno} imports {module}")
+        if isinstance(node, ast.Call):
+            chain = _names_in_chain(node.func)
+            if "patch" in chain:
+                problems.append(f"tests/{path} line {node.lineno} calls patch")
+            if chain == ["setattr"] and node.args and _leftmost(node.args[0]) in imported:
+                problems.append(f"tests/{path} line {node.lineno} setattr()s on something imported")
+        for target in _attribute_stores(node):
+            if _leftmost(target) in imported:
+                problems.append(
+                    f"tests/{path} line {node.lineno} assigns to {ast.unparse(target)}, an "
+                    "attribute of something it imported"
+                )
+    return sorted(set(problems))
+
+
+def test_files(root=None):
+    """(path relative to tests/, source) for every .py file under tests/."""
+    root = root or os.path.join(ROOT, "tests")
+    return [
+        (os.path.relpath(path, root).replace(os.sep, "/"), _read(path))
+        for path in python_files(root)
+    ]
+
+
+@functools.cache
+def files_that_patch():
+    """path -> problems, for each file under tests/ that puts a stand-in in by name. Read once."""
+    found = {path: mocking_problems(source, path) for path, source in test_files()}
+    return {path: problems for path, problems in found.items() if problems}
 
 
 def _read(path):
@@ -312,6 +517,7 @@ def check_package(files):
 
 CORE = "core/decisions.py"
 SHELL = "shell/run.py"
+WORLD = "world/files.py"
 
 
 def problems_of(source, path=CORE):
@@ -319,19 +525,23 @@ def problems_of(source, path=CORE):
 
 
 class TestClassification(unittest.TestCase):
-    def test_the_two_folders_and_the_two_entry_files_are_classified_by_path(self):
+    def test_the_three_folders_and_the_two_entry_files_are_classified_by_path(self):
         self.assertEqual(classify("core/decisions.py"), "core")
         self.assertEqual(classify("core/drivers/command.py"), "core")
         self.assertEqual(classify("core/__init__.py"), "core")
         self.assertEqual(classify("__init__.py"), "core")
         self.assertEqual(classify("shell/run.py"), "shell")
         self.assertEqual(classify("shell/deep/er/thing.py"), "shell")
+        self.assertEqual(classify("world/files.py"), "world")
+        self.assertEqual(classify("world/deep/er/thing.py"), "world")
+        self.assertEqual(classify("world/__init__.py"), "world")
         self.assertEqual(classify("__main__.py"), "shell")
 
     def test_a_new_file_in_each_folder_is_covered_with_nothing_to_register(self):
         self.assertEqual(problems_of("import math", "core/brand_new.py"), [])
         self.assertTrue(problems_of("import os", "core/brand_new.py"))
-        self.assertEqual(problems_of("import os", "shell/brand_new.py"), [])
+        self.assertEqual(problems_of("import os", "world/brand_new.py"), [])
+        self.assertTrue(problems_of("import yaml", "world/brand_new.py"))
         self.assertTrue(problems_of("import yaml", "shell/brand_new.py"))
 
     def test_a_new_sub_folder_in_each_folder_is_covered_with_nothing_to_register(self):
@@ -339,26 +549,28 @@ class TestClassification(unittest.TestCase):
         self.assertTrue(problems_of("print(1)", "core/fresh/thing.py"))
         self.assertEqual(problems_of("import math", "core/fresh/thing.py"), [])
         self.assertTrue(problems_of("from shuttle.shell import run", "core/fresh/thing.py"))
-        self.assertEqual(problems_of("import os\nprint(1)", "shell/fresh/thing.py"), [])
+        self.assertEqual(problems_of("import os\nprint(1)", "world/fresh/thing.py"), [])
+        self.assertTrue(problems_of("import yaml", "world/fresh/thing.py"))
         self.assertTrue(problems_of("import yaml", "shell/fresh/thing.py"))
 
     def test_a_stray_module_at_the_package_root_is_refused_naming_the_file_and_the_fix(self):
         (problem,) = problems_of("x = 1", "stray.py")
-        self.assertIn("shuttle/stray.py sits outside the two folders", problem)
+        self.assertIn("shuttle/stray.py sits outside the three folders", problem)
         self.assertIn("move it into shuttle/core/", problem)
         self.assertIn("shuttle/shell/", problem)
+        self.assertIn("shuttle/world/", problem)
 
     def test_a_root_file_named_like_a_folder_is_refused_whatever_its_name(self):
-        for name in ("core.py", "shell.py", "decisions.py", "cli.py", "__version__.py"):
+        for name in ("core.py", "shell.py", "world.py", "decisions.py", "cli.py", "__version__.py"):
             with self.subTest(name=name):
                 (problem,) = problems_of("X = 1", name)
-                self.assertIn(f"shuttle/{name} sits outside the two folders", problem)
+                self.assertIn(f"shuttle/{name} sits outside the three folders", problem)
 
     def test_a_module_in_a_third_folder_is_refused_naming_the_file_and_the_fix(self):
         (problem,) = problems_of("import yaml", "extra/thing.py")
-        self.assertIn("shuttle/extra/thing.py sits outside the two folders", problem)
+        self.assertIn("shuttle/extra/thing.py sits outside the three folders", problem)
         (problem,) = problems_of("", "extra/__init__.py")
-        self.assertIn("shuttle/extra/__init__.py sits outside the two folders", problem)
+        self.assertIn("shuttle/extra/__init__.py sits outside the three folders", problem)
 
     def test_where_a_name_is_not_a_place(self):
         # A folder named like a module, or a folder name only starting like a classified one.
@@ -370,8 +582,12 @@ class TestClassification(unittest.TestCase):
         self.assertEqual(classify("core/shell.py"), "core")
         self.assertTrue(problems_of("import os", "core/shell.py"))
         self.assertEqual(classify("shell/core/x.py"), "shell")
-        self.assertEqual(problems_of("import os", "shell/core/x.py"), [])
+        self.assertTrue(problems_of("import os", "shell/core/x.py"))
+        self.assertEqual(problems_of("import os", "world/shell/x.py"), [])
         self.assertEqual(classify("shell/core.py"), "shell")
+        self.assertEqual(classify("world/core.py"), "world")
+        self.assertIsNone(classify("worlds/thing.py"))
+        self.assertIsNone(classify("world.py/x.py"))
         # A root __init__.py or __main__.py in a sub-folder is not the package's own entry file.
         self.assertEqual(classify("extra/__main__.py"), None)
         # Only exactly __init__.py and __main__.py sit at the root.
@@ -431,6 +647,7 @@ class TestTheRootFilesStayThin(unittest.TestCase):
     def test_other_files_are_not_held_to_the_thin_rule(self):
         self.assertEqual(problems_of("x = 1\ny = 2\n", "core/__init__.py"), [])
         self.assertEqual(problems_of("x = 1\ny = 2\n", "shell/__init__.py"), [])
+        self.assertEqual(problems_of("x = 1\ny = 2\n", "world/__init__.py"), [])
 
 
 class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
@@ -486,7 +703,7 @@ class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
         for source in ("from shuttle import run", "import shuttle.stray"):
             with self.subTest(source=source):
                 (problem,) = problems_of(source)
-                self.assertIn("neither shuttle/core/ nor shuttle/shell/", problem)
+                self.assertIn("neither shuttle/core/", problem)
 
     def test_a_relative_import_from_a_sub_folder_resolves_to_its_real_module(self):
         drivers = "core/drivers/command.py"
@@ -505,6 +722,82 @@ class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
                 self.assertIn("allow-list", problems[0])
 
 
+class TestTheWorldHoldsNoDecisionsAndTheShellReachesItOnlyWhereItIsWiredIn(unittest.TestCase):
+    def test_the_world_may_import_the_standard_library_its_siblings_and_the_shapes_alone(self):
+        for source in (
+            "import os, subprocess, socket, signal",
+            "from shuttle.core.shapes import Operations",
+            "from shuttle.core import shapes",
+            "import shuttle.core.shapes",
+            "from shuttle.world import files",
+            "from . import files",
+            "from .files import FILES",
+            "from shuttle import __version__",
+            "print(open('f').read())",
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(problems_of(source, "world/real.py"), [])
+
+    def test_the_world_importing_any_other_core_module_is_refused(self):
+        for source in (
+            "from shuttle.core import decisions",
+            "from shuttle.core.decisions import build_header",
+            "import shuttle.core.fixed",
+            "from shuttle.core.drivers import command",
+            "from ..core import fixed",
+            "from ..core.decisions import conclude",
+        ):
+            with self.subTest(source=source):
+                (problem,) = problems_of(source, "world/files.py")
+                self.assertIn("the world imports shuttle.core", problem)
+                self.assertIn("holds no decisions", problem)
+
+    def test_the_world_importing_the_shell_or_the_entry_file_is_refused(self):
+        for source in (
+            "from shuttle.shell import run",
+            "import shuttle.shell.records",
+            "from shuttle import shell",
+            "from ..shell import run",
+            "from shuttle import __main__",
+        ):
+            with self.subTest(source=source):
+                (problem,) = problems_of(source, "world/files.py")
+                self.assertIn("the world imports shuttle.", problem)
+                self.assertIn("a shell module", problem)
+
+    def test_the_core_importing_the_world_in_any_form_is_refused(self):
+        for source in (
+            "from shuttle import world",
+            "import shuttle.world.files",
+            "from shuttle.world import real",
+            "from shuttle.world.real import OPERATIONS",
+            "from ..world import real",
+            "def f():\n    from shuttle.world import files\n    return files",
+        ):
+            with self.subTest(source=source):
+                (problem,) = problems_of(source, "core/new.py")
+                self.assertIn("the core imports shuttle.world", problem)
+                self.assertIn("a world module", problem)
+
+    def test_the_shell_importing_the_world_is_refused_except_in_the_command_line_module(self):
+        for source in (
+            "from shuttle.world import real",
+            "import shuttle.world.files",
+            "from shuttle import world",
+            "from ..world import real",
+            "from shuttle.world.real import OPERATIONS",
+        ):
+            with self.subTest(source=source):
+                (problem,) = problems_of(source, "shell/run.py")
+                self.assertIn("the shell imports shuttle.world", problem)
+                self.assertIn("only shell/cli.py", problem)
+        self.assertEqual(problems_of("from shuttle.world import real", "shell/cli.py"), [])
+        self.assertEqual(problems_of("from ..world import real", "shell/cli.py"), [])
+        self.assertTrue(problems_of("from shuttle.world import real", "shell/deep/cli.py"))
+        self.assertTrue(problems_of("from shuttle.world import real", "shell/x.py"))
+        self.assertTrue(problems_of("from shuttle.world import real", "__main__.py"))
+
+
 class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
     # Every spelling the rule test must refuse, from the suppression table
     # (tests/hostile/suppressions_table.py): all that ruff honours and the ones it does not.
@@ -512,13 +805,13 @@ class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
 
     def test_every_spelling_is_refused_naming_the_file_and_where_the_code_belongs(self):
         for source in self.SPELLINGS:
-            for path in (CORE, "core/drivers/x.py", SHELL, "__main__.py", "stray.py"):
+            for path in (CORE, "core/drivers/x.py", SHELL, WORLD, "__main__.py", "stray.py"):
                 with self.subTest(source=source, path=path):
                     problems = [p for p in problems_of(source, path) if "lint ignore" in p]
                     self.assertEqual(len(problems), 1, problems)
                     self.assertIn(f"shuttle/{path} line ", problems[0])
                     self.assertIn("TID251", problems[0])
-                    self.assertIn("belongs in shuttle/shell/", problems[0])
+                    self.assertIn("belongs in shuttle/world/", problems[0])
 
     def test_the_line_number_is_the_comments(self):
         (problem,) = noqa_problems("x = 1\ny = 2\nimport os  # noqa: TID251\n", CORE)
@@ -586,11 +879,13 @@ class TestTheImportTable(unittest.TestCase):
                     self.assertEqual(problems, [])
 
     def test_every_standard_library_module_on_the_allow_list_has_an_allowed_row(self):
-        imported = set()
+        imported = {"core": set(), "shell": set()}
         for _, source, folder, caught_by, *_ in IMPORTS:
-            if caught_by is None and folder.startswith("core"):
-                imported |= top_modules_imported(source)
-        self.assertEqual(CORE_STDLIB_ALLOWED - imported, set())
+            if caught_by is None and folder.split("/")[0] in imported:
+                imported[folder.split("/")[0]] |= top_modules_imported(source)
+        self.assertEqual(CORE_STDLIB_ALLOWED - imported["core"], set())
+        # the shell's list is the core's and two more; the two more each have a row
+        self.assertEqual((SHELL_STDLIB_ALLOWED - CORE_STDLIB_ALLOWED) - imported["shell"], set())
 
     def test_the_table_has_each_kind_of_row_and_no_row_twice(self):
         kinds = {caught for _, _, _, caught, *_ in IMPORTS}
@@ -656,7 +951,7 @@ class TestTheCoreMentionsNoBuiltinThatReachesTheWorld(unittest.TestCase):
                 problems = problems_of(source)
                 self.assertTrue(problems, source)
                 self.assertIn("the core mentions", problems[0])
-                self.assertIn("move that code to the shell", problems[0])
+                self.assertIn("move that code to the world", problems[0])
 
     def test_builtins_open_is_refused_by_the_import_and_by_the_name(self):
         problems = problems_of("import builtins\nbuiltins.open('f')")
@@ -667,13 +962,19 @@ class TestTheCoreMentionsNoBuiltinThatReachesTheWorld(unittest.TestCase):
         self.assertEqual(problems_of("opened = 1\nprinter = 2\nx = {'open': 1}['open']"), [])
         self.assertEqual(problems_of("def f(record):\n    return record.open"), [])
 
-    def test_the_shell_may_use_them(self):
-        self.assertEqual(problems_of("print(open('f').read())", SHELL), [])
+    def test_the_shell_may_not_either_and_the_world_may(self):
+        for source in ("print(open('f').read())", "x = open('f')", "f = print", "input()"):
+            with self.subTest(source=source):
+                problems = problems_of(source, SHELL)
+                self.assertTrue(problems, source)
+                self.assertIn("the shell mentions", problems[0])
+                self.assertIn("move that code to the world", problems[0])
+                self.assertEqual(problems_of(source, WORLD), [])
 
 
 class TestStandardLibraryOnly(unittest.TestCase):
     def test_a_third_party_import_is_refused_in_the_core_the_shell_and_sub_folders(self):
-        for name in (CORE, SHELL, "core/drivers/command.py", "shell/deep/thing.py"):
+        for name in (CORE, SHELL, WORLD, "core/drivers/command.py", "shell/deep/thing.py"):
             for source in ("import requests", "from yaml import safe_load", "import numpy.linalg"):
                 with self.subTest(name=name, source=source):
                     problems = problems_of(source, name)
@@ -687,10 +988,11 @@ class TestStandardLibraryOnly(unittest.TestCase):
 
     def test_the_standard_library_and_the_package_itself_are_fine(self):
         self.assertEqual(problems_of("import json\nfrom shuttle.core import fixed", SHELL), [])
+        self.assertEqual(problems_of("import json\nfrom shuttle.core import shapes", WORLD), [])
 
     def test_an_import_of_a_package_module_in_neither_folder_is_refused(self):
         problems = problems_of("from shuttle.ghost import x", SHELL)
-        self.assertIn("neither shuttle/core/ nor shuttle/shell/", problems[0])
+        self.assertIn("neither shuttle/core/", problems[0])
 
 
 class TestThePackageWalk(unittest.TestCase):
@@ -705,17 +1007,22 @@ class TestThePackageWalk(unittest.TestCase):
         files = [("core/__init__.py", ""), ("core.py", "X = 1"), ("shell.py", "X = 1")]
         problems = check_package(files)
         self.assertEqual(len(problems), 2)
-        self.assertTrue(all("sits outside the two folders" in p for p in problems))
+        self.assertTrue(all("sits outside the three folders" in p for p in problems))
 
     def test_a_new_file_and_a_new_sub_folder_fail_the_walk_when_they_break_a_rule(self):
         files = [
             ("core/new_file.py", "import os"),
             ("core/fresh/thing.py", "import os"),
             ("shell/fresh/thing.py", "import os"),
+            ("world/fresh/thing.py", "import os"),
         ]
         problems = check_package(files)
-        self.assertEqual(len(problems), 2)
-        self.assertTrue(all("the core imports os" in p for p in problems))
+        self.assertEqual(len(problems), 3)
+        self.assertEqual(
+            sorted(p.split(":")[0] for p in problems),
+            ["core/fresh/thing.py", "core/new_file.py", "shell/fresh/thing.py"],
+        )
+        self.assertTrue(all(" imports os" in p for p in problems))
 
     def test_the_walk_names_files_by_their_path_under_the_package(self):
         names = [path for path, _ in package_files()]
@@ -756,6 +1063,85 @@ class TestThePackageItself(unittest.TestCase):
             self.assertTrue(all(p.startswith("core/") for p in problems))
 
 
+class TestNoTestPatchesAnything(unittest.TestCase):
+    """A stand-in is passed in, never put in by name. By value, over source text."""
+
+    REFUSED = (
+        "import unittest.mock",
+        "import unittest.mock as m",
+        "from unittest import mock",
+        "from unittest.mock import patch",
+        "from unittest.mock import MagicMock",
+        "import mock",
+        "from mock import patch",
+        "from unittest import mock as m",
+        "x = patch('a.b')",
+        "import x\nx.patch('a')",
+        "@patch('a.b')\ndef t(m): pass",
+        "@mock.patch.object(a, 'b')\ndef t(m): pass",
+        "with x.patch.object(a, 'b'): pass",
+        "with patch.dict(os.environ, {}): pass",
+        "import os\nos.getcwd = lambda: '/'",
+        "import sys\nsys.stdout = None",
+        "import os\nos.environ.clear_hook = 1",
+        "from shuttle.shell import run\nrun.STEPS = ()",
+        "from shuttle.shell import run\nrun.STEPS += ()",
+        "from shuttle.shell import run\ndel run.STEPS",
+        "from shuttle.shell import run\nrun.a.b.c = 1",
+        "from shuttle.shell import run\nrun.f().x = 1",
+        "from shuttle.shell import run as r\nr.STEPS = ()",
+        "import importlib\nm = importlib.import_module('x')\nm.y = 1",
+        "import os.path\nos.path.join = None",
+        "import os\nsetattr(os, 'getcwd', None)",
+        "import os\nsetattr(os.path, 'join', None)",
+        "import os\nfor os.name in (1, 2): pass",
+        "import os\nos.x: int = 1",
+        "import os\nwith x() as os.y: pass",
+    )
+    ALLOWED = (
+        "import os\nos.environ['X'] = '1'",
+        "import os\nos.environ.pop('X', None)",
+        "import sys\nsys.path.insert(0, '.')",
+        "import unittest\nclass T(unittest.TestCase):\n    def setUp(self):\n        self.x = 1",
+        "class A: pass\na = A()\na.x = 1",
+        "state = {}\nstate['signal'] = 'SIGINT'",
+        "def f(world):\n    world.t = 1.0",
+        "import os\nx = os.path.join('a', 'b')",
+        "import os\nwith open('f') as handle:\n    handle.x = 1",
+        "import os\nfor name in os.listdir('.'):\n    pass",
+        "patched = 1\nx = patched + 1",
+        "import re\nre.compile('patch')",
+        "def patch_up(): pass\npatch_up()",
+        "import os\nsetattr(object(), 'x', 1)",
+        "from dataclasses import dataclass\n@dataclass\nclass C:\n    x: int = 1",
+    )
+
+    def test_each_way_of_putting_a_stand_in_in_by_name_is_refused(self):
+        for source in self.REFUSED:
+            with self.subTest(source=source):
+                self.assertTrue(mocking_problems(source, "x/test_y.py"), source)
+
+    def test_passing_things_in_and_setting_items_and_look_alikes_are_fine(self):
+        for source in self.ALLOWED:
+            with self.subTest(source=source):
+                self.assertEqual(mocking_problems(source, "x/test_y.py"), [])
+
+    def test_a_refusal_names_the_file_the_line_and_what_was_done(self):
+        (problem,) = mocking_problems("x = 1\nimport sys\nsys.stdout = None\n", "by_value/t.py")
+        self.assertIn("tests/by_value/t.py line 3", problem)
+        self.assertIn("sys.stdout", problem)
+
+    def test_no_test_under_tests_patches_anything_except_the_ones_named_with_a_reason(self):
+        self.assertEqual(set(files_that_patch()), set(MOCKING_EXEMPT))
+
+    def test_every_exempt_file_exists_has_a_reason_and_still_patches(self):
+        for path, reason in MOCKING_EXEMPT.items():
+            with self.subTest(path=path):
+                self.assertTrue(os.path.exists(os.path.join(ROOT, "tests", path)))
+                self.assertGreaterEqual(len(reason.split()), 8, "say why, in a sentence")
+                self.assertIn(path, files_that_patch(), "no longer patches: remove it")
+
+
 class TestNotTestedMarkers(unittest.TestCase):
     """A line left deliberately untested says why: `# not tested: <reason>` (see report.py)."""
 
@@ -788,30 +1174,32 @@ class TestTheLinterAgreesWithTheFolders(unittest.TestCase):
         self.lint = config["ruff"]["lint"]
         self.assertNotIn("shuttle", config, "the folders are the classification: no table")
 
-    def test_the_one_ban_list_bans_the_shell_folder_and_the_entry_file_and_nothing_else(self):
+    def test_the_one_ban_list_bans_the_entry_file_and_no_other_part_of_the_package(self):
         banned = set(self.lint["flake8-tidy-imports"]["banned-api"])
         ours = {m for m in banned if m.split(".")[0] == "shuttle"}
-        self.assertEqual(ours, {"shuttle.shell", "shuttle.__main__"})
+        self.assertEqual(ours, {"shuttle.__main__"})
 
-    def test_ban_messages_name_the_shell_folder(self):
+    def test_ban_messages_name_the_world_folder_for_a_library_and_the_shell_for_the_package(self):
         banned = self.lint["flake8-tidy-imports"]["banned-api"]
         for name, entry in banned.items():
             with self.subTest(name=name):
-                self.assertIn("shuttle/shell/", entry["msg"])
+                where = "shuttle/shell/" if name.split(".")[0] == "shuttle" else "shuttle/world/"
+                self.assertIn(where, entry["msg"])
                 self.assertNotIn("per-file-ignores", entry["msg"])
 
-    def test_only_the_shell_folder_the_entry_file_and_the_tests_are_exempt_from_the_ban(self):
+    def test_only_the_world_and_the_tests_are_exempt_from_the_ban(self):
         exempt = {
             path for path, rules in self.lint["per-file-ignores"].items() if "TID251" in rules
         }
-        self.assertEqual(exempt, {"shuttle/shell/**", "shuttle/__main__.py", "tests/**"})
+        self.assertEqual(exempt, {"shuttle/world/**", "tests/**"})
 
     def test_relative_imports_are_banned_so_the_ban_cannot_be_walked_around(self):
         self.assertEqual(self.lint["flake8-tidy-imports"]["ban-relative-imports"], "all")
 
-    def test_every_standard_library_module_the_linter_bans_is_off_the_core_allow_list(self):
+    def test_every_standard_library_module_the_linter_bans_is_off_both_allow_lists(self):
         banned = {m for m in self.lint["flake8-tidy-imports"]["banned-api"] if "." not in m}
         self.assertEqual(banned & CORE_STDLIB_ALLOWED, set())
+        self.assertEqual(banned & SHELL_STDLIB_ALLOWED, set())
 
 
 if __name__ == "__main__":

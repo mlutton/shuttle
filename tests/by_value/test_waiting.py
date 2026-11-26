@@ -1,62 +1,43 @@
-"""By value: the waiting logic, driven by a stand-in clock and stand-in processes. No real time passes.
+"""By value: the waiting logic, on the simulated world. No real time passes, no real process runs.
 
 Covers which cause ends the wait, what is ended and in what order (ask, wait the grace, kill),
-what facts each outcome gives, and that a later signal changes nothing. The one test that waits
-for real is in test_grace.py; signals sent to the real command are in test_command.py.
+what facts each outcome gives, and that a later signal changes nothing. The one real wait is in
+tests/command/test_time_limit.py; signals sent to the real command are in test_command.py.
 """
 
-import datetime
-import signal
+import importlib
+import inspect
+import os
+import sys
 import unittest
 
+from shuttle.core import decisions as core
 from shuttle.shell import run
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+simulated = importlib.import_module("rehearsal.simulated_world")
+
 POLL = run._POLL_SECONDS
-GRACE = 3  # a stand-in clock makes the real default affordable here
+GRACE = run.END_GRACE_SECONDS
 
 
-class StandInClock:
-    """Time that moves only when something sleeps. `at` is a list of (time, function) run once when reached."""
-
-    def __init__(self, at=()):
-        self.t = 0.0
-        self.pending = sorted(at, key=lambda pair: pair[0])
-
-    def now(self):
-        return self.t
-
-    def sleep(self, seconds):
-        self.t += seconds
-        while self.pending and self.pending[0][0] <= self.t:
-            self.pending.pop(0)[1]()
+def a_child(world, exits_at=None, obeys=("ask_to_end", "kill")):
+    """A running child on the world: it exits by itself `exits_at` seconds after it starts."""
+    world.program("tool", exits_after=exits_at, obeys=obeys)
+    return world.operations.processes.start(["tool"], {})
 
 
-class StandInProcess:
-    """A child that exits by itself at `exits_at`, and obeys only the requests named in `obeys`."""
-
-    def __init__(self, clock, exits_at=None, obeys=("terminate", "kill")):
-        self.clock, self.exits_at, self.obeys = clock, exits_at, obeys
-        self.returncode = None
-        self.calls = []
-
-    def poll(self):
-        if self.returncode is None and self.exits_at is not None and self.clock.t >= self.exits_at:
-            self.returncode = 0
-        return self.returncode
-
-    def terminate(self):
-        self.calls.append(("terminate", self.clock.t))
-        if "terminate" in self.obeys:
-            self.returncode = -signal.SIGTERM
-
-    def kill(self):
-        self.calls.append(("kill", self.clock.t))
-        if "kill" in self.obeys:
-            self.returncode = -signal.SIGKILL
+def signal_from(world, at):
+    return lambda: "SIGINT" if at is not None and world.t >= at else None
 
 
-def signal_from(clock, at):
-    return lambda: "SIGINT" if at is not None and clock.t >= at else None
+def requests(world):
+    """The asks and kills the world was given, in order, as (name, time on its clock)."""
+    return [
+        (op.split(".")[1], t)
+        for op, _, t in world.log
+        if op in ("processes.ask_to_end", "processes.kill")
+    ]
 
 
 class WhichCauseEndsTheWait(unittest.TestCase):
@@ -72,77 +53,90 @@ class WhichCauseEndsTheWait(unittest.TestCase):
             (None, 2, 5, "signal"),
         ):
             with self.subTest(exits_at=exits_at, signal_at=signal_at, limit=limit):
-                clock = StandInClock()
-                process = StandInProcess(clock, exits_at)
-                cause = run.wait_for_the_cause(process, limit, signal_from(clock, signal_at), clock)
+                world = simulated.SimulatedWorld()
+                process = a_child(world, exits_at)
+                cause = run.wait_for_the_cause(
+                    world.operations, process, limit, signal_from(world, signal_at)
+                )
                 self.assertEqual(cause, expected)
-                self.assertLessEqual(clock.t, limit + POLL)
-                self.assertEqual(
-                    process.calls, []
-                )  # the wait only watches; ending is a separate decision
+                self.assertLessEqual(world.t, limit + POLL)
+                self.assertEqual(requests(world), [])  # the wait only watches; ending is separate
 
 
 class WhatIsEndedAndInWhatOrder(unittest.TestCase):
+    def end(self, **child):
+        world = simulated.SimulatedWorld()
+        process = a_child(world, **child)
+        return world, run.end_child(world.operations, process)
+
     def test_a_child_that_obeys_the_ask_is_asked_once_and_not_killed(self):
-        clock = StandInClock()
-        process = StandInProcess(clock, obeys=("terminate",))
-        self.assertEqual(run.end_child(process, GRACE, clock), "ended")
-        self.assertEqual([name for name, _ in process.calls], ["terminate"])
+        world, result = self.end(obeys=("ask_to_end",))
+        self.assertEqual(result, "ended")
+        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end"])
 
     def test_a_child_that_ignores_the_ask_is_killed_after_the_whole_grace(self):
-        clock = StandInClock()
-        process = StandInProcess(clock, obeys=("kill",))
-        self.assertEqual(run.end_child(process, GRACE, clock), "ended")
-        self.assertEqual([name for name, _ in process.calls], ["terminate", "kill"])
-        asked, killed = process.calls[0][1], process.calls[1][1]
+        world, result = self.end(obeys=("kill",))
+        self.assertEqual(result, "ended")
+        (first, asked), (name, killed) = requests(world)
+        self.assertEqual(first, "ask_to_end")
+        self.assertEqual(name, "kill")
         self.assertGreaterEqual(killed - asked, GRACE)
         self.assertLessEqual(killed - asked, GRACE + POLL)
 
     def test_a_child_that_survives_the_kill_is_not_confirmed_after_a_second_grace(self):
-        clock = StandInClock()
-        process = StandInProcess(clock, obeys=())
-        self.assertEqual(run.end_child(process, GRACE, clock), "not_confirmed")
-        self.assertEqual([name for name, _ in process.calls], ["terminate", "kill"])
-        self.assertGreaterEqual(clock.t, 2 * GRACE)
+        world, result = self.end(obeys=())
+        self.assertEqual(result, "not_confirmed")
+        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end", "kill"])
+        self.assertGreaterEqual(world.t, 2 * GRACE)
 
     def test_a_child_that_has_already_exited_is_not_asked_anything(self):
-        clock = StandInClock()
-        process = StandInProcess(clock, exits_at=0)
-        self.assertEqual(run.end_child(process, GRACE, clock), "ended")
-        self.assertEqual(process.calls, [])
+        world, result = self.end(exits_at=0)
+        self.assertEqual(result, "ended")
+        self.assertEqual(requests(world), [])
 
-    def test_the_defaults_are_the_documented_values(self):
+    def test_a_request_that_cannot_be_sent_is_not_an_error_and_the_child_is_still_ended(self):
+        world = simulated.SimulatedWorld()
+        process = a_child(world, obeys=("kill",))
+        world.will_raise("processes.ask_to_end", ProcessLookupError("gone"))
+        self.assertEqual(run.end_child(world.operations, process), "ended")
+
+    def test_the_grace_is_a_fixed_policy_and_the_run_takes_no_seam_for_it(self):
         self.assertEqual(run.END_GRACE_SECONDS, 3)
-        self.assertEqual(run.end_child.__defaults__, (3, run.REAL_CLOCK))
-        self.assertEqual(run.run.__defaults__[-2:], (3, run.REAL_CLOCK))
+        self.assertEqual(
+            list(inspect.signature(run.run).parameters), ["document_path", "out", "err", "world"]
+        )
+        self.assertEqual(list(inspect.signature(run.end_child).parameters), ["world", "process"])
+        self.assertNotIn("clock", inspect.signature(run.wait_for_the_cause).parameters)
 
 
 class TheWaitStepGivesTheseFacts(unittest.TestCase):
-    def step(self, limit, signal_at=None, exits_at=None, obeys=("terminate", "kill")):
-        """Run the wait step on stand-ins. `signal_at` is when a signal arrives, on the stand-in clock."""
-        state = {"signal": None, "facts": {}, "grace": GRACE, "raw": {"time_limit_seconds": limit}}
-        arrives = (
-            [(signal_at, lambda: state.update(signal="SIGINT"))] if signal_at is not None else []
-        )
-        clock = StandInClock(arrives)
-        process = StandInProcess(clock, exits_at, obeys)
-        state.update(
-            clock=clock,
-            stand_ins={"boundary": {"process": process}},
-            clock_start=datetime.datetime.now(datetime.UTC),
-        )
+    def step(self, limit, signal_at=None, exits_at=None, obeys=("ask_to_end", "kill")):
+        """Run the wait step on the world. `signal_at` is when a signal arrives, on its clock."""
+        world = simulated.SimulatedWorld()
+        process = a_child(world, exits_at, obeys)
+        state = {
+            "signal": None,
+            "facts": {},
+            "raw": {"time_limit_seconds": limit},
+            "world": world.operations,
+            "stand_ins": {"boundary": {"process": process}},
+            "clock_start": world.operations.clock.now(),
+        }
+        if signal_at is not None:
+            world.at(signal_at, lambda: state.update(signal="SIGINT"))
         run.step_wait_for_the_end(state)
-        return state["facts"], process
+        return state["facts"], world
 
     def test_a_child_that_exits_by_itself_gives_exited_and_is_never_asked(self):
-        facts, process = self.step(limit=10, exits_at=1)
-        self.assertEqual((facts["wait"], facts["exit_code"], process.calls), ("exited", 0, []))
+        facts, world = self.step(limit=10, exits_at=1)
+        self.assertEqual((facts["wait"], facts["exit_code"]), ("exited", 0))
+        self.assertEqual(requests(world), [])
         self.assertNotIn("stop", facts)
 
     def test_the_limit_gives_time_limit_and_the_child_is_ended(self):
-        facts, process = self.step(limit=2)
+        facts, world = self.step(limit=2)
         self.assertEqual(facts["wait"], "time_limit")
-        self.assertEqual([name for name, _ in process.calls], ["terminate"])
+        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end"])
         self.assertNotIn("stop", facts)
 
     def test_a_signal_gives_signal(self):
@@ -152,37 +146,65 @@ class TheWaitStepGivesTheseFacts(unittest.TestCase):
     def test_a_signal_during_the_grace_after_the_limit_changes_nothing_and_the_child_is_killed(
         self,
     ):
-        facts, process = self.step(limit=2, signal_at=2 + GRACE / 2, obeys=("kill",))
+        facts, world = self.step(limit=2, signal_at=2 + GRACE / 2, obeys=("kill",))
         self.assertEqual(facts["wait"], "time_limit")
         self.assertNotIn("stop", facts)
-        self.assertEqual([name for name, _ in process.calls], ["terminate", "kill"])
-        self.assertEqual(
-            (facts["exit_code"], facts["child_signal"]), run.exit_facts(-signal.SIGKILL)
-        )
+        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end", "kill"])
+        self.assertEqual((facts["exit_code"], facts["child_signal"]), (None, "SIGKILL"))
 
     def test_a_limit_passing_in_the_grace_after_a_signal_changes_nothing(self):
-        facts, process = self.step(limit=2, signal_at=1, obeys=("kill",))
+        facts, world = self.step(limit=2, signal_at=1, obeys=("kill",))
         self.assertEqual(facts["wait"], "signal")
-        self.assertEqual([name for name, _ in process.calls], ["terminate", "kill"])
+        self.assertEqual([name for name, _ in requests(world)], ["ask_to_end", "kill"])
 
     def test_a_child_that_survives_the_kill_gives_stop_not_confirmed(self):
         facts, _ = self.step(limit=2, obeys=())
         self.assertEqual((facts["wait"], facts["stop"]), ("time_limit", "not_confirmed"))
+        self.assertEqual((facts["exit_code"], facts["child_signal"]), (None, None))
+
+    def test_the_duration_is_the_time_on_the_worlds_clock_from_the_start_to_the_end(self):
+        world = simulated.SimulatedWorld()
+        process = a_child(world, exits_at=1)
+        state = {
+            "signal": None,
+            "facts": {},
+            "raw": {"time_limit_seconds": 10},
+            "world": world.operations,
+            "stand_ins": {"boundary": {"process": process}},
+            "clock_start": world.operations.clock.now(),
+        }
+        run.step_wait_for_the_end(state)
+        self.assertAlmostEqual(state["executor_duration"], 1.0, delta=POLL * 2)
+        self.assertEqual(state["ended_at"], world.operations.clock.timestamp())
+
+
+class TheExitFacts(unittest.TestCase):
+    def test_rows(self):
+        for given, expected in (
+            ((None, None), (None, None)),
+            ((0, None), (0, None)),
+            ((3, None), (3, None)),
+            ((-9, "SIGKILL"), (None, "SIGKILL")),
+            ((-15, "SIGTERM"), (None, "SIGTERM")),
+            ((-99, None), (None, "signal 99")),
+        ):
+            with self.subTest(given):
+                self.assertEqual(core.exit_facts(*given), expected)
 
 
 class TheHandlersOnlyRecordTheFirstSignal(unittest.TestCase):
     def test_each_signal_is_recorded_by_name_and_a_later_one_changes_nothing(self):
-        for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-            with self.subTest(signal=number.name):
-                state = {"signal": None}
-                previous = run._install_handlers(state)
-                self.addCleanup(
-                    lambda previous=previous: [signal.signal(n, h) for n, h in previous.items()]
-                )
-                signal.raise_signal(number)
-                other = signal.SIGHUP if number != signal.SIGHUP else signal.SIGINT
-                signal.raise_signal(other)
-                self.assertEqual(state["signal"], number.name)
+        for first in ("SIGINT", "SIGTERM", "SIGHUP"):
+            with self.subTest(signal=first):
+                world = simulated.SimulatedWorld()
+                state = {"signal": None, "world": world.operations}
+                restore = run._install_handlers(state)
+                world.deliver(first)
+                world.deliver("SIGHUP" if first != "SIGHUP" else "SIGINT")
+                self.assertEqual(state["signal"], first)
+                restore()
+                world.deliver("SIGTERM")  # nobody is listening now
+                self.assertEqual(state["signal"], first)
 
 
 if __name__ == "__main__":

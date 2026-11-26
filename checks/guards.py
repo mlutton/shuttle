@@ -35,6 +35,7 @@ GUARD_FILES = (
     "tests/by_value/test_check_helpers.py",
     "tests/by_value/test_name_functions.py",
     "tests/by_value/test_names_table.py",
+    "tests/rehearsal/contract.py",
     "tests/command/test_hostile_tables.py",
     "tests/command/test_fix_mode.py",
     "tests/command/test_base_check.py",

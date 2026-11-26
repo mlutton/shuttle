@@ -1,8 +1,10 @@
 """The run form: the fifteen steps of a run, in order, as a thin shell.
 
 Each step gathers facts from the world (files, the clock, a process) into one
-facts dictionary and hands every decision to shuttle.core.decisions. Steps marked
-"stand-in" call a function in shuttle.shell.stand_ins that returns a marked value.
+facts dictionary and hands every decision to shuttle.core.decisions. The world is
+reached only through the operations `run` is handed (shuttle.core.shapes.Operations):
+this module imports nothing that touches it. Steps marked "stand-in" call a function in
+shuttle.shell.stand_ins that returns a marked value.
 
 One guarantee: once the request id is claimed, every step runs under `guarded`
 and the conclusion runs in a `finally`. An error becomes a fact for the decisions.
@@ -12,133 +14,101 @@ one, and a record that cannot be written is printed instead.
 """
 
 import contextlib
-import datetime
 import hashlib
 import json
-import os
-import shutil
-import signal
-import socket
-import subprocess
-import time
-import uuid
 from collections.abc import Callable, Mapping, Sequence
-from types import FrameType
-from typing import Any, TextIO
+from typing import TextIO
 
 from shuttle import __version__
 from shuttle.core import decisions, fixed
 from shuttle.core.drivers import command
-from shuttle.core.shapes import Conclusion, Decision, Facts, LaunchSpec, Receipt, State, StepResult
+from shuttle.core.shapes import (
+    Conclusion,
+    Decision,
+    LaunchSpec,
+    Operations,
+    Process,
+    Receipt,
+    State,
+    StepResult,
+)
 from shuttle.shell import records, stand_ins
 
 # The deadline (the time limit) and this grace are stand-ins until the boundary owns the time limit.
-END_GRACE_SECONDS = 3  # as of 2026-11-25: seconds between asking a child to end and killing it; passed in by code, never read from the world
+END_GRACE_SECONDS = 3  # as of 2026-11-25: seconds between asking a child to end and killing it; a fixed policy, not read from the world
 _POLL_SECONDS = 0.05
 
 
-def _now() -> str:
-    return datetime.datetime.now(datetime.UTC).isoformat(timespec="milliseconds")
-
-
-def exit_facts(returncode: int | None) -> tuple[int | None, str | None]:
-    """From a child's return code: (exit code, signal name). A kill by signal has no exit code."""
-    if returncode is None:
-        return None, None
-    if returncode < 0:
-        try:
-            return None, signal.Signals(-returncode).name
-        except ValueError:
-            return None, f"signal {-returncode}"
-    return returncode, None
-
-
-class Clock:
-    """The waiting seam: what time it is, and waiting. Everything in this file that waits goes through one."""
-
-    def now(self) -> float:
-        return time.monotonic()
-
-    def sleep(self, seconds: float) -> None:
-        time.sleep(seconds)
-
-
-REAL_CLOCK = Clock()
-
-
-def _exited_within(process: subprocess.Popen[bytes], seconds: float, clock: Clock) -> bool:
-    deadline = clock.now() + seconds
-    while process.poll() is None:
-        if clock.now() >= deadline:
+def _exited_within(world: Operations, process: Process, seconds: float) -> bool:
+    deadline = world.clock.now() + seconds
+    while world.processes.poll(process) is None:
+        if world.clock.now() >= deadline:
             return False
-        clock.sleep(_POLL_SECONDS)
+        world.clock.wait(_POLL_SECONDS)
     return True
 
 
-def end_child(
-    process: subprocess.Popen[bytes], grace: float = END_GRACE_SECONDS, clock: Clock = REAL_CLOCK
-) -> str:
+def end_child(world: Operations, process: Process) -> str:
     """End the direct child, for every cause: ask, wait a short grace (seconds), then kill.
 
     Returns "ended" or "not_confirmed". Whether everything the child started is gone
     is a stand-in (step 9); only the direct child is ended here.
     """
-    if process.poll() is None:
+    if world.processes.poll(process) is None:
         with contextlib.suppress(OSError):
-            process.terminate()
-        if not _exited_within(process, grace, clock):
+            world.processes.ask_to_end(process)
+        if not _exited_within(world, process, END_GRACE_SECONDS):
             with contextlib.suppress(OSError):
-                process.kill()
-            if not _exited_within(process, grace, clock):
+                world.processes.kill(process)
+            if not _exited_within(world, process, END_GRACE_SECONDS):
                 return "not_confirmed"
     return "ended"
 
 
 def wait_for_the_cause(
-    process: subprocess.Popen[bytes],
+    world: Operations,
+    process: Process,
     limit_seconds: float,
     get_signal: Callable[[], str | None],
-    clock: Clock = REAL_CLOCK,
 ) -> str:
     """Poll until the child exits, a signal is seen, or the limit passes. Returns the first cause seen."""
-    deadline = clock.now() + limit_seconds
+    deadline = world.clock.now() + limit_seconds
     while True:
         cause = decisions.wait_cause(
-            process.poll() is not None, clock.now() >= deadline, get_signal()
+            world.processes.poll(process) is not None,
+            world.clock.now() >= deadline,
+            get_signal(),
         )
         if cause:
             return cause
-        clock.sleep(_POLL_SECONDS)
+        world.clock.wait(_POLL_SECONDS)
 
 
-def locate(settings: Mapping[str, Any]) -> bool:
-    """Shell: whether the command can be found and run. Returns True or False."""
-    try:
-        return shutil.which(settings["command"]) is not None
-    except (ValueError, OSError):
-        return False
+def _caller_environment(world: Operations, names: Sequence[str]) -> dict[str, str]:
+    """The variables the run may look at: PATH and the named ones, those that are set."""
+    found: dict[str, str] = {}
+    for name in ("PATH", *names):
+        value = world.environment.read_variable(name)
+        if value is not None:
+            found[name] = value
+    return found
 
 
-def start_in_boundary(launch_spec: LaunchSpec, environment: Mapping[str, str]) -> StepResult:
+def start_in_boundary(
+    world: Operations, launch_spec: LaunchSpec, environment: Mapping[str, str]
+) -> StepResult:
     """Boundary: a plain child process, no containment yet. Raises when it cannot start.
 
-    A stand-in until the boundary is built; it is the shell's, because it starts a process.
+    A stand-in until the boundary is built.
     """
-    process = subprocess.Popen(
-        launch_spec["argv"],
-        env=environment,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    process = world.processes.start(launch_spec["argv"], environment)
     return {fixed.STAND_IN_KEY: "boundary", "process": process}
 
 
 def step_read_and_validate_document(state: State) -> None:
     facts = state["facts"]
     try:
-        with open(state["document_path"], "rb") as f:
-            data = f.read()
+        data = state["world"].files.read(state["document_path"])
         raw = json.loads(data.decode("utf-8"))
     except (OSError, ValueError) as error:
         facts["unreadable"] = True
@@ -164,10 +134,13 @@ def step_read_and_validate_document(state: State) -> None:
 
 
 def step_claim_request_id(state: State) -> None:
-    facts, source = state["facts"], state["facts"]["header_source"]
-    header = decisions.build_header("request", source, uuid.uuid4().hex, _now())
+    facts, source, world = state["facts"], state["facts"]["header_source"], state["world"]
+    header = decisions.build_header(
+        "request", source, world.identity.new_id(), world.clock.timestamp()
+    )
     try:
         records.claim_request_record(
+            state["world"],
             source["records_location"],
             source["request_id"],
             {"header": header, "input": state["raw"]},
@@ -194,12 +167,14 @@ def step_claim_request_id(state: State) -> None:
 def step_run_input_checks_and_executor_driver_check(state: State) -> None:
     # The input checks are real in the first step (the document's shape). This step is the
     # executor driver's check and the check of the named environment variables.
+    world = state["world"]
     settings = state["raw"]["executor"]["settings"]
+    names = state["raw"].get("environment", [])
     reason, text = decisions.executor_driver_check(
         settings["command"],
-        state["raw"].get("environment", []),
-        os.environ,
-        locate(settings),
+        names,
+        _caller_environment(world, names),
+        world.processes.find_program(settings["command"]),
     )
     if reason:
         state["facts"]["executor_driver_check"] = reason
@@ -224,33 +199,37 @@ def step_take_opening_fingerprint(state: State) -> None:  # stand-in
 
 
 def step_launch_executor(state: State) -> None:
+    world = state["world"]
     spec = command.launch(state["raw"]["executor"]["settings"])
-    environment = decisions.build_environment(state["raw"].get("environment", []), os.environ)
-    state["started_at"] = _now()
-    state["clock_start"] = datetime.datetime.now(datetime.UTC)
-    state["stand_ins"]["boundary"] = start_in_boundary(spec, environment)
+    names = state["raw"].get("environment", [])
+    environment = decisions.build_environment(names, _caller_environment(world, names))
+    state["started_at"] = world.clock.timestamp()
+    state["clock_start"] = world.clock.now()
+    state["stand_ins"]["boundary"] = start_in_boundary(world, spec, environment)
     state["facts"]["launch"] = "ok"
 
 
 def step_wait_for_the_end(state: State) -> None:
+    world = state["world"]
     process = state["stand_ins"]["boundary"]["process"]
     facts = state["facts"]
-    clock = state["clock"]
     try:
         cause = wait_for_the_cause(
-            process, float(state["raw"]["time_limit_seconds"]), lambda: state["signal"], clock
+            world, process, float(state["raw"]["time_limit_seconds"]), lambda: state["signal"]
         )
         facts["wait"] = cause
-        if cause != "exited" and end_child(process, state["grace"], clock) == "not_confirmed":
+        if cause != "exited" and end_child(world, process) == "not_confirmed":
             facts["stop"] = "not_confirmed"
     finally:
-        if process.poll() is None:  # the wait itself broke: still end the child
-            end_child(process, state["grace"], clock)
-    facts["exit_code"], facts["child_signal"] = exit_facts(process.returncode)
-    state["executor_duration"] = (
-        datetime.datetime.now(datetime.UTC) - state["clock_start"]
-    ).total_seconds()
-    state["ended_at"] = _now()
+        if world.processes.poll(process) is None:  # the wait itself broke: still end the child
+            end_child(world, process)
+    returncode = world.processes.poll(process)
+    facts["exit_code"], facts["child_signal"] = decisions.exit_facts(
+        returncode,
+        world.signals.name_of(-returncode) if returncode is not None and returncode < 0 else None,
+    )
+    state["executor_duration"] = world.clock.now() - state["clock_start"]
+    state["ended_at"] = world.clock.timestamp()
 
 
 def step_stop_everything_and_confirm_empty(state: State) -> None:  # stand-in
@@ -290,16 +269,14 @@ def step_tear_down(state: State) -> None:  # stand-in
     state["stand_ins"]["teardown"] = stand_ins.tear_down(None)
 
 
-def _full_receipt(
-    state: State, decision: Decision, build_receipt: Callable[[Decision, Facts], Receipt]
-) -> Receipt:
-    facts = state["facts"]
-    return build_receipt(
+def _full_receipt(state: State, decision: Decision) -> Receipt:
+    facts, world = state["facts"], state["world"]
+    return decisions.build_receipt(
         decision,
         {
-            "receipt_id": uuid.uuid4().hex,
+            "receipt_id": world.identity.new_id(),
             "execution_version": __version__,
-            "host": socket.gethostname(),
+            "host": world.identity.host_name(),
             "input_hash": state.get("input_hash", fixed.CANNOT_TELL),
             "launched": facts.get("launch") == "ok",
             "started_at": state.get("started_at"),
@@ -326,14 +303,20 @@ def conclude_run(state: State) -> Conclusion:
             {"kind": "not_recorded", "decision": decision, "problem": state.get("problem")}
         )
     try:
-        receipt = _full_receipt(state, decision, state["build_receipt"])
+        receipt = _full_receipt(state, decision)
     except BaseException:
         receipt = decisions.minimal_receipt(decision)
     source = facts["header_source"]
     try:
-        header = decisions.build_header("outcome", source, uuid.uuid4().hex, _now())
-        path = state["write_record"](
-            source["records_location"], source["request_id"], {"header": header, "receipt": receipt}
+        world = state["world"]
+        header = decisions.build_header(
+            "outcome", source, world.identity.new_id(), world.clock.timestamp()
+        )
+        path = records.write_outcome_record(
+            world,
+            source["records_location"],
+            source["request_id"],
+            {"header": header, "receipt": receipt},
         )
     except BaseException as error:  # nothing may prevent the receipt: print it instead
         return decisions.conclude(
@@ -351,6 +334,9 @@ def step_write_outcome_record(state: State) -> None:
     state["conclusion"] = conclude_run(state)
 
 
+# The ordered steps of a run are the design. That `run_steps` takes the table as an argument is a test
+# seam only for the placeholder steps, which touch nothing; as each becomes a real step that uses the
+# operations, its failures are made through them and the argument goes.
 STEPS = (
     ("read_and_validate_document", step_read_and_validate_document),
     ("claim_request_id", step_claim_request_id),
@@ -389,64 +375,62 @@ def guarded(name: str, step: Callable[[State], None], state: State) -> None:
             )
 
 
-def _install_handlers(state: State) -> dict[int, Any]:
-    """Signals only record which one came first. They never raise."""
+def _install_handlers(state: State) -> Callable[[], None]:
+    """Signals only record which one came first. They never raise. Returns the undo."""
 
-    def handler(number: int, frame: FrameType | None) -> None:
+    def note(name: str) -> None:
         if state["signal"] is None:
-            state["signal"] = signal.Signals(number).name
+            state["signal"] = name
 
-    previous: dict[int, Any] = {}
-    for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-        previous[number] = signal.signal(number, handler)
-    return previous
+    restore: Callable[[], None] = state["world"].signals.install(note)
+    return restore
 
 
-def run(
+def run(document_path: str, out: TextIO, err: TextIO, world: Operations) -> int:
+    """Run one input document end to end. Returns the exit code.
+
+    world: everything the run does to the world goes through it; the command passes the real set.
+    """
+    return run_steps(STEPS, document_path, out, err, world)
+
+
+def run_steps(
+    steps: Sequence[tuple[str, Callable[[State], None]]],
     document_path: str,
     out: TextIO,
     err: TextIO,
-    steps: Sequence[tuple[str, Callable[[State], None]]] | None = None,
-    build_receipt: Callable[[Decision, Facts], Receipt] | None = None,
-    write_record: Callable[[str, str, Mapping[str, Any]], str] | None = None,
-    grace: float = END_GRACE_SECONDS,
-    clock: Clock = REAL_CLOCK,
+    world: Operations,
 ) -> int:
-    """Run one input document end to end. Returns the exit code.
+    """`run` over any ordered table of steps; `run` passes the real one (STEPS).
 
-    clock: the waiting seam (a Clock); a test passes a stand-in.
-    grace: seconds between asking the child to end and killing it; code passes it, a test passes a short one.
-    steps: the ordered (name, function) table, the real one by default, so a test can replace any step.
+    The table is plain data: the order of a run and the function each step is. It is an
+    argument so a by-value test can put a step that fails where one of the placeholder steps
+    (gates, set-up, fingerprints, stop confirmation, closing, delivery, tidying, tear-down)
+    stands: they touch nothing, so no operation can be made to fail inside them.
     """
     state: State = {
         "document_path": document_path,
         "out": out,
         "err": err,
+        "world": world,
         "facts": {},
         "stand_ins": {},
         "problems": {},
         "signal": None,
-        "grace": grace,
-        "clock": clock,
-        "build_receipt": build_receipt or decisions.build_receipt,
-        "write_record": write_record or records.write_outcome_record,
     }
-    previous = _install_handlers(state)
+    restore = _install_handlers(state)
     try:
-        for name, step in steps or STEPS:
+        for name, step in steps:
             state["facts"].update(decisions.facts_after_signal(state["facts"], state["signal"]))
             if decisions.step_runs(name, state["facts"]):
                 guarded(name, step, state)
     finally:
         boundary = state["stand_ins"].get("boundary")
         if boundary and boundary.get("process") is not None:
-            end_child(
-                boundary["process"], grace, clock
-            )  # whatever went wrong, nothing is left running
+            end_child(world, boundary["process"])  # whatever went wrong, nothing is left running
         if "conclusion" not in state:  # the last step did not run, or did not finish
             state["conclusion"] = conclude_run(state)
-        for number, handler in previous.items():
-            signal.signal(number, handler)
+        restore()
     for line in state["conclusion"]["stdout"]:
         out.write(line + "\n")
     for line in state["conclusion"]["stderr"]:

@@ -1,0 +1,93 @@
+"""The contract cases (tests/rehearsal/contract.py) against the simulated world, by value.
+
+No disk, no process and no time passes. The real half is tests/command/test_world_contract.py.
+"""
+
+import importlib
+import os
+import sys
+import unittest
+
+TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, TESTS)
+
+contract = importlib.import_module("rehearsal.contract")
+simulated = importlib.import_module("rehearsal.simulated_world")
+
+
+class SimulatedHarness:
+    def __init__(self, world):
+        self.world = world
+        self.folders = 0
+
+    def folder(self):
+        self.folders += 1
+        return self.world.make_folder(f"/area/folder-{self.folders}")
+
+    def names_in(self, folder):
+        return self.world.names_in(folder)
+
+    def argv(self, kind, ready=None, report=None):
+        behaviours = {
+            "exits_at_once": {"exits_after": 0},
+            "exits_with_three": {"exits_after": 0, "exit_code": 3},
+            "sleeps": {},
+            "reports_streams": {"exits_after": 0},
+            "reports_session": {"exits_after": 0},
+            "ignores_the_ask": {"obeys": ("kill",), "creates": (ready,) if ready else ()},
+        }
+        if kind in behaviours:
+            self.world.program(kind, **behaviours[kind])
+        return [kind]  # "not_a_program" is never registered
+
+    # The simulated world runs no program, so what a started child sees of its streams and
+    # session is what the simulated `start` is declared to give it: the same as the real one.
+    def streams_the_child_saw(self):
+        return ("null", "null", "null")
+
+    def session_the_child_saw(self):
+        return (True, True)
+
+    def make_a_name_that_leads_nowhere(self, path):
+        self.world.put_a_name_that_leads_nowhere(path)
+
+    def host_name(self):
+        return self.world.host
+
+    def environment(self):
+        return {"PATH": "/bin"}
+
+    def have_previous_handler(self, handler):
+        self.world.have_previous_handler(handler)
+
+    def send(self, name):
+        self.world.deliver(name)
+
+    def set_variable(self, name, value):
+        self.world.variables[name] = value
+
+
+class SimulatedWorldHoldsTheContract(contract.ContractCases, unittest.TestCase):
+    def setUp(self):
+        self.simulated = simulated.SimulatedWorld()
+        self.world = self.simulated.operations
+        self.harness = SimulatedHarness(self.simulated)
+
+    def test_waiting_moves_the_clock_by_exactly_the_time_asked(self):
+        for seconds in (0.01, 0.1, 3):
+            with self.subTest(seconds=seconds):
+                before = self.world.clock.now()
+                self.world.clock.wait(seconds)
+                self.assertAlmostEqual(self.world.clock.now() - before, seconds, places=9)
+
+    def test_a_signal_other_than_the_three_is_not_handed_to_the_handler(self):
+        # the real half shows that only these three are installed (it cannot send the others)
+        calls = []
+        self.world.signals.install(calls.append)
+        for name in ("SIGUSR1", "SIGQUIT", "SIGCHLD"):
+            self.simulated.deliver(name)
+        self.assertEqual(calls, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -237,6 +237,17 @@ def failed_step_after_error(step: str) -> str | None:
     return _STEP_FAILURES.get(step, (None, {}))[0]
 
 
+def exit_facts(returncode: int | None, signal_name: str | None) -> tuple[int | None, str | None]:
+    """From a child's return code and the name of the signal numbered by its negation, if there
+    is one: (exit code, signal name). A kill by signal has no exit code; a signal with no name
+    is called "signal N"."""
+    if returncode is None:
+        return None, None
+    if returncode < 0:
+        return None, signal_name or f"signal {-returncode}"
+    return returncode, None
+
+
 def facts_after_signal(facts: Facts, signal_name: str | None) -> Facts:
     """A signal that arrived before the executor started is a stop before launch.
 
@@ -582,6 +593,13 @@ def build_environment(
 
 
 # --------------------------------------------------------------------- the records
+
+
+def join_path(folder: str, name: str) -> str:
+    """A name inside a folder, written the way os.path.join writes it on a POSIX system."""
+    if not folder or folder.endswith("/"):
+        return folder + name
+    return f"{folder}/{name}"
 
 
 def build_header(
