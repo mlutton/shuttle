@@ -30,6 +30,7 @@ start no process and write nothing.
 """
 
 import ast
+import functools
 import importlib
 import io
 import os
@@ -361,10 +362,10 @@ MOCKING_EXEMPT = {
 }
 
 
-def _imported_names(tree):
+def _imported_names(nodes):
     """Names a file binds by importing: a module, or what `from m import x` takes."""
     names = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             names |= {a.asname or a.name.split(".")[0] for a in node.names}
         elif isinstance(node, ast.ImportFrom):
@@ -441,10 +442,10 @@ def mocking_problems(source, path):
     unittest.mock (or mock), calls patch (any `patch` or `patch.object`, as a call or a
     decorator), or assigns to, deletes or setattr()s an attribute of something it imported.
     Setting an item (`os.environ[name] = value`) is not an attribute and is not refused."""
-    tree = ast.parse(source)
-    imported = _imported_names(tree)
+    nodes = list(ast.walk(ast.parse(source)))  # once: this runs over every test file
+    imported = _imported_names(nodes)
     problems = []
-    for node in ast.walk(tree):
+    for node in nodes:
         for module in _mock_imports(node):
             problems.append(f"tests/{path} line {node.lineno} imports {module}")
         if isinstance(node, ast.Call):
@@ -463,12 +464,19 @@ def mocking_problems(source, path):
 
 
 def test_files(root=None):
-    """(path relative to tests/, source) for every .py file under tests/ except the tables'."""
+    """(path relative to tests/, source) for every .py file under tests/."""
     root = root or os.path.join(ROOT, "tests")
     return [
         (os.path.relpath(path, root).replace(os.sep, "/"), _read(path))
         for path in python_files(root)
     ]
+
+
+@functools.cache
+def files_that_patch():
+    """path -> problems, for each file under tests/ that puts a stand-in in by name. Read once."""
+    found = {path: mocking_problems(source, path) for path, source in test_files()}
+    return {path: problems for path, problems in found.items() if problems}
 
 
 def _read(path):
@@ -1124,15 +1132,14 @@ class TestNoTestPatchesAnything(unittest.TestCase):
         self.assertIn("sys.stdout", problem)
 
     def test_no_test_under_tests_patches_anything_except_the_ones_named_with_a_reason(self):
-        found = {path for path, source in test_files() if mocking_problems(source, path)}
-        self.assertEqual(found, set(MOCKING_EXEMPT))
+        self.assertEqual(set(files_that_patch()), set(MOCKING_EXEMPT))
 
     def test_every_exempt_file_exists_has_a_reason_and_still_patches(self):
-        files = dict(test_files())
         for path, reason in MOCKING_EXEMPT.items():
             with self.subTest(path=path):
+                self.assertTrue(os.path.exists(os.path.join(ROOT, "tests", path)))
                 self.assertGreaterEqual(len(reason.split()), 8, "say why, in a sentence")
-                self.assertTrue(mocking_problems(files[path], path), "no longer patches: remove it")
+                self.assertIn(path, files_that_patch(), "no longer patches: remove it")
 
 
 class TestNotTestedMarkers(unittest.TestCase):
