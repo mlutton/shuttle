@@ -11,7 +11,8 @@ import sys
 import tempfile
 import unittest
 
-from shuttle import core, run
+from shuttle.core import decisions as core
+from shuttle.shell import run
 
 
 class QuickClock(run.Clock):

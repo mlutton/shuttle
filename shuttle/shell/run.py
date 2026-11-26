@@ -1,11 +1,11 @@
 """The run form: the fifteen steps of a run, in order, as a thin shell.
 
 Each step gathers facts from the world (files, the clock, a process) into one
-facts dictionary and hands every decision to shuttle.core. Steps marked
-"stand-in" call a function in shuttle.stand_ins that returns a marked value.
+facts dictionary and hands every decision to shuttle.core.decisions. Steps marked
+"stand-in" call a function in shuttle.shell.stand_ins that returns a marked value.
 
 One guarantee: once the request id is claimed, every step runs under `guarded`
-and the conclusion runs in a `finally`. An error becomes a fact for the core.
+and the conclusion runs in a `finally`. An error becomes a fact for the decisions.
 A signal only sets a fact (the handlers never raise), and the wait polls for it.
 The ending is decided by a total function, the receipt falls back to a minimal
 one, and a record that cannot be written is printed instead.
@@ -26,8 +26,11 @@ from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 from typing import Any, TextIO
 
-from shuttle import __version__, command_driver, core, fixed, records, stand_ins
-from shuttle.shapes import Conclusion, Decision, Facts, LaunchSpec, Receipt, State, StepResult
+from shuttle import __version__
+from shuttle.core import decisions, fixed
+from shuttle.core.drivers import command
+from shuttle.core.shapes import Conclusion, Decision, Facts, LaunchSpec, Receipt, State, StepResult
+from shuttle.shell import records, stand_ins
 
 # The deadline (the time limit) and this grace are stand-ins until the boundary owns the time limit.
 END_GRACE_SECONDS = 3  # as of 2026-11-25: seconds between asking a child to end and killing it; passed in by code, never read from the world
@@ -100,7 +103,9 @@ def wait_for_the_cause(
     """Poll until the child exits, a signal is seen, or the limit passes. Returns the first cause seen."""
     deadline = clock.now() + limit_seconds
     while True:
-        cause = core.wait_cause(process.poll() is not None, clock.now() >= deadline, get_signal())
+        cause = decisions.wait_cause(
+            process.poll() is not None, clock.now() >= deadline, get_signal()
+        )
         if cause:
             return cause
         clock.sleep(_POLL_SECONDS)
@@ -143,7 +148,7 @@ def step_read_and_validate_document(state: State) -> None:
         return
     state["raw"] = raw
     state["input_hash"] = hashlib.sha256(data).hexdigest()
-    checked = core.validate_document(raw)
+    checked = decisions.validate_document(raw)
     if checked["header_source"] is None:
         facts["unreadable"] = True
         state["problem"] = "{}; nothing was done; fix the input document and run again".format(
@@ -160,7 +165,7 @@ def step_read_and_validate_document(state: State) -> None:
 
 def step_claim_request_id(state: State) -> None:
     facts, source = state["facts"], state["facts"]["header_source"]
-    header = core.build_header("request", source, uuid.uuid4().hex, _now())
+    header = decisions.build_header("request", source, uuid.uuid4().hex, _now())
     try:
         records.claim_request_record(
             source["records_location"],
@@ -169,17 +174,17 @@ def step_claim_request_id(state: State) -> None:
         )
     except records.RecordNotBuilt as error:
         facts["id_claim"] = "unusable"  # nothing is claimed; no record is written either way
-        state["problem"] = core.claim_problem(
+        state["problem"] = decisions.claim_problem(
             "not_built", source["request_id"], source["records_location"], str(error)
         )
     except FileExistsError as error:
         facts["id_claim"] = "used"
-        state["problem"] = core.claim_problem(
+        state["problem"] = decisions.claim_problem(
             "used", source["request_id"], source["records_location"], type(error).__name__
         )
     except OSError as error:
         facts["id_claim"] = "unusable"
-        state["problem"] = core.claim_problem(
+        state["problem"] = decisions.claim_problem(
             "unusable", source["request_id"], source["records_location"], type(error).__name__
         )
     else:
@@ -190,7 +195,7 @@ def step_run_input_checks_and_executor_driver_check(state: State) -> None:
     # The input checks are real in the first step (the document's shape). This step is the
     # executor driver's check and the check of the named environment variables.
     settings = state["raw"]["executor"]["settings"]
-    reason, text = core.executor_driver_check(
+    reason, text = decisions.executor_driver_check(
         settings["command"],
         state["raw"].get("environment", []),
         os.environ,
@@ -203,22 +208,24 @@ def step_run_input_checks_and_executor_driver_check(state: State) -> None:
 
 def step_run_gates(state: State) -> None:  # stand-in
     state["stand_ins"]["gates"] = stand_ins.run_gates([])
-    state["facts"]["gates"] = core.result_status(state["stand_ins"]["gates"])
+    state["facts"]["gates"] = decisions.result_status(state["stand_ins"]["gates"])
 
 
 def step_set_up_run_area(state: State) -> None:  # stand-in
-    state["stand_ins"]["setup"] = stand_ins.set_up_run_area(command_driver.declare()["needs_setup"])
-    state["facts"]["setup"] = core.result_status(state["stand_ins"]["setup"])
+    state["stand_ins"]["setup"] = stand_ins.set_up_run_area(command.declare()["needs_setup"])
+    state["facts"]["setup"] = decisions.result_status(state["stand_ins"]["setup"])
 
 
 def step_take_opening_fingerprint(state: State) -> None:  # stand-in
     state["stand_ins"]["opening_fingerprint"] = stand_ins.take_opening_fingerprint(None)
-    state["facts"]["opening_freeze"] = core.result_status(state["stand_ins"]["opening_fingerprint"])
+    state["facts"]["opening_freeze"] = decisions.result_status(
+        state["stand_ins"]["opening_fingerprint"]
+    )
 
 
 def step_launch_executor(state: State) -> None:
-    spec = command_driver.launch(state["raw"]["executor"]["settings"])
-    environment = core.build_environment(state["raw"].get("environment", []), os.environ)
+    spec = command.launch(state["raw"]["executor"]["settings"])
+    environment = decisions.build_environment(state["raw"].get("environment", []), os.environ)
     state["started_at"] = _now()
     state["clock_start"] = datetime.datetime.now(datetime.UTC)
     state["stand_ins"]["boundary"] = start_in_boundary(spec, environment)
@@ -250,7 +257,7 @@ def step_stop_everything_and_confirm_empty(state: State) -> None:  # stand-in
     state["stand_ins"]["stop_confirmation"] = stand_ins.stop_and_confirm_empty(
         state["stand_ins"]["boundary"]
     )
-    status = core.result_status(state["stand_ins"]["stop_confirmation"])
+    status = decisions.result_status(state["stand_ins"]["stop_confirmation"])
     if (
         state["facts"].get("stop") != "not_confirmed"
     ):  # the wait may already have failed to end the child
@@ -258,21 +265,21 @@ def step_stop_everything_and_confirm_empty(state: State) -> None:  # stand-in
 
 
 def step_observe(state: State) -> None:
-    state["executor_driver_observations"] = command_driver.observe(fixed.NONE, fixed.CANNOT_TELL)
+    state["executor_driver_observations"] = command.observe(fixed.NONE, fixed.CANNOT_TELL)
 
 
 def step_take_closing_freeze(state: State) -> None:  # stand-in
     state["stand_ins"]["closing_freeze"] = stand_ins.take_closing_freeze(
         None, state["stand_ins"].get("opening_fingerprint")
     )
-    state["facts"]["closing_freeze"] = core.result_status(state["stand_ins"]["closing_freeze"])
+    state["facts"]["closing_freeze"] = decisions.result_status(state["stand_ins"]["closing_freeze"])
 
 
 def step_deliver(state: State) -> None:  # stand-in
     state["stand_ins"]["delivery"] = stand_ins.deliver(
         None, state["stand_ins"].get("closing_freeze")
     )
-    state["facts"]["delivery"] = core.result_status(state["stand_ins"]["delivery"])
+    state["facts"]["delivery"] = decisions.result_status(state["stand_ins"]["delivery"])
 
 
 def step_move_kept_files(state: State) -> None:  # stand-in
@@ -302,7 +309,7 @@ def _full_receipt(
             "signal": facts.get("child_signal"),
             "executor_driver_observations": state.get("executor_driver_observations"),
             "stand_ins": state["stand_ins"],
-            "reason_text": core.reason_text(decision, state["problems"]),
+            "reason_text": decisions.reason_text(decision, state["problems"]),
         },
     )
 
@@ -310,26 +317,26 @@ def _full_receipt(
 def conclude_run(state: State) -> Conclusion:
     """The conclusion: decide, build the receipt, write the record. Each part has its own fallback."""
     facts = state["facts"]
-    kind = core.outcome_kind(facts)
+    kind = decisions.outcome_kind(facts)
     if kind == "unreadable":
-        return core.conclude({"kind": "unreadable", "problem": state.get("problem")})
-    decision = core.decide_ending(facts)
+        return decisions.conclude({"kind": "unreadable", "problem": state.get("problem")})
+    decision = decisions.decide_ending(facts)
     if kind == "not_recorded":
-        return core.conclude(
+        return decisions.conclude(
             {"kind": "not_recorded", "decision": decision, "problem": state.get("problem")}
         )
     try:
         receipt = _full_receipt(state, decision, state["build_receipt"])
     except BaseException:
-        receipt = core.minimal_receipt(decision)
+        receipt = decisions.minimal_receipt(decision)
     source = facts["header_source"]
     try:
-        header = core.build_header("outcome", source, uuid.uuid4().hex, _now())
+        header = decisions.build_header("outcome", source, uuid.uuid4().hex, _now())
         path = state["write_record"](
             source["records_location"], source["request_id"], {"header": header, "receipt": receipt}
         )
     except BaseException as error:  # nothing may prevent the receipt: print it instead
-        return core.conclude(
+        return decisions.conclude(
             {
                 "kind": "write_failed",
                 "decision": decision,
@@ -337,7 +344,7 @@ def conclude_run(state: State) -> Conclusion:
                 "receipt_text": json.dumps(receipt, indent=2, default=str),
             }
         )
-    return core.conclude({"kind": "written", "decision": decision, "path": path})
+    return decisions.conclude({"kind": "written", "decision": decision, "path": path})
 
 
 def step_write_outcome_record(state: State) -> None:
@@ -369,8 +376,8 @@ def guarded(name: str, step: Callable[[State], None], state: State) -> None:
     try:
         step(state)
     except BaseException as error:
-        facts.update(core.facts_after_error(name))
-        failed = core.failed_step_after_error(name)
+        facts.update(decisions.facts_after_error(name))
+        failed = decisions.failed_step_after_error(name)
         if failed:
             state["problems"][failed] = "the step {} failed ({}); nothing more can be said".format(
                 name.replace("_", " "),
@@ -421,14 +428,14 @@ def run(
         "signal": None,
         "grace": grace,
         "clock": clock,
-        "build_receipt": build_receipt or core.build_receipt,
+        "build_receipt": build_receipt or decisions.build_receipt,
         "write_record": write_record or records.write_outcome_record,
     }
     previous = _install_handlers(state)
     try:
         for name, step in steps or STEPS:
-            state["facts"].update(core.facts_after_signal(state["facts"], state["signal"]))
-            if core.step_runs(name, state["facts"]):
+            state["facts"].update(decisions.facts_after_signal(state["facts"], state["signal"]))
+            if decisions.step_runs(name, state["facts"]):
                 guarded(name, step, state)
     finally:
         boundary = state["stand_ins"].get("boundary")

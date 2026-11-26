@@ -8,7 +8,8 @@ not allow.
 import itertools
 import unittest
 
-from shuttle import core, fixed
+from shuttle.core import decisions as core
+from shuttle.core import fixed
 
 
 def facts(**changes):

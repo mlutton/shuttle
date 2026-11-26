@@ -13,7 +13,7 @@ import tempfile
 import time
 import unittest
 
-from shuttle import fixed
+from shuttle.core import fixed
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
