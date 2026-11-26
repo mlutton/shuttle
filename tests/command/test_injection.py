@@ -13,6 +13,7 @@ import unittest
 
 from shuttle.core import decisions as core
 from shuttle.shell import run
+from shuttle.world import real
 
 
 class QuickClock(run.Clock):
@@ -91,7 +92,9 @@ class InjectionTables(unittest.TestCase):
 
     def run_it(self, steps=None, **kwargs):
         out, err = io.StringIO(), io.StringIO()
-        code = run.run(self.doc, out, err, steps=steps, clock=QuickClock(), **kwargs)
+        code = run.run(
+            self.doc, out, err, real.OPERATIONS, steps=steps, clock=QuickClock(), **kwargs
+        )
         return code, out.getvalue().splitlines(), err.getvalue()
 
     def use_script(self, code):

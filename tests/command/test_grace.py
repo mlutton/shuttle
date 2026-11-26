@@ -15,6 +15,7 @@ import time
 import unittest
 
 from shuttle.shell import run
+from shuttle.world import real
 
 LIMIT = 0.5  # long enough that the script has started and set its handler before the limit passes
 GRACE = 0.05
@@ -62,7 +63,7 @@ class FullFlowOfATimeLimit(unittest.TestCase):
                 )
             out, err = io.StringIO(), io.StringIO()
             started = time.monotonic()
-            code = run.run(document, out, err, grace=GRACE)
+            code = run.run(document, out, err, real.OPERATIONS, grace=GRACE)
             elapsed = time.monotonic() - started
             self.assertEqual(code, 0, err.getvalue())
             self.assertEqual(out.getvalue().splitlines()[-1], "time_limit")

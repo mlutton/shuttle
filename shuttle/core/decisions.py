@@ -584,6 +584,13 @@ def build_environment(
 # --------------------------------------------------------------------- the records
 
 
+def join_path(folder: str, name: str) -> str:
+    """A name inside a folder, written the way os.path.join writes it on a POSIX system."""
+    if not folder or folder.endswith("/"):
+        return folder + name
+    return f"{folder}/{name}"
+
+
 def build_header(
     record_type: str, header_source: HeaderSource, record_id: str, time: str
 ) -> dict[str, Any]:

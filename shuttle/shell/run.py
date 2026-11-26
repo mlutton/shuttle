@@ -29,7 +29,16 @@ from typing import Any, TextIO
 from shuttle import __version__
 from shuttle.core import decisions, fixed
 from shuttle.core.drivers import command
-from shuttle.core.shapes import Conclusion, Decision, Facts, LaunchSpec, Receipt, State, StepResult
+from shuttle.core.shapes import (
+    Conclusion,
+    Decision,
+    Facts,
+    LaunchSpec,
+    Operations,
+    Receipt,
+    State,
+    StepResult,
+)
 from shuttle.shell import records, stand_ins
 
 # The deadline (the time limit) and this grace are stand-ins until the boundary owns the time limit.
@@ -168,6 +177,7 @@ def step_claim_request_id(state: State) -> None:
     header = decisions.build_header("request", source, uuid.uuid4().hex, _now())
     try:
         records.claim_request_record(
+            state["world"],
             source["records_location"],
             source["request_id"],
             {"header": header, "input": state["raw"]},
@@ -406,6 +416,7 @@ def run(
     document_path: str,
     out: TextIO,
     err: TextIO,
+    world: Operations,
     steps: Sequence[tuple[str, Callable[[State], None]]] | None = None,
     build_receipt: Callable[[Decision, Facts], Receipt] | None = None,
     write_record: Callable[[str, str, Mapping[str, Any]], str] | None = None,
@@ -422,6 +433,7 @@ def run(
         "document_path": document_path,
         "out": out,
         "err": err,
+        "world": world,
         "facts": {},
         "stand_ins": {},
         "problems": {},
@@ -429,7 +441,12 @@ def run(
         "grace": grace,
         "clock": clock,
         "build_receipt": build_receipt or decisions.build_receipt,
-        "write_record": write_record or records.write_outcome_record,
+        "write_record": write_record
+        or (
+            lambda location, request_id, record: records.write_outcome_record(
+                world, location, request_id, record
+            )
+        ),
     }
     previous = _install_handlers(state)
     try:
