@@ -253,7 +253,7 @@ def step_stop_everything_and_confirm_empty(state: RunState) -> None:  # stand-in
 
 
 def step_observe(state: RunState) -> None:
-    state["executor_driver_observations"] = command.observe(fixed.NONE, fixed.CANNOT_TELL)
+    state["executor_driver_observations"] = command.observe()
 
 
 def step_take_closing_freeze(state: RunState) -> None:  # stand-in
@@ -286,7 +286,7 @@ def _full_receipt(state: RunState, decision: Decision) -> Receipt:
             "receipt_id": world.identity.new_id(),
             "execution_version": __version__,
             "host": world.identity.host_name(),
-            "input_hash": state.get("input_hash", fixed.CANNOT_TELL),
+            "input_hash": state.get("input_hash"),
             "launched": facts.get("launch") == "ok",
             "started_at": state.get("started_at"),
             "ended_at": state.get("ended_at"),

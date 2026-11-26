@@ -6,7 +6,7 @@ A caller hands Shuttle one input document. Shuttle checks it, starts one executo
 
 ## Status
 
-Early build. It is not usable yet, and it may not be for a while. The first increment is a skeleton: `python3 -m shuttle run <input document>` runs one plain command from start to finish (ending it when its time limit runs out or the command is interrupted) and writes a request record and an outcome record. Only the run form exists. The boundary (the command runs as a plain child process, and confirming that everything it started is stopped is a stand-in), the fingerprints of the place, delivery and the other three forms are stand-ins or not built; a receipt field fed by a stand-in says "cannot tell". The code and its tests are published as they are written, so the tests are the best account of what works today.
+Early build. It is not usable yet, and it may not be for a while. The first increment is a skeleton: `python3 -m shuttle run <input document>` runs one plain command from start to finish (ending it when its time limit runs out or the command is interrupted) and writes a request record and an outcome record. Only the run form exists. The boundary (the command runs as a plain child process, and confirming that everything it started is stopped is a stand-in), the fingerprints of the place, delivery and the other three forms are stand-ins or not built; a receipt field fed by a stand-in says "not built". The code and its tests are published as they are written, so the tests are the best account of what works today.
 
 ## What it will promise
 
@@ -21,6 +21,10 @@ Early build. It is not usable yet, and it may not be for a while. The first incr
 - Outside: a command-line tool with four forms (run, check, stop, status).
 - Inside: functions over plain data, in three folders. Each decision is a pure function in `shuttle/core/`. The code that gathers facts, hands them to the core and acts on the answer is `shuttle/shell/`; it touches nothing itself. Everything Shuttle does to the world (files, processes, the clock, signals, the environment, who and what it is) is one small set of operations, a record of functions typed in `shuttle/core/shapes.py` (`Operations`) and passed in; the real set is `shuttle/world/`, thin and holding no decisions. The command line wires the real set in (`shuttle/shell/cli.py`) and the process's arguments and standard streams come from the world's entry (`shuttle/world/real.py`).
 - Python, standard library only.
+
+## The records
+
+Two records are written per run, both JSON: a request record (a header, and `input`, the document's exact text) before anything starts, and an outcome record (a header, and the receipt) when the run ends. Every field of the receipt is a pair, `{"state": ..., "value": ...}`: the state says how the value is known, so a field whose own text is the word "none" is not mistaken for the state "none". The four states, in the one list of fixed values (`shuttle/core/fixed.py`, `STATES`), are `value` (execution looked and found this), `none` (it looked and there is nothing), `cannot tell` (it could not look) and `not built` (the step behind the field is still a stand-in; when the last stand-in is replaced, the state is removed from the list). Only the state `value` carries a value; the others carry `null`. A receipt is built only from pairs: a bare string where a pair belongs, or a field left out, is refused.
 
 ## Checking a change
 

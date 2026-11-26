@@ -123,75 +123,82 @@ class Facts(TypedDict, total=False):
 # ------------------------------------------------------------------ the receipt
 
 
+class Pair(TypedDict):
+    """One receipt field: how the value is known (a state in `fixed.STATES`), and the value."""
+
+    state: str
+    value: JsonValue  # None unless the state is "value"
+
+
 class EndingGroup(TypedDict):
-    ending: JsonValue
-    reason: JsonValue
-    failed_step: JsonValue
-    reason_text: JsonValue
-    receipt_id: JsonValue
-    everything_stopped: JsonValue
-    execution_version: JsonValue
-    host: JsonValue
+    ending: Pair
+    reason: Pair
+    failed_step: Pair
+    reason_text: Pair
+    receipt_id: Pair
+    everything_stopped: Pair
+    execution_version: Pair
+    host: Pair
 
 
 class ExecutionGroup(TypedDict):
-    started_at: JsonValue
-    ended_at: JsonValue
-    observed_runtime: JsonValue
-    duration_gates: JsonValue
-    duration_opening_freeze: JsonValue
-    duration_executor: JsonValue
-    duration_closing_freeze: JsonValue
-    duration_delivery: JsonValue
-    input_hash: JsonValue
-    reference_hashes: JsonValue
-    fingerprint_before: JsonValue
-    fingerprint_after: JsonValue
-    changed_nothing: JsonValue
-    files_added: JsonValue
-    files_changed: JsonValue
-    files_deleted: JsonValue
-    files_list_kept_file: JsonValue
-    delivered: JsonValue
-    delivery_branch: JsonValue
-    delivery_branch_reason: JsonValue
-    exit_code: JsonValue
-    signal: JsonValue
-    peak_memory: JsonValue
-    processor_time: JsonValue
-    session_file_kept_at: JsonValue
-    teardown_failure: JsonValue
-    stop_reason: JsonValue
-    stop_asker: JsonValue
+    started_at: Pair
+    ended_at: Pair
+    observed_runtime: Pair
+    duration_gates: Pair
+    duration_opening_freeze: Pair
+    duration_executor: Pair
+    duration_closing_freeze: Pair
+    duration_delivery: Pair
+    input_hash: Pair
+    reference_hashes: Pair
+    fingerprint_before: Pair
+    fingerprint_after: Pair
+    changed_nothing: Pair
+    files_added: Pair
+    files_changed: Pair
+    files_deleted: Pair
+    files_list_kept_file: Pair
+    delivered: Pair
+    delivery_branch: Pair
+    delivery_branch_reason: Pair
+    exit_code: Pair
+    signal: Pair
+    peak_memory: Pair
+    processor_time: Pair
+    session_file_kept_at: Pair
+    teardown_failure: Pair
+    stop_reason: Pair
+    stop_asker: Pair
 
 
 class ExecutorDriverGroup(TypedDict):
-    executor_driver_name: JsonValue
-    executor_driver_version: JsonValue
-    tool_version: JsonValue
-    model: JsonValue
-    effort: JsonValue
-    tokens_in: JsonValue
-    tokens_out: JsonValue
-    tokens_cached: JsonValue
-    activity: JsonValue
-    session_id: JsonValue
-    refused_actions: JsonValue
-    quota_level: JsonValue
-    vendor_limit_reached: JsonValue
-    vendor_limit_reset: JsonValue
-    tool_made_own_commits: JsonValue
-    load_lists_differ: JsonValue
-    load_lists_kept_file: JsonValue
-    changed_self_loaded_file: JsonValue
-    waiting_question: JsonValue
+    executor_driver_name: Pair
+    executor_driver_version: Pair
+    tool_version: Pair
+    model: Pair
+    effort: Pair
+    tokens_in: Pair
+    tokens_out: Pair
+    tokens_cached: Pair
+    activity: Pair
+    session_id: Pair
+    refused_actions: Pair
+    quota_level: Pair
+    vendor_limit_reached: Pair
+    vendor_limit_reset: Pair
+    tool_made_own_commits: Pair
+    load_lists_differ: Pair
+    load_lists_kept_file: Pair
+    changed_self_loaded_file: Pair
+    waiting_question: Pair
 
 
 class ExecutorGroup(TypedDict):
-    statement_state: JsonValue
-    statement_hash: JsonValue
-    statement_location: JsonValue
-    claim: JsonValue
+    statement_state: Pair
+    statement_hash: Pair
+    statement_location: Pair
+    claim: Pair
 
 
 class Receipt(TypedDict):
@@ -207,7 +214,7 @@ class ReceiptFacts(TypedDict):
     receipt_id: str
     execution_version: str
     host: str
-    input_hash: str
+    input_hash: str | None
     launched: bool
     started_at: str | None
     ended_at: str | None

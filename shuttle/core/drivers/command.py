@@ -4,6 +4,7 @@ An executor driver offers four functions (check, launch, observe, declare) and
 its declarations as data. It never names an ending. There is no base class.
 """
 
+from shuttle.core import pairs
 from shuttle.core.shapes import CommandSettings, ExecutorDriverGroup, LaunchSpec
 
 NAME = "command"
@@ -33,29 +34,30 @@ def launch(settings: CommandSettings) -> LaunchSpec:
     return {"argv": [settings["command"]] + list(settings["arguments"])}
 
 
-def observe(none_fact: str, cannot_tell: str) -> ExecutorDriverGroup:
+def observe() -> ExecutorDriverGroup:
     """Pure: the driver group of the receipt. A plain command reports nothing of its own.
 
     "none" means looked and nothing there; "cannot tell" means could not look.
     """
+    nothing = pairs.none()
     return {
-        "executor_driver_name": NAME,
-        "executor_driver_version": VERSION,
-        "tool_version": none_fact,
-        "model": none_fact,
-        "effort": none_fact,
-        "tokens_in": none_fact,
-        "tokens_out": none_fact,
-        "tokens_cached": none_fact,
-        "activity": none_fact,
-        "session_id": none_fact,
-        "refused_actions": none_fact,
-        "quota_level": none_fact,
-        "vendor_limit_reached": none_fact,
-        "vendor_limit_reset": none_fact,
-        "tool_made_own_commits": cannot_tell,
-        "load_lists_differ": none_fact,
-        "load_lists_kept_file": none_fact,
-        "changed_self_loaded_file": none_fact,
-        "waiting_question": none_fact,
+        "executor_driver_name": pairs.value(NAME),
+        "executor_driver_version": pairs.value(VERSION),
+        "tool_version": nothing,
+        "model": nothing,
+        "effort": nothing,
+        "tokens_in": nothing,
+        "tokens_out": nothing,
+        "tokens_cached": nothing,
+        "activity": nothing,
+        "session_id": nothing,
+        "refused_actions": nothing,
+        "quota_level": nothing,
+        "vendor_limit_reached": nothing,
+        "vendor_limit_reset": nothing,
+        "tool_made_own_commits": pairs.cannot_tell(),
+        "load_lists_differ": nothing,
+        "load_lists_kept_file": nothing,
+        "changed_self_loaded_file": nothing,
+        "waiting_question": nothing,
     }

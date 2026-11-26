@@ -7,8 +7,13 @@ from typing import Final
 
 FORMAT_VERSION = 1
 
+# The four states of a receipt field, in the one list. A field is a pair of a state and a value.
+VALUE = "value"  # looked, and found this
 NONE = "none"  # looked, and there is nothing
 CANNOT_TELL = "cannot tell"  # could not look
+NOT_BUILT = "not built"  # the step behind this field is still a stand-in
+# While stand-ins exist NOT_BUILT is a state; when the last one is replaced, remove it from here.
+STATES = (VALUE, NONE, CANNOT_TELL, NOT_BUILT)
 
 ENDINGS = (
     "ended_by_itself",
