@@ -33,7 +33,11 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PACKAGE = os.path.join(ROOT, "shuttle")
 sys.path.insert(0, os.path.join(ROOT, "checks"))
+sys.path.insert(0, os.path.join(ROOT, "tests"))
 report = importlib.import_module("report")  # find_markers: the one definition of a marker
+# The reviewers' attack lists, as data (see the README, "Hostile-case tables").
+IMPORTS = importlib.import_module("hostile.imports_table").IMPORTS
+SUPPRESSIONS = importlib.import_module("hostile.suppressions_table").SUPPRESSIONS
 
 # Standard library modules a core module may import: each touches nothing. A module not on
 # this list is refused in the core, so a module nobody thought of (codecs, zipfile, fcntl)
@@ -484,18 +488,6 @@ class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
                 (problem,) = problems_of(source)
                 self.assertIn("neither shuttle/core/ nor shuttle/shell/", problem)
 
-    def test_core_importing_another_core_module_is_fine(self):
-        for source in (
-            "from shuttle.core import fixed",
-            "from shuttle.core.fixed import NONE",
-            "from . import fixed",
-            "from .fixed import NONE",
-            "import shuttle.core.fixed",
-            "from shuttle import __version__",
-        ):
-            with self.subTest(source=source):
-                self.assertEqual(problems_of(source), [])
-
     def test_a_relative_import_from_a_sub_folder_resolves_to_its_real_module(self):
         drivers = "core/drivers/command.py"
         self.assertEqual(problems_of("from .. import fixed", drivers), [])
@@ -512,51 +504,11 @@ class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
                 self.assertIn(f"the core imports {name}", problems[0])
                 self.assertIn("allow-list", problems[0])
 
-    def test_core_importing_an_allowed_standard_library_module_is_fine(self):
-        for name in sorted(CORE_STDLIB_ALLOWED):
-            with self.subTest(name=name):
-                self.assertEqual(problems_of(f"import {name}"), [])
-        self.assertEqual(problems_of("from collections.abc import Mapping"), [])
-        self.assertEqual(problems_of("from typing import Any"), [])
-
-    def test_the_shell_may_import_any_standard_library_module_and_the_core(self):
-        self.assertEqual(problems_of("import os, subprocess, codecs", SHELL), [])
-        self.assertEqual(problems_of("from shuttle.core import decisions", SHELL), [])
-        self.assertEqual(problems_of("from shuttle.shell import records", SHELL), [])
-
 
 class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
-    SPELLINGS = (
-        "import os  # noqa",
-        "import os  # NOQA",
-        "import os  #noqa",
-        "import os  # noqa: TID251",
-        "import os  #noqa:TID251",
-        "import os  # noqa : TID251",
-        "import os  # noqa: tid251",
-        "import os  # noqa: E501, TID251",
-        "import os  # noqa: E501 TID251",
-        "import os  # noqa:TID251 because",
-        "import os  # some words # noqa: TID251",
-        "import os  # noqa: TID",
-        "import os  # noqa: TID2",
-        "import os  # noqa: ALL",
-        "import os  # noqa:",
-        "# ruff: noqa\nimport os",
-        "# ruff: noqa: TID251\nimport os",
-        "# ruff:noqa:TID251\nimport os",
-        "# RUFF: NOQA: TID251\nimport os",
-        "# ruff: noqa: E501, TID251\nimport os",
-        "# ruff: noqa: ALL\nimport os",
-        "# flake8: noqa\nimport os",
-        "# flake8: noqa: TID251\nimport os",
-        "import os  # ruff: noqa: TID251",
-        "# ruff: disable[TID251]\nimport os\n# ruff: enable[TID251]",
-        "# ruff: disable[E501, TID251]\nimport os",
-        "# ruff: ignore[TID251]\nimport os",
-        "import os  # ruff: ignore[TID251]",
-        "import os  # ruff: ignore[]",
-    )
+    # Every spelling the rule test must refuse, from the suppression table
+    # (tests/hostile/suppressions_table.py): all that ruff honours and the ones it does not.
+    SPELLINGS = tuple(source for _, source, _, refused in SUPPRESSIONS if refused)
 
     def test_every_spelling_is_refused_naming_the_file_and_where_the_code_belongs(self):
         for source in self.SPELLINGS:
@@ -598,6 +550,65 @@ class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
         for path, source in package_files():
             with self.subTest(path=path):
                 self.assertEqual(noqa_problems(source, path), [])
+
+
+class TestTheImportTable(unittest.TestCase):
+    """tests/hostile/imports_table.py: the forms the reviews tried, each with its verdict."""
+
+    @staticmethod
+    def place(index, folder):
+        return folder if folder.endswith(".py") else f"{folder}/row_{index:03d}.py"
+
+    def test_the_rule_test_refuses_each_row_marked_both_or_rule_test_and_allows_the_rest(self):
+        for index, (label, source, folder, caught_by, _) in enumerate(IMPORTS):
+            with self.subTest(label=label, source=source):
+                self.assertIn(caught_by, ("both", "rule test", "lint", None))
+                problems = check_module(source, self.place(index, folder))
+                if caught_by in ("both", "rule test"):
+                    self.assertTrue(problems, "the rule test lets a refused form through")
+                else:
+                    self.assertEqual(problems, [])
+
+    def test_the_table_covers_the_allow_list_and_every_kind_of_form(self):
+        sources = [source for _, source, _, _, _ in IMPORTS]
+        for name in sorted(CORE_STDLIB_ALLOWED):
+            with self.subTest(name=name):
+                self.assertTrue(
+                    any(
+                        f"import {name}" in source or f"from {name}" in source for source in sources
+                    )
+                )
+        kinds = {caught for _, _, _, caught, _ in IMPORTS}
+        self.assertEqual(kinds, {"both", "rule test", "lint", None})
+        labels = [label for label, *_ in IMPORTS]
+        self.assertEqual(len(labels), len(set(labels)))
+        places = [(source, folder) for _, source, folder, *_ in IMPORTS]
+        self.assertEqual(len(places), len(set(places)))
+
+
+class TestTheSuppressionTable(unittest.TestCase):
+    """tests/hostile/suppressions_table.py: what the rule test must do with each spelling."""
+
+    def test_the_rule_test_refuses_exactly_the_spellings_the_table_says_it_refuses(self):
+        for label, source, _, refused in SUPPRESSIONS:
+            with self.subTest(label=label, source=source):
+                problems = [p for p in check_module(source, CORE) if "lint ignore" in p]
+                self.assertEqual(bool(problems), refused)
+
+    def test_the_rule_test_refuses_every_spelling_the_table_says_ruff_honours(self):
+        # the guard that matters: a spelling that silences the linter and the rule test too
+        for label, source, honoured, refused in SUPPRESSIONS:
+            if honoured:
+                with self.subTest(label=label, source=source):
+                    self.assertTrue(refused, "ruff honours it and the rule test lets it by")
+
+    def test_the_table_holds_each_kind_of_spelling_once(self):
+        sources = [source for _, source, _, _ in SUPPRESSIONS]
+        self.assertEqual(len(sources), len(set(sources)))
+        self.assertGreaterEqual(len(sources), 85)
+        self.assertTrue(any(h for _, _, h, _ in SUPPRESSIONS))
+        self.assertTrue(any(r and not h for _, _, h, r in SUPPRESSIONS))
+        self.assertTrue(any(not r for _, _, _, r in SUPPRESSIONS))
 
 
 class TestTheCoreMentionsNoBuiltinThatReachesTheWorld(unittest.TestCase):

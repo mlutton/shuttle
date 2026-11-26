@@ -21,8 +21,10 @@ def escape_char(char: str) -> str:
         return "\\n"
     if char == "\t":
         return "\\t"
-    if code < 0x20 or 0x7F <= code <= 0x9F:
+    if code < 0x20 or code == 0x7F:
         return f"\\x{code:02x}"
+    if 0x80 <= code <= 0x9F:  # not \x80 etc.: that is how a byte that is not UTF-8 is shown
+        return f"\\u{code:04x}"
     if 0xDC80 <= code <= 0xDCFF:  # a byte that was not valid UTF-8, kept by surrogateescape
         return f"\\x{code - 0xDC00:02x}"
     if code in _INVISIBLE or 0xD800 <= code <= 0xDFFF:

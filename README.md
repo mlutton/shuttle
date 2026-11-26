@@ -67,6 +67,14 @@ The tests are sorted by seam, all run by that one command:
 
 The `tests (unittest)` workflow runs the check on every pull request. Its `base check (unittest)` job also runs the base branch's copy of `checks/all.sh` against the pull request's files, so a pull request cannot pass by weakening the script, and lists in the job summary any guard files (changed, added or deleted; a moved file shows as deleted from its old path) the pull request changes (`checks/`, `.githooks/`, `.github/`, `pyproject.toml`, `requirements-dev.txt`, `tests/by_value/test_rules.py`). It does not cover the workflow file or the lint configuration, which still come from the pull request; the summary is how a reviewer sees them.
 
+## Hostile-case tables
+
+The cases reviewers used to rebuild by hand for every pull request are kept as data in `tests/hostile/`, three tables with no logic in them: `names_table.py` (file names that break careless code: a space, a newline, a backtick, bytes that are not UTF-8, look-alikes of the guard folders; each row says whether a real filesystem can hold it), `imports_table.py` (the forms by which a core module might reach the shell, the entry file, the world or a third-party package, and the forms that must stay allowed; each row says whether the rule test, the linter or both refuse it) and `suppressions_table.py` (every lint-ignore spelling tried in review, whether the pinned ruff honours it, and whether the rule test must refuse it). A row says what it attacks; a row that exposed a function's bug and could not be fixed there is marked as a known gap with the reason, and its test fails if the gap closes.
+
+- The import table drives `check_module` in `tests/by_value/test_rules.py` and, in one real ruff run, checks the "which guard" column against the real linter. The suppression table is checked against the real ruff in one run, so an upgrade that makes ruff honour a spelling the rule test lets through fails a test instead of opening a hole.
+- A function in `checks/*.py` that takes file names (a parameter named like `path`, `name`, `root`, `changed`, `links`; the full set is `NAME_PARAMETERS` in `tests/by_value/test_name_functions.py`) must be run against the whole names table: add a test to `tests/by_value/test_names_table.py` that loops the table and states the function's invariant in its name, then register the function in `tests/hostile/registry.py`. A function with such a parameter that is not registered fails the rule test, naming the function and where to add it. A function that does not carry file names can be exempted there, with a reason.
+- To add a case, add a row. The tests that loop a table need no change.
+
 ## The per-run report
 
 ```

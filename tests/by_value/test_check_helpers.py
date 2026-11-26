@@ -19,7 +19,7 @@ class EscapeNameTest(unittest.TestCase):
         self.assertEqual(names.escape_name("a\nb\tc\\d\x01"), "a\\nb\\tc\\\\d\\x01")
 
     def test_c1_controls_and_bidirectional_controls_are_escaped(self):
-        self.assertEqual(names.escape_name("a\x85b\x9fc"), "a\\x85b\\x9fc")
+        self.assertEqual(names.escape_name("a\x85b\x9fc"), "a\\u0085b\\u009fc")
         self.assertEqual(
             names.escape_name("a\u202eb\u2066c\u200fd\u2029"), "a\\u202eb\\u2066c\\u200fd\\u2029"
         )
