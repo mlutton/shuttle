@@ -2,4 +2,4 @@
 operations would be, and the cases both are held to. See simulated_world.py and contract.py.
 
 Not to be confused with shuttle/shell/stand_ins.py, which holds placeholder steps of a run
-(gates, set-up, fingerprints, delivery). This holds a stand-in for the world."""
+(set-up, fingerprints, delivery). This holds a stand-in for the world."""

@@ -20,10 +20,10 @@ import contextlib
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
-from typing import TextIO
+from typing import Any, TextIO
 
 from shuttle import __version__
-from shuttle.core import decisions, fixed
+from shuttle.core import decisions, fixed, refusals
 from shuttle.core.drivers import command
 from shuttle.core.shapes import (
     Conclusion,
@@ -36,7 +36,7 @@ from shuttle.core.shapes import (
     RunState,
     StepResult,
 )
-from shuttle.shell import records, stand_ins
+from shuttle.shell import gates, input_checks, records, stand_ins
 
 # The deadline (the time limit) and this grace are stand-ins until the boundary owns the time limit.
 END_GRACE_SECONDS = 3  # as of 2026-11-25: seconds between asking a child to end and killing it; a fixed policy, not read from the world
@@ -110,6 +110,22 @@ def start_in_boundary(
 
 
 def step_read_and_validate_document(state: RunState) -> None:
+    """The first step of a run: read and validate the document, refuse one that holds a
+    credential-like environment value before anything is claimed or written, print the id."""
+    read_and_validate_document(state)
+    raw = state.get("raw")
+    refusal = refusals.check_credential_values(
+        raw.get("environment") if isinstance(raw, dict) else None
+    )
+    if refusal and not state["facts"].get("unreadable"):
+        state["facts"]["unreadable"] = True
+        state["problem"] = refusal["problem"]
+        return
+    print_request_id(state)
+
+
+def read_and_validate_document(state: RunState) -> None:
+    """Read and validate the document; print nothing. The check form uses this one."""
     facts = state["facts"]
     try:
         data = state["world"].files.read(state["document_path"])
@@ -121,6 +137,8 @@ def step_read_and_validate_document(state: RunState) -> None:
             f"cannot read the input document as JSON ({type(error).__name__}); nothing was done; give a readable JSON file"
         )
         return
+    if isinstance(raw, dict) and "request_id" not in raw:
+        raw = refusals.fill_request_id(raw, state["world"].identity.new_id())
     state["raw"] = raw
     state["input_text"] = text
     state["input_hash"] = hashlib.sha256(data).hexdigest()
@@ -135,11 +153,17 @@ def step_read_and_validate_document(state: RunState) -> None:
     if checked["refusal"]:
         facts["input_check"] = checked["refusal"]["reason"]
         state["problems"]["input_check"] = checked["problem"] or ""
-    state["out"].write(checked["header_source"]["request_id"] + "\n")
-    state["out"].flush()
 
 
-def _header_source(state: RunState) -> HeaderSource:
+def print_request_id(state: RunState) -> None:
+    """The request id, first on standard output, once the document was read far enough to have one."""
+    source = state["facts"].get("header_source")
+    if source is not None:
+        state["out"].write(source["request_id"] + "\n")
+        state["out"].flush()
+
+
+def header_source_of(state: RunState) -> HeaderSource:
     """The header source the steps after reading the document may rely on."""
     source = state["facts"].get("header_source")
     if source is None:
@@ -155,7 +179,7 @@ def _note_on_standard_error(state: RunState) -> Callable[[str], None]:
 
 
 def step_claim_request_id(state: RunState) -> None:
-    facts, source, world = state["facts"], _header_source(state), state["world"]
+    facts, source, world = state["facts"], header_source_of(state), state["world"]
     header = decisions.build_header(
         "request", source, world.identity.new_id(), world.clock.timestamp()
     )
@@ -187,25 +211,38 @@ def step_claim_request_id(state: RunState) -> None:
 
 
 def step_run_input_checks_and_executor_driver_check(state: RunState) -> None:
-    # The input checks are real in the first step (the document's shape). This step is the
-    # executor driver's check and the check of the named environment variables.
-    world = state["world"]
-    settings = state["raw"]["executor"]["settings"]
-    names = state["raw"].get("environment", [])
-    reason, text = decisions.executor_driver_check(
-        settings["command"],
+    """The input checks that need the world, then the executor driver's check. Each is recorded
+    under its own fact, so a run that fails both says the input check first."""
+    world, facts = state["world"], state["facts"]
+    refusal = refusals.first_refusal(input_checks.run_input_checks(world, state["raw"]))
+    if refusal:
+        facts["input_check"] = refusal["reason"]
+        state["problems"]["input_check"] = refusal["problem"]
+    reason, text = driver_check(world, state["raw"])
+    if reason:
+        facts["executor_driver_check"] = reason
+        state["problems"]["executor_driver_check"] = text or ""
+
+
+def driver_check(world: Operations, raw: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    """The executor driver's check, and the check of the environment variables the document names."""
+    settings = raw["executor"]["settings"]
+    names = raw.get("environment", [])
+    return decisions.executor_driver_check(
+        settings,
         names,
         _caller_environment(world, names),
         world.processes.find_program(settings["command"]),
     )
-    if reason:
-        state["facts"]["executor_driver_check"] = reason
-        state["problems"]["executor_driver_check"] = text or ""
 
 
-def step_run_gates(state: RunState) -> None:  # stand-in
-    state["stand_ins"]["gates"] = stand_ins.run_gates([])
-    state["facts"]["gates"] = decisions.result_status(state["stand_ins"]["gates"])
+def step_run_gates(state: RunState) -> None:
+    refusal, result = gates.run_gates(state["world"], state["raw"].get("gates", []))
+    state["stand_ins"]["gates"] = result
+    state["facts"]["gates"] = "ok"
+    if refusal:
+        state["facts"]["gates"] = "no" if refusal["reason"] == "gate_said_no" else "failed"
+        state["problems"]["gates"] = refusal["problem"]
 
 
 def step_set_up_run_area(state: RunState) -> None:  # stand-in
@@ -341,7 +378,7 @@ def conclude_run(state: RunState) -> Conclusion:
     except BaseException as error:
         receipt = decisions.minimal_receipt(decision)
         state["err"].write(_minimal_receipt_line(error) + "\n")
-    source = _header_source(state)
+    source = header_source_of(state)
     try:
         world = state["world"]
         header = decisions.build_header(

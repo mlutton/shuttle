@@ -99,6 +99,7 @@ class StepResult(TypedDict, total=False):
     stand_in: str
     process: Any  # the handle the process operations made; nothing else looks inside
     ok: bool
+    duration_seconds: float  # a real step that took time says how much
 
 
 class Facts(TypedDict, total=False):
@@ -276,6 +277,9 @@ class FileOperations(NamedTuple):
     write_new: Callable[[str, str], None]  # create, write, flush to disk; FileExistsError if there
     link: Callable[[str, str], None]  # (existing name, new name); FileExistsError if new is there
     remove: Callable[[str], None]  # FileNotFoundError when there is no such name
+    usable_folder: Callable[
+        [str], bool
+    ]  # a folder a new name can be made in; looks, writes nothing
 
 
 class ProcessOperations(NamedTuple):

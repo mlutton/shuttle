@@ -18,6 +18,7 @@ It is held to the real operations by the contract cases in contract.py.
 """
 
 import datetime
+import os
 import signal
 
 from shuttle.core.shapes import (
@@ -40,6 +41,14 @@ class _Child:
         self.behaviour = behaviour
         self.started_at = started_at
         self.returncode = None
+
+
+def _shipped(name):
+    """A file shipped with the package, as the real world holds it."""
+    folder = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(folder, "shuttle", "data", name)
+    with open(path, "rb") as f:
+        return path, f.read()
 
 
 class SimulatedWorld:
@@ -68,6 +77,7 @@ class SimulatedWorld:
                 write_new=self._write_new,
                 link=self._link,
                 remove=self._remove,
+                usable_folder=self._usable_folder,
             ),
             processes=ProcessOperations(
                 find_program=self._find_program,
@@ -99,6 +109,12 @@ class SimulatedWorld:
     def put_file(self, path, text):
         data = text if isinstance(text, bytes) else text.encode("utf-8")
         self.files[path] = bytearray(data)
+
+    def put_shipped_data(self):
+        """The data files shipped with the package, which a run reads (the kinds)."""
+        for name in ("kinds_with_statement.txt", "kinds_without_statement.txt"):
+            path, data = _shipped(name)
+            self.files[path] = bytearray(data)
 
     def put_a_name_that_leads_nowhere(self, path):
         self.dangling.add(path)
@@ -195,6 +211,10 @@ class SimulatedWorld:
     def _exists(self, path):
         self._enter("files.exists", path)
         return path in self.files or path in self.folders or path in self.dangling
+
+    def _usable_folder(self, path):
+        self._enter("files.usable_folder", path)
+        return path in self.folders
 
     def _write_new(self, path, text):
         how, error = self._enter("files.write_new", path, text)

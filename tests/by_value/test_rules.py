@@ -60,6 +60,7 @@ CORE_STDLIB_ALLOWED = frozenset(
         "dataclasses",  # plain records
         "enum",  # plain enumerations
         "functools",  # pure helpers over functions
+        "hashlib",  # a hash of text it was handed: the instruction against its hash
         "itertools",  # pure iteration helpers
         "json",  # dumps and loads over values; files are the shell's (nothing here opens one)
         "math",  # arithmetic
@@ -68,10 +69,9 @@ CORE_STDLIB_ALLOWED = frozenset(
     }
 )
 
-# The shell touches nothing itself, so it gets the core's list and two more that touch nothing.
+# The shell touches nothing itself, so it gets the core's list and one more that touches nothing.
 SHELL_STDLIB_ALLOWED = CORE_STDLIB_ALLOWED | {
     "contextlib",  # suppress, and the like: control flow only
-    "hashlib",  # a hash of bytes it was handed
 }
 
 # Where an allow-list holds, a standard library module not on it is refused. The world may
@@ -884,7 +884,7 @@ class TestTheImportTable(unittest.TestCase):
             if caught_by is None and folder.split("/")[0] in imported:
                 imported[folder.split("/")[0]] |= top_modules_imported(source)
         self.assertEqual(CORE_STDLIB_ALLOWED - imported["core"], set())
-        # the shell's list is the core's and two more; the two more each have a row
+        # the shell's list is the core's and one more; the one more has a row
         self.assertEqual((SHELL_STDLIB_ALLOWED - CORE_STDLIB_ALLOWED) - imported["shell"], set())
 
     def test_the_table_has_each_kind_of_row_and_no_row_twice(self):
