@@ -69,7 +69,6 @@ class Refusals(RefusalCase):
             ),
             ("missing_setting", d(kind="judge")),
             ("reach_not_available", d(reach={"read": ["/etc"]})),
-            ("credential_like_value", d(environment=["TOKEN=sk-abcdefghijklmnopqrstuvwxyz"])),
             ("no_time_limit", {k: v for k, v in d().items() if k != "time_limit_seconds"}),
             ("unknown_executor", {**d(), "executor": {"name": "nonesuch", "settings": {}}}),
             (
@@ -88,6 +87,16 @@ class Refusals(RefusalCase):
             with self.subTest(reason):
                 step = "executor_driver_check" if reason == "tool_not_installed" else "input_check"
                 self.assertRefused(doc, reason, step, prepare=put_reference_and_statement)
+
+    def test_a_credential_like_value_is_refused_before_the_claim_and_leaves_nothing_behind(self):
+        value = "madeup0123456789madeup0123456789xyz"
+        doc = scenes.document(environment=[f"TOKEN={value}"])
+        world, code, lines, err = self.run_it(doc)
+        self.assertEqual((code, lines), (1, ["none"]))
+        self.assertIn("credential", err)
+        self.assertNotIn(value, err)
+        self.assertEqual(world.names_in(doc["records_location"]), [])
+        self.assertEqual(world.started, [])
 
     def test_a_matching_instruction_hash_and_reference_are_accepted(self):
         doc = scenes.document(

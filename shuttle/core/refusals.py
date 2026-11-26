@@ -153,6 +153,26 @@ def _environment_entry_refusal(entry: object) -> Found | None:
     return None
 
 
+def check_credential_values(entries: object) -> Found | None:
+    """The first environment entry whose value looks like a credential, wherever it sits in the
+    list, as a refusal made before the request id is claimed (so no record keeps the value). The
+    value is never repeated."""
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if isinstance(entry, str) and "=" in entry:
+            name, _, value = entry.partition("=")
+            if looks_like_credential(value):
+                return _found(
+                    "credential_like_value",
+                    _INPUT,
+                    f"environment entry {name!r} was given a value that looks like a credential; "
+                    "nothing was done and no record was written, so the request id is NOT spent; "
+                    "name the variable only",
+                )
+    return None
+
+
 def check_environment_entries(entries: object) -> Found | None:
     """The environment part: names only. A value given with a name is refused, and one that looks
     like a credential is named as such (the value is never repeated)."""

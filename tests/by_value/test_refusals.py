@@ -222,6 +222,19 @@ class CheckEnvironmentEntries(RefusalCase):
                 self.assertRefusal(got, "credential_like_value", "input_check")
                 self.assertNotIn("abcdefghijklmnop", got["problem"])
 
+    def test_a_credential_like_value_is_found_wherever_it_sits_in_the_list(self):
+        for entries in (
+            ["MODE=fast", "TOKEN=sk-abcdefghijklmnopqrstuvwxyz"],
+            ["=x", "K=Bearer abc.def"],
+        ):
+            with self.subTest(entries):
+                got = refusals.check_credential_values(entries)
+                self.assertRefusal(got, "credential_like_value", "input_check")
+                self.assertNotIn("abcdefghijklmnop", got["problem"])
+        for entries in ([], ["HOME", "MODE=fast", 5], "not a list", None):
+            with self.subTest(entries):
+                self.assertIsNone(refusals.check_credential_values(entries))
+
     def test_a_name_given_with_any_other_value_is_missing_setting(self):
         for entry in ("MODE=fast", "MODE=", "=x"):
             with self.subTest(entry):

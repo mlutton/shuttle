@@ -15,6 +15,9 @@ import unittest
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 WRITES_WITNESS = "import sys\nopen(sys.argv[1], 'w').write('started')\n"
+MADE_UP_CREDENTIAL = (
+    "madeup0123456789madeup0123456789xyz"  # no vendor prefix; long enough to look like a token
+)
 GATE_ANSWERS = "import sys\nsys.exit(int(sys.argv[1]))\n"
 
 
@@ -113,10 +116,6 @@ class Refusals(RealCommand):
             ("statement_location_occupied", self.document(kind="judge", statement_location=taken)),
             ("reach_not_available", self.document(reach=["x"])),
             (
-                "credential_like_value",
-                self.document(environment=["K=sk-abcdefghijklmnopqrstuvwxyz"]),
-            ),
-            (
                 "no_time_limit",
                 {k: v for k, v in self.document().items() if k != "time_limit_seconds"},
             ),
@@ -162,6 +161,26 @@ class Refusals(RealCommand):
         self.assertEqual(lines[-1], "ended_by_itself")
         self.assertTrue(os.path.exists(self.witness))
 
+    def test_a_credential_like_environment_value_is_refused_before_the_id_is_claimed_and_kept_nowhere(
+        self,
+    ):
+        value = MADE_UP_CREDENTIAL
+        doc = self.document(environment=[f"TOKEN={value}"])
+        done, lines = self.command("run", doc)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(lines, ["none"])
+        self.assertIn("credential", done.stderr)
+        self.assertEqual(os.listdir(self.records), [])  # no request record, no outcome record
+        for stream in (done.stdout, done.stderr):
+            self.assertNotIn(value, stream)
+        for folder, _, names in os.walk(self.records):
+            for name in names:
+                with open(os.path.join(folder, name)) as f:
+                    self.assertNotIn(value, f.read())
+        self.assertFalse(os.path.exists(self.witness))
+        fixed, lines = self.command("run", self.document())  # the id was not spent
+        self.assertEqual(lines[-1], "ended_by_itself")
+
     def test_a_used_request_id_is_refused_whether_or_not_the_earlier_run_finished(self):
         self.command("run", self.document())
         first = self.snapshot()
@@ -199,6 +218,15 @@ class CheckForm(RealCommand):
         self.assertIn("not a promise", lines[-1])
         self.assertEqual(os.listdir(self.records), [])
         self.assertFalse(os.path.exists(self.witness))
+
+    def test_the_check_still_reports_a_credential_like_value_and_prints_no_value(self):
+        done, lines = self.command(
+            "check", self.document(environment=[f"TOKEN={MADE_UP_CREDENTIAL}"])
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(lines[-2], "check: refused: credential_like_value")
+        self.assertNotIn(MADE_UP_CREDENTIAL, done.stdout + done.stderr)
+        self.assertEqual(os.listdir(self.records), [])
 
     def test_a_refusal_is_the_shape_of_an_outcome_record_and_the_id_stays_free(self):
         done, lines = self.command("check", self.document(kind="nonesuch"))

@@ -130,7 +130,8 @@ def check(document_path: str, out: TextIO, err: TextIO, world: Operations) -> in
         "problems": {},
         "signal": None,
     }
-    run.step_read_and_validate_document(state)
+    run.read_and_validate_document(state)
+    run.print_request_id(state)
     try:
         conclusion = _conclude(state)
     except Exception as error:  # fail closed: say what was not done

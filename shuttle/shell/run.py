@@ -110,6 +110,22 @@ def start_in_boundary(
 
 
 def step_read_and_validate_document(state: RunState) -> None:
+    """The first step of a run: read and validate the document, refuse one that holds a
+    credential-like environment value before anything is claimed or written, print the id."""
+    read_and_validate_document(state)
+    raw = state.get("raw")
+    refusal = refusals.check_credential_values(
+        raw.get("environment") if isinstance(raw, dict) else None
+    )
+    if refusal and not state["facts"].get("unreadable"):
+        state["facts"]["unreadable"] = True
+        state["problem"] = refusal["problem"]
+        return
+    print_request_id(state)
+
+
+def read_and_validate_document(state: RunState) -> None:
+    """Read and validate the document; print nothing. The check form uses this one."""
     facts = state["facts"]
     try:
         data = state["world"].files.read(state["document_path"])
@@ -137,8 +153,14 @@ def step_read_and_validate_document(state: RunState) -> None:
     if checked["refusal"]:
         facts["input_check"] = checked["refusal"]["reason"]
         state["problems"]["input_check"] = checked["problem"] or ""
-    state["out"].write(checked["header_source"]["request_id"] + "\n")
-    state["out"].flush()
+
+
+def print_request_id(state: RunState) -> None:
+    """The request id, first on standard output, once the document was read far enough to have one."""
+    source = state["facts"].get("header_source")
+    if source is not None:
+        state["out"].write(source["request_id"] + "\n")
+        state["out"].flush()
 
 
 def header_source_of(state: RunState) -> HeaderSource:
