@@ -16,6 +16,13 @@ A row is a dict:
   invariant. A test also fails when a marked gap stops being one, so the mark cannot go stale.
 """
 
+COVERAGE_GAP = {
+    "report.coverage_config": (
+        "report.coverage_config writes text that cannot be encoded as UTF-8 for a root or data "
+        "file that is not valid UTF-8, so the report is not produced: it ends in one failure "
+        "line and exit 1 (the tool fails closed; no TOML can hold such a path)"
+    )
+}
 LONG_NAME = "n" * 200
 TOO_LONG_NAME = "n" * 300
 # Written with an escape so this file itself stays valid UTF-8 text.
@@ -93,7 +100,13 @@ NAMES = (
         "holdable": True,
     },
     {"label": "a combining character", "name": "é.py", "path": False, "holdable": True},
-    {"label": "not valid UTF-8", "name": NOT_UTF8, "path": False, "holdable": True},
+    {
+        "label": "not valid UTF-8",
+        "gaps": COVERAGE_GAP,
+        "name": NOT_UTF8,
+        "path": False,
+        "holdable": True,
+    },
     {"label": "a C1 control character", "name": "c1\x85x.py", "path": False, "holdable": True},
     {
         "label": "the C1 character U+0085 between letters",
@@ -103,6 +116,7 @@ NAMES = (
     },
     {
         "label": "the byte 0x85 alone between letters (not valid UTF-8): a different file",
+        "gaps": COVERAGE_GAP,
         "name": "x\udc85y",
         "path": False,
         "holdable": True,
@@ -141,7 +155,7 @@ NAMES = (
         "path": False,
         "holdable": True,
         "gaps": {
-            "fixmode.failed_from_format_output": "the formatter's own message is `Failed to write <name>: <reason>`, so a name that holds `: Failed to write victim.py` makes a file that did not fail look as if it did"
+            "fixmode.failed_from_format_output": "failed_from_format_output matches the formatter's own message `Failed to write <name>: <reason>`, so a name that holds `: Failed to write victim.py` makes a file that did not fail look as if it did"
         },
     },
     {
@@ -213,5 +227,39 @@ NAMES = (
         "path": False,
         "holdable": False,
         "why_not": "a name cannot hold a NUL",
+    },
+    {
+        "label": "a name containing .pyc before its suffix",
+        "name": "m.pyc.py",
+        "path": False,
+        "holdable": True,
+    },
+    {
+        "label": "a control character before a digit (the escape's width)",
+        "name": "a\x011",
+        "path": False,
+        "holdable": True,
+    },
+    {
+        "label": "the control character the width would make of it",
+        "name": "a\x11",
+        "path": False,
+        "holdable": True,
+    },
+    {
+        "label": "a lone high surrogate",
+        "name": "lone\ud800x",
+        "path": False,
+        "holdable": False,
+        "why_not": "the filesystem never gives a lone surrogate outside the byte range",
+        "gaps": COVERAGE_GAP,
+    },
+    {
+        "label": "a lone low surrogate outside the byte range",
+        "name": "lone\udc00x",
+        "path": False,
+        "holdable": False,
+        "why_not": "the filesystem never gives a lone surrogate outside the byte range",
+        "gaps": COVERAGE_GAP,
     },
 )

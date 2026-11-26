@@ -33,16 +33,13 @@ TABLE_TESTED = {
     "report.merge_rows": f"{NAMES_TEST}::ReportTest.test_merge_rows_gives_one_row_for_each_walked_name_whole_and_in_order",
     "report.render_coverage": f"{NAMES_TEST}::ReportTest.test_render_coverage_gives_each_file_one_line_and_no_two_alike",
     "report.render_report": f"{NAMES_TEST}::ReportTest.test_render_report_keeps_every_name_inside_a_fenced_block_and_escaped",
-    "report.coverage_config": f"{NAMES_TEST}::ReportTest.test_coverage_config_keeps_a_root_and_a_data_file_whole_in_the_toml",
+    "report.coverage_config": f"{NAMES_TEST}::ReportTest.test_coverage_config_keeps_a_root_and_a_data_file_whole_in_the_toml_file",
     "report.walked_files": f"{NAMES_TEST}::TheFilesystemTest.test_walked_files_lists_each_python_file_once_whole_with_slashes_in_order",
     "report.source_markers": f"{NAMES_TEST}::TheFilesystemTest.test_source_markers_gives_each_marker_and_problem_with_the_file_s_whole_name",
     "report.analyse_unmeasured": f"{NAMES_TEST}::TheFilesystemTest.test_analyse_unmeasured_gives_each_file_under_its_whole_path",
 }
 
 EXEMPT = {
-    "report.commit_text": "its `facts` are the pull request's event values (commit ids), not file names",
-    "report.log_line": "it prints two numbers and the Python version from the report's facts; no name",
-    "report.ranges": "its `lines` are line numbers, not file names",
     "report.git_commit": "shell: runs git in the project's own root folder, which the caller chose; it reads no name from the changed tree",
     "report._run": "shell: runs a tool with the project's root folder as its working folder; no name from the changed tree",
     "report.gather": "shell: runs the tools and calls the table-tested functions above with what they return; its own `root` is the project's folder",

@@ -5,7 +5,6 @@ this. Kept here so the by-value tests and the command tests use one definition.
 """
 
 import os
-import sys
 import unicodedata
 
 # A second opinion on what must not reach a terminal or a Markdown page raw: the C0 and C1
@@ -30,16 +29,12 @@ def as_python(name):
 
 def create_all(root, rows, make=as_python, content="x = 1  # not tested: why\n", skip=()):
     """Make a file for each row under root/names/. Returns ({name: path relative to root},
-    [(label, reason)] for each row not made). Rows the filesystem refuses are named on standard
-    error with how many there were; so are rows in skip, a {label: reason} of rows the tool
-    under test refuses (the caller says why)."""
-    made, refused = {}, []
+    [(label, error name)] for the rows that should have worked and did not). A row the table
+    says no filesystem holds (holdable False), and a row in skip (a {label: reason} of rows the
+    tool under test refuses), are left out and not reported: they are expected."""
+    made, unexpected = {}, []
     for row in rows:
-        if not row["holdable"]:
-            refused.append((row["label"], row["why_not"]))
-            continue
-        if row["label"] in skip:
-            refused.append((row["label"], skip[row["label"]]))
+        if not row["holdable"] or row["label"] in skip:
             continue
         rel = f"{NAMES_FOLDER}/{make(row['name'])}"
         full = os.path.join(root, rel)
@@ -48,13 +43,17 @@ def create_all(root, rows, make=as_python, content="x = 1  # not tested: why\n",
             with open(full, "w", encoding="utf-8", newline="") as f:
                 f.write(content)
         except (OSError, ValueError) as error:
-            refused.append((row["label"], type(error).__name__))
+            unexpected.append((row["label"], type(error).__name__))
             continue
         made[row["name"]] = rel
-    if refused:
-        sys.stderr.write(
-            f"names table: {len(refused)} of {len(rows)} rows were not made: "
-            + ", ".join(f"{label} ({why})" for label, why in refused)
-            + "\n"
-        )
-    return made, refused
+    return made, unexpected
+
+
+def unmade_note(unexpected):
+    """One short line for a test's skip reason: how many rows this filesystem refused and the
+    first few labels."""
+    shown = ", ".join(label for label, _ in unexpected[:3])
+    more = "..." if len(unexpected) > 3 else ""
+    return (
+        f"this filesystem refused {len(unexpected)} names the table says it can hold: {shown}{more}"
+    )

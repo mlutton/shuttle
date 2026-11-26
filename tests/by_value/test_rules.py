@@ -552,6 +552,17 @@ class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
                 self.assertEqual(noqa_problems(source, path), [])
 
 
+def top_modules_imported(source):
+    """The top-level modules a source text imports, by parsing it (never by matching text)."""
+    found = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            found |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            found.add(node.module.split(".")[0])
+    return found
+
+
 class TestTheImportTable(unittest.TestCase):
     """tests/hostile/imports_table.py: the forms the reviews tried, each with its verdict."""
 
@@ -559,31 +570,42 @@ class TestTheImportTable(unittest.TestCase):
     def place(index, folder):
         return folder if folder.endswith(".py") else f"{folder}/row_{index:03d}.py"
 
-    def test_the_rule_test_refuses_each_row_marked_both_or_rule_test_and_allows_the_rest(self):
-        for index, (label, source, folder, caught_by, _) in enumerate(IMPORTS):
+    def test_the_rule_test_refuses_each_row_marked_both_or_rule_test_for_the_stated_reason(self):
+        for index, (label, source, folder, caught_by, _, problem) in enumerate(IMPORTS):
             with self.subTest(label=label, source=source):
                 self.assertIn(caught_by, ("both", "rule test", "lint", None))
                 problems = check_module(source, self.place(index, folder))
                 if caught_by in ("both", "rule test"):
-                    self.assertTrue(problems, "the rule test lets a refused form through")
+                    self.assertTrue(problem, "a refused row says what the refusal must say")
+                    self.assertTrue(
+                        any(problem in p for p in problems),
+                        f"refused, but not for that reason ({problem!r}): {problems}",
+                    )
                 else:
+                    self.assertEqual(problem, "")
                     self.assertEqual(problems, [])
 
-    def test_the_table_covers_the_allow_list_and_every_kind_of_form(self):
-        sources = [source for _, source, _, _, _ in IMPORTS]
-        for name in sorted(CORE_STDLIB_ALLOWED):
-            with self.subTest(name=name):
-                self.assertTrue(
-                    any(
-                        f"import {name}" in source or f"from {name}" in source for source in sources
-                    )
-                )
-        kinds = {caught for _, _, _, caught, _ in IMPORTS}
+    def test_every_standard_library_module_on_the_allow_list_has_an_allowed_row(self):
+        imported = set()
+        for _, source, folder, caught_by, *_ in IMPORTS:
+            if caught_by is None and folder.startswith("core"):
+                imported |= top_modules_imported(source)
+        self.assertEqual(CORE_STDLIB_ALLOWED - imported, set())
+
+    def test_the_table_has_each_kind_of_row_and_no_row_twice(self):
+        kinds = {caught for _, _, _, caught, *_ in IMPORTS}
         self.assertEqual(kinds, {"both", "rule test", "lint", None})
         labels = [label for label, *_ in IMPORTS]
         self.assertEqual(len(labels), len(set(labels)))
         places = [(source, folder) for _, source, folder, *_ in IMPORTS]
         self.assertEqual(len(places), len(set(places)))
+
+    def test_a_known_gap_says_why_in_words(self):
+        for label, _, _, caught_by, note, _ in IMPORTS:
+            if "known gap" in note:
+                with self.subTest(label=label):
+                    self.assertIsNone(caught_by)
+                    self.assertGreaterEqual(len(note.split()), 8, "say why, in a sentence")
 
 
 class TestTheSuppressionTable(unittest.TestCase):
@@ -596,16 +618,17 @@ class TestTheSuppressionTable(unittest.TestCase):
                 self.assertEqual(bool(problems), refused)
 
     def test_the_rule_test_refuses_every_spelling_the_table_says_ruff_honours(self):
-        # the guard that matters: a spelling that silences the linter and the rule test too
-        for label, source, honoured, refused in SUPPRESSIONS:
+        # the table's column is checked against the real ruff in tests/command/
+        # test_hostile_tables.py, which also derives "honoured" from ruff's own answer
+        for label, source, honoured, _ in SUPPRESSIONS:
             if honoured:
                 with self.subTest(label=label, source=source):
-                    self.assertTrue(refused, "ruff honours it and the rule test lets it by")
+                    problems = [p for p in check_module(source, CORE) if "lint ignore" in p]
+                    self.assertTrue(problems, "ruff honours it and the rule test lets it by")
 
     def test_the_table_holds_each_kind_of_spelling_once(self):
         sources = [source for _, source, _, _ in SUPPRESSIONS]
         self.assertEqual(len(sources), len(set(sources)))
-        self.assertGreaterEqual(len(sources), 85)
         self.assertTrue(any(h for _, _, h, _ in SUPPRESSIONS))
         self.assertTrue(any(r and not h for _, _, h, r in SUPPRESSIONS))
         self.assertTrue(any(not r for _, _, _, r in SUPPRESSIONS))

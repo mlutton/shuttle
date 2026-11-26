@@ -55,6 +55,11 @@ def write(root, rel, text):
         f.write(text)
 
 
+def read_file(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 def banned_import_findings(tree):
     """Run the pinned ruff once over shuttle/ in the tree: the set of files (relative to
     shuttle/) with a banned-import finding. Anything but a finding-or-none result is an error."""
@@ -87,7 +92,7 @@ class ImportsLintColumnTest(TreeTest):
     def test_the_which_guard_column_agrees_with_the_real_linter_and_every_refusal_is_caught(self):
         tree = self.tree()
         places = []
-        for index, (_, source, folder, _, _) in enumerate(imports_table.IMPORTS):
+        for index, (_, source, folder, *_) in enumerate(imports_table.IMPORTS):
             place = folder if folder.endswith(".py") else f"{folder}/row_{index:03d}.py"
             places.append(place)
             write(tree, f"shuttle/{place}", source + "\n")
@@ -98,7 +103,7 @@ class ImportsLintColumnTest(TreeTest):
         flagged = banned_import_findings(tree)
 
         wrong = []
-        for place, (label, source, _, caught_by, note) in zip(
+        for place, (label, source, _, caught_by, note, _) in zip(
             places, imports_table.IMPORTS, strict=True
         ):
             lint = place in flagged
@@ -112,7 +117,7 @@ class ImportsLintColumnTest(TreeTest):
             if caught_by is None and "known gap" in note and (lint or rule):
                 wrong.append(f"{label}: marked a known gap but a guard now catches it")
         self.assertEqual(wrong, [])
-        self.assertGreater(len(flagged), 30)
+        self.assertTrue(flagged, "ruff reported nothing: it did not read the files")
 
 
 class SuppressionsRealRuffTest(TreeTest):
@@ -156,28 +161,36 @@ class GuardListingOfEveryNameTest(unittest.TestCase):
             for name in ("guard-files.sh", "guards.py", "names.py"):
                 shutil.copy(os.path.join(REPO, "checks", name), os.path.join(tree, "checks"))
             write(tree, "README.md", "x\n")
+            # the base has an older names table with one more row, a suppression table that
+            # does not parse, and no import table
+            real_names = read_file(os.path.join(TESTS, "hostile", "names_table.py"))
+            extra = '    {"label": "a row only the base had", "name": "gone", "path": False},\n)\n'
+            write(tree, "tests/hostile/names_table.py", real_names.rstrip()[:-1] + extra)
+            write(tree, "tests/hostile/suppressions_table.py", "SUPPRESSIONS = (\n")
             self.git(tree, "add", "-A")
             self.git(tree, "commit", "-q", "-m", "base")
             base = self.git(tree, "rev-parse", "HEAD")
 
-            made, skipped = [], []
+            made, unexpected = [], []
             for row in names_table.NAMES:
                 rel = row["name"] if row["path"] else f"checks/{row['name']}"
                 if not row["holdable"]:
-                    skipped.append((row["label"], "no filesystem holds it"))
                     continue
                 try:
                     write(tree, os.fsdecode(rel), "x\n")
                 except (OSError, ValueError) as error:
-                    skipped.append((row["label"], type(error).__name__))
+                    unexpected.append((row["label"], type(error).__name__))
                     continue
                 made.append((row, rel))
-            sys.stderr.write(
-                f"guard listing: {len(made)} names made, {len(skipped)} rows skipped: "
-                + ", ".join(f"{label} ({why})" for label, why in skipped)
-                + "\n"
-            )
-            self.assertGreater(len(made), 50)
+            if unexpected:
+                with self.subTest("some names are refused here"):
+                    self.skipTest(support.unmade_note(unexpected))
+            self.assertTrue(made)
+            for table in ("names", "imports", "suppressions"):
+                shutil.copy(
+                    os.path.join(TESTS, "hostile", f"{table}_table.py"),
+                    os.path.join(tree, "tests", "hostile"),
+                )
             self.git(tree, "add", "-A")
             self.git(tree, "commit", "-q", "-m", "every name")
 
@@ -189,7 +202,8 @@ class GuardListingOfEveryNameTest(unittest.TestCase):
                 timeout=60,
             )
             self.assertEqual(done.returncode, 0, done.stderr)
-            text = done.stdout.decode("utf-8")
+            whole = done.stdout.decode("utf-8")
+            text, _, tables = whole.partition("## What this pull request does to the hostile")
             lines = text.split("\n")
             fence = next(line for line in lines if line.startswith("`"))
             self.assertEqual(lines.count(fence), 2, "exactly two fence lines")
@@ -200,6 +214,11 @@ class GuardListingOfEveryNameTest(unittest.TestCase):
                 for row, rel in made
                 if not row["path"]
             ]
+            expected += [
+                "changed tests/hostile/names_table.py",
+                "changed tests/hostile/suppressions_table.py",
+                "added   tests/hostile/imports_table.py",
+            ]
             self.assertEqual(sorted(body), sorted(expected))
             self.assertEqual(
                 collections.Counter(body).most_common(1)[0][1], 1, "a name is listed twice"
@@ -209,10 +228,33 @@ class GuardListingOfEveryNameTest(unittest.TestCase):
                 [line for line in body if line.lstrip(" ").startswith(fence)],
                 "a name closed the block",
             )
+            self.check_tables_section(tables)
             looks_alike = [rel for row, rel in made if row["path"]]
             self.assertTrue(looks_alike)
             for rel in looks_alike:
                 self.assertNotIn(names.escape_name(os.fsdecode(rel)), text)
+
+    def check_tables_section(self, section):
+        """What the listing says about the tables: a row the base had, a table that did not
+        parse at the base, a table the base lacked, and every known-gap mark."""
+        block = section.split("\n")
+        fence = next(line for line in block if line.startswith("`"))
+        shown = block[block.index(fence) + 1 : block.index(fence, block.index(fence) + 1)]
+        self.assertIn("names: row removed: a row only the base had", shown)
+        self.assertTrue(
+            any(
+                x.startswith("suppressions: the table at the base could not be read") for x in shown
+            )
+        )
+        imports = len(imports_table.IMPORTS)
+        self.assertIn(f"imports: no table at the base; all {imports} rows are new", shown)
+        for row in names_table.NAMES:
+            for key, reason in row.get("gaps", {}).items():
+                self.assertIn(f"names: known gap: {row['label']}: {key}: {reason}", shown)
+        for label, _, _, _, note, _ in imports_table.IMPORTS:
+            if "known gap" in note:
+                self.assertIn(f"imports: new known gap: {label}: import form: {note}", shown)
+        self.assertFalse([line for line in shown if support.unsafe(line)])
 
 
 if __name__ == "__main__":

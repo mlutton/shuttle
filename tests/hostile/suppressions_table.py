@@ -210,4 +210,24 @@ SUPPRESSIONS = (
     ("text in a module docstring", '"""# ruff: noqa: TID251"""\nimport os', False, False),
     ("text in an f-string", "import os\nx = f'# noqa: {1}'", False, False),
     ("a comment on the line of a string only", "import os\nx = 'a'  # noqa: E501", False, False),
+    (
+        "range, disable everything",
+        "# ruff: disable[ALL]\nimport os\n# ruff: enable[ALL]",
+        False,
+        True,
+    ),
+    ("range, ignore everything", "import os  # ruff: ignore[ALL]", False, True),
+    (
+        "range, disable everything on the line before",
+        "# ruff: disable[ALL]\nimport os",
+        False,
+        True,
+    ),
+    (
+        "two noqa words, the first for another rule",
+        "import os  # noqa: E501 # noqa: TID251",
+        False,
+        True,
+    ),
+    ("two noqa words, the second a blanket", "import os  # noqa: E501 # noqa", False, True),
 )

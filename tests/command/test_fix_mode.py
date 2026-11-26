@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(REPO, "checks"))
 names = importlib.import_module("names")
 names_table = importlib.import_module("hostile.names_table")
 create_all = importlib.import_module("hostile.support").create_all
+unmade_note = importlib.import_module("hostile.support").unmade_note
 as_python = importlib.import_module("hostile.support").as_python
 # Rows of the names table that ruff itself refuses: it fails on a name that is not valid UTF-8
 # (test_a_name_that_is_not_valid_utf8_is_shown_escaped_and_ends_with_a_fix_line covers those).
@@ -110,9 +111,12 @@ class FixModeTest(TreeTest):
             f.write("x  =  1\n")
         os.symlink(target, os.path.join(self.tree, "out.py"))
         # every file name in the names table that this filesystem holds and ruff accepts
-        in_table, _ = create_all(
+        in_table, unexpected = create_all(
             self.tree, names_table.NAMES, make=as_python, skip=RUFF_REFUSES, content="x  =  1\n"
         )
+        if unexpected:
+            with self.subTest("some names are refused here"):
+                self.skipTest(unmade_note(unexpected))
         changed = ["__pycache__/cached.py", "a.py", "my file.py", "out.py", "w.pyw"]
         if newline_name:
             changed.append("two\nlines.py")

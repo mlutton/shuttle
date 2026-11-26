@@ -15,6 +15,7 @@ how many rows it refused and why.
 
 import hashlib
 import importlib
+import io
 import itertools
 import os
 import re
@@ -22,6 +23,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+import unittest.mock
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(TESTS)
@@ -33,13 +35,9 @@ guards = importlib.import_module("guards")
 fixmode = importlib.import_module("fixmode")
 report = importlib.import_module("report")
 table = importlib.import_module("hostile.names_table")
+registry = importlib.import_module("hostile.registry")
 support = importlib.import_module("hostile.support")
-unsafe, one_line, as_python, create_all = (
-    support.unsafe,
-    support.one_line,
-    support.as_python,
-    support.create_all,
-)
+unsafe, one_line = support.unsafe, support.one_line
 
 ROWS = table.NAMES
 NO_NUL = [row for row in ROWS if "\0" not in row["name"]]
@@ -83,6 +81,30 @@ class TheTablesTest(unittest.TestCase):
                     self.assertTrue(row.get("why_not"), "a name no filesystem holds says why")
                 for key in row.get("gaps", {}):
                     self.assertRegex(key, r"^\w+\.\w+$")
+
+    def test_a_known_gap_names_a_registered_function_and_says_why_in_words(self):
+        # without this a one-character reason could excuse a failing row
+        for row in ROWS:
+            for key, reason in row.get("gaps", {}).items():
+                with self.subTest(label=row["label"], key=key):
+                    self.assertIn(key, registry.TABLE_TESTED, "a mark on a function nobody tests")
+                    self.assertIn(key.split(".")[1], reason, "the reason names the function")
+                    self.assertGreaterEqual(len(reason.split()), 12, "say why, in a sentence")
+
+    def test_a_row_this_filesystem_refuses_is_reported_short_and_the_others_are_made(self):
+        rows = [
+            {"label": "fine", "name": "ok.py", "path": False, "holdable": True},
+            {"label": "refused", "name": "x\0y.py", "path": False, "holdable": True},
+            {"label": "known", "name": "k.py", "path": False, "holdable": True},
+            {"label": "never", "name": "n.py", "path": False, "holdable": False, "why_not": "w"},
+        ]
+        with tempfile.TemporaryDirectory() as root:
+            made, unexpected = support.create_all(root, rows, skip={"known": "a tool refuses it"})
+        self.assertEqual(list(made), ["ok.py"])
+        self.assertEqual(unexpected, [("refused", "ValueError")])
+        note = support.unmade_note(unexpected)
+        self.assertLess(len(note), 120)
+        self.assertIn("refused", note)
 
     def test_the_table_has_the_names_the_reviews_found(self):
         wanted = [" ", "\t", "\n", "\r", "`" * 6, "-", "#", "    ", "|", "<", ">", "\\n", "'", '"']
@@ -158,7 +180,7 @@ class FencedTest(unittest.TestCase):
 class GitOutputTest(RowsTest):
     def test_parse_name_status_returns_every_name_whole_in_order_for_any_name_git_can_carry(self):
         statuses = itertools.cycle("AMDT")
-        pairs = [(next(statuses), row["name"]) for row in NO_NUL]
+        pairs = [(next(statuses), row["name"]) for row in HOLDABLE]
         raw = b"".join(s.encode() + b"\0" + os.fsencode(n) + b"\0" for s, n in pairs)
         self.assertEqual(guards.parse_name_status(raw), pairs)
 
@@ -167,7 +189,7 @@ class GitOutputTest(RowsTest):
             got = guards.parse_name_status(one)
             return None if got == [("M", row["name"])] else f"got {got!r}"
 
-        self.each("guards.parse_name_status", NO_NUL, check)
+        self.each("guards.parse_name_status", HOLDABLE, check)
 
 
 class GuardDecisionTest(RowsTest):
@@ -373,10 +395,19 @@ class FixModeTest(RowsTest):
 class TheFilesystemTest(unittest.TestCase):
     """Functions that read a folder: a temporary one holds every name this filesystem will."""
 
+    def make(self, root, rows=None, **kwargs):
+        """The files made for the rows. A row this filesystem refuses although the table says
+        it can hold it is reported as a skipped sub-test, with one short reason."""
+        made, unexpected = support.create_all(root, rows or HOLDABLE, **kwargs)
+        if unexpected:
+            with self.subTest("some names are refused here"):
+                self.skipTest(support.unmade_note(unexpected))
+        self.assertTrue(made)
+        return made
+
     def test_snapshot_hashes_each_file_under_its_own_whole_path_once(self):
         with tempfile.TemporaryDirectory() as root:
-            made, _ = create_all(root, HOLDABLE, make=lambda n: n)
-            self.assertTrue(made)
+            made = self.make(root, make=lambda n: n)
             shot = fixmode.snapshot(root)
             self.assertEqual(sorted(shot), sorted(made.values()))
             for rel in made.values():
@@ -398,15 +429,14 @@ class TheFilesystemTest(unittest.TestCase):
 
     def test_walked_files_lists_each_python_file_once_whole_with_slashes_in_order(self):
         with tempfile.TemporaryDirectory() as root:
-            made, _ = create_all(root, HOLDABLE)
-            self.assertTrue(made)
+            made = self.make(root)
             walked = report.walked_files(root, ["names"])
             self.assertEqual(walked, sorted(made.values()))
             self.assertEqual(len(set(walked)), len(walked))
 
     def test_source_markers_gives_each_marker_and_problem_with_the_file_s_whole_name(self):
         with tempfile.TemporaryDirectory() as root:
-            made, _ = create_all(root, HOLDABLE)
+            made = self.make(root)
             paths = sorted(made.values())
             markers, problems = report.source_markers(root, paths)
             self.assertEqual(problems, [])
@@ -416,7 +446,7 @@ class TheFilesystemTest(unittest.TestCase):
 
     def test_source_markers_names_a_file_it_cannot_read_whole(self):
         with tempfile.TemporaryDirectory() as root:
-            made, _ = create_all(root, HOLDABLE, content="")
+            made = self.make(root, content="")
             for rel in made.values():
                 with open(os.path.join(root, rel), "wb") as f:
                     f.write(b"\xff\xfe\x00 not utf-8\n")
@@ -428,7 +458,7 @@ class TheFilesystemTest(unittest.TestCase):
 
     def test_analyse_unmeasured_gives_each_file_under_its_whole_path(self):
         with tempfile.TemporaryDirectory() as root:
-            made, _ = create_all(root, HOLDABLE, content="x = 1\n")
+            made = self.make(root, content="x = 1\n")
             rc = os.path.join(root, "coverage.toml")
             with open(rc, "w", encoding="utf-8") as f:
                 f.write(f"[tool.coverage.run]\ndata_file = {str(os.path.join(root, 'd'))!r}\n")
@@ -546,20 +576,41 @@ class ReportTest(RowsTest):
 
         self.each("report.render_report", NO_NUL, check)
 
-    def test_coverage_config_keeps_a_root_and_a_data_file_whole_in_the_toml(self):
+    def test_coverage_config_keeps_a_root_and_a_data_file_whole_in_the_toml_file(self):
         pyproject = {"tool": {"coverage": {"run": {"source": ["shuttle"], "branch": True}}}}
+        with tempfile.TemporaryDirectory() as folder:
+            config = os.path.join(folder, "coverage.toml")
 
-        def check(row):
-            name = row["name"]
-            text = report.coverage_config(pyproject, "/r/" + name, "/d/" + name)
-            try:
-                run = tomllib.loads(text)["tool"]["coverage"]["run"]
-            except tomllib.TOMLDecodeError as error:
-                return f"not TOML: {error}"
-            same = run["source"] == [os.path.join("/r/" + name, "shuttle")]
-            return None if same and run["data_file"] == "/d/" + name else f"changed: {run!r}"
+            def check(row):
+                name = row["name"]
+                text = report.coverage_config(pyproject, "/r/" + name, "/d/" + name)
+                try:  # the file the report writes, as it writes it
+                    with open(config, "w", encoding="utf-8") as f:
+                        f.write(text)
+                    with open(config, "rb") as f:
+                        run = tomllib.load(f)["tool"]["coverage"]["run"]
+                except (UnicodeEncodeError, tomllib.TOMLDecodeError) as error:
+                    return f"not a TOML file: {error}"
+                same = run["source"] == [os.path.join("/r/" + name, "shuttle")]
+                return None if same and run["data_file"] == "/d/" + name else f"changed: {run!r}"
 
-        self.each("report.coverage_config", NO_NUL, check)
+            self.each("report.coverage_config", NO_NUL, check)
+
+    def test_a_report_that_cannot_write_its_settings_ends_in_one_failure_line_and_exit_1(self):
+        # the truth the coverage_config gap rests on: the write raises, main says so once
+        error = UnicodeEncodeError("utf-8", "\udcff", 0, 1, "surrogates not allowed")
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(report, "run", side_effect=error),
+            unittest.mock.patch.object(sys, "stdout", out),
+            unittest.mock.patch.object(sys, "stderr", io.StringIO()),
+        ):
+            code = report.main()
+        self.assertEqual(code, 1)
+        (line,) = out.getvalue().splitlines()
+        self.assertTrue(line.startswith(report.COULD_NOT))
+        with self.assertRaises(UnicodeEncodeError):
+            "/r/\udcff".encode()
 
 
 if __name__ == "__main__":
