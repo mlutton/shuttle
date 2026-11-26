@@ -189,6 +189,19 @@ class FixModeDecisionsTest(unittest.TestCase):
         self.assertEqual(fixmode.remaining_findings(found, "/r"), ["a.py:?: F401 "])
         self.assertEqual(fixmode.parse_diagnostics("[]"), [])
 
+    def test_a_link_is_hashed_under_its_own_path_unless_its_target_is_already_hashed(self):
+        links = {
+            "/r/in.py": "/r/real.py",
+            "/r/out.py": "/elsewhere/o.py",
+            "/r/b.py": "/r/.git/x.py",
+        }
+        self.assertEqual(fixmode.links_to_hash({"/r/real.py"}, links), ["/r/b.py", "/r/out.py"])
+        self.assertEqual(fixmode.links_to_hash({"/r/real.py"}, {}), [])
+
+    def test_pycache_is_not_skipped_because_ruff_does_not_skip_it(self):
+        self.assertNotIn("__pycache__", fixmode.SKIPPED_FOLDERS)
+        self.assertEqual(set(fixmode.SKIPPED_FOLDERS), {".git", ".ruff_cache", ".mypy_cache"})
+
     def test_nothing_changed_says_so(self):
         self.assertEqual(fixmode.render_lines([], [], False), ["fix: nothing to change"])
 

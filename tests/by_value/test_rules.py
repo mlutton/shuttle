@@ -10,6 +10,9 @@ Where a module sits is its classification. Nothing is registered anywhere:
   `__main__.py` (hands to the shell; judged as shell) may sit. A module anywhere else
   fails with the file's name and what to do.
 - No module imports a third-party package.
+- No file under shuttle/ carries a lint ignore that covers the banned-import rule (TID251):
+  without this, a file could start with `# ruff: noqa: TID251` and import what it likes,
+  and the linter would pass it. See `noqa_problems` for the spellings.
 
 `check_module` is the checking logic: source text and a module's name in, a list of
 problems out. The file walking is a thin layer over it. These tests read source text; they
@@ -17,8 +20,11 @@ start no process and write nothing.
 """
 
 import ast
+import io
 import os
+import re
 import sys
+import tokenize
 import tomllib
 import unittest
 
@@ -137,6 +143,50 @@ def _entry_problems(tree, path):
     return [f"shuttle/{path} holds more than {what}: move the code into shuttle/shell/"]
 
 
+BANNED_IMPORT_RULE = "TID251"
+# What ruff accepts as a lint ignore, found in comments only (never in a string): the
+# line-level and file-level noqa (also spelled `flake8: noqa`) and the range comments
+# `ruff: disable[...]` / `ruff: ignore[...]`. Case is ignored here although ruff is stricter
+# about some spellings, so a misspelling that happens not to work today is still refused.
+_NOQA = re.compile(r"#\s*(?:(?:ruff|flake8)\s*:\s*)?noqa\b(?P<rest>[^#]*)", re.IGNORECASE)
+_RANGE = re.compile(r"#\s*ruff\s*:\s*(?:disable|ignore)\s*\[(?P<codes>[^\]]*)\]", re.IGNORECASE)
+_CODE = re.compile(r"[A-Za-z]+[0-9]*")
+
+
+def _covers_rule(codes):
+    """Whether a list of rule codes (text) covers TID251: none named (a blanket ignore), the
+    rule itself, a prefix of it (TID, TID2) or ALL."""
+    named = [c.upper() for c in _CODE.findall(codes)]
+    return not named or any(BANNED_IMPORT_RULE.startswith(c) or c == "ALL" for c in named)
+
+
+def _noqa_covers_rule(rest):
+    """`rest` is what follows the word noqa in a comment: nothing or other words (blanket), or
+    a colon and a list of codes."""
+    stripped = rest.lstrip()
+    if not stripped.startswith(":"):
+        return True  # a blanket ignore covers every rule
+    return _covers_rule(stripped[1:])
+
+
+def noqa_problems(source, path):
+    """A lint ignore that covers TID251 anywhere in the file: file-level or line-level, blanket
+    or naming the rule, in any spelling ruff accepts."""
+    problems = []
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type != tokenize.COMMENT:
+            continue
+        found = [m for m in _NOQA.finditer(token.string) if _noqa_covers_rule(m["rest"])]
+        found += [m for m in _RANGE.finditer(token.string) if _covers_rule(m["codes"])]
+        if found:
+            problems.append(
+                f"shuttle/{path} line {token.start[0]} carries a lint ignore ({token.string.strip()}) "
+                f"that covers the banned-import rule {BANNED_IMPORT_RULE}: take it out; code that "
+                "needs a banned library belongs in shuttle/shell/"
+            )
+    return problems
+
+
 def check_module(source, path):
     """Problems with one module's source, judged by where its file sits.
 
@@ -147,9 +197,10 @@ def check_module(source, path):
         return [
             f"shuttle/{path} sits outside the two folders: move it into "
             "shuttle/core/ (it decides, touching nothing) or shuttle/shell/ (it reaches the "
-            "world). Only __init__.py and __main__.py may sit at the package root"
+            "world). Only __init__.py and __main__.py may sit at the package root",
+            *noqa_problems(source, path),
         ]
-    problems = []
+    problems = noqa_problems(source, path)
     tree = ast.parse(source)
     problems += _entry_problems(tree, path)
     for node in ast.walk(tree):
@@ -449,6 +500,78 @@ class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
         self.assertEqual(problems_of("import os, subprocess, codecs", SHELL), [])
         self.assertEqual(problems_of("from shuttle.core import decisions", SHELL), [])
         self.assertEqual(problems_of("from shuttle.shell import records", SHELL), [])
+
+
+class TestNoLintIgnoreCoversTheBannedImportRule(unittest.TestCase):
+    SPELLINGS = (
+        "import os  # noqa",
+        "import os  # NOQA",
+        "import os  #noqa",
+        "import os  # noqa: TID251",
+        "import os  #noqa:TID251",
+        "import os  # noqa : TID251",
+        "import os  # noqa: tid251",
+        "import os  # noqa: E501, TID251",
+        "import os  # noqa: E501 TID251",
+        "import os  # noqa:TID251 because",
+        "import os  # some words # noqa: TID251",
+        "import os  # noqa: TID",
+        "import os  # noqa: TID2",
+        "import os  # noqa: ALL",
+        "import os  # noqa:",
+        "# ruff: noqa\nimport os",
+        "# ruff: noqa: TID251\nimport os",
+        "# ruff:noqa:TID251\nimport os",
+        "# RUFF: NOQA: TID251\nimport os",
+        "# ruff: noqa: E501, TID251\nimport os",
+        "# ruff: noqa: ALL\nimport os",
+        "# flake8: noqa\nimport os",
+        "# flake8: noqa: TID251\nimport os",
+        "import os  # ruff: noqa: TID251",
+        "# ruff: disable[TID251]\nimport os\n# ruff: enable[TID251]",
+        "# ruff: disable[E501, TID251]\nimport os",
+        "# ruff: ignore[TID251]\nimport os",
+        "import os  # ruff: ignore[TID251]",
+        "import os  # ruff: ignore[]",
+    )
+
+    def test_every_spelling_is_refused_naming_the_file_and_where_the_code_belongs(self):
+        for source in self.SPELLINGS:
+            for path in (CORE, "core/drivers/x.py", SHELL, "__main__.py", "stray.py"):
+                with self.subTest(source=source, path=path):
+                    problems = [p for p in problems_of(source, path) if "lint ignore" in p]
+                    self.assertEqual(len(problems), 1, problems)
+                    self.assertIn(f"shuttle/{path} line ", problems[0])
+                    self.assertIn("TID251", problems[0])
+                    self.assertIn("belongs in shuttle/shell/", problems[0])
+
+    def test_the_line_number_is_the_comments(self):
+        (problem,) = noqa_problems("x = 1\ny = 2\nimport os  # noqa: TID251\n", CORE)
+        self.assertIn("shuttle/core/decisions.py line 3 ", problem)
+
+    def test_each_comment_is_one_problem(self):
+        self.assertEqual(len(noqa_problems("a = 1  # noqa\nb = 2  # noqa: TID251\n", CORE)), 2)
+
+    def test_ignores_of_other_rules_and_words_that_only_look_alike_are_fine(self):
+        for source in (
+            "x = 1  # noqa: E501",
+            "x = 1  # noqa: E501, F401",
+            "# ruff: noqa: F401\nx = 1",
+            "# ruff: disable[E501]\nx = 1",
+            "x = 1  # a noqa mention in prose is not an ignore",
+            "x = 'import os  # noqa'",
+            'x = """\n# noqa\n"""',
+            "x = 1  # nota bene",
+            "x = 1  # noqanything",
+            "x = 1  # type: ignore",
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(noqa_problems(source, CORE), [])
+
+    def test_the_package_as_it_stands_carries_none(self):
+        for path, source in package_files():
+            with self.subTest(path=path):
+                self.assertEqual(noqa_problems(source, path), [])
 
 
 class TestTheCoreMentionsNoBuiltinThatReachesTheWorld(unittest.TestCase):

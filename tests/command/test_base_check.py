@@ -165,8 +165,22 @@ class GuardFilesTest(TemporaryRepositoryTest):
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stdout.splitlines(), [COULD_NOT])
 
+    def test_a_helper_that_is_missing_or_not_parseable_still_gets_the_line_and_a_failure(self):
+        helper = os.path.join(self.tree, "checks", "guards.py")
+        for what, content in (("missing", None), ("not parseable", "def f(:\n")):
+            with self.subTest(what=what):
+                if content is None:
+                    os.remove(helper)
+                else:
+                    self.write("checks/guards.py", content)
+                result = self.run_script("guard-files.sh", self.base)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout.splitlines(), [COULD_NOT])
+
     def test_a_missing_argument_is_refused(self):
-        self.assertEqual(self.run_script("guard-files.sh").returncode, 2)
+        result = self.run_script("guard-files.sh")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
 
 
 class BaseCheckTest(TemporaryRepositoryTest):

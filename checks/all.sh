@@ -24,6 +24,8 @@
 #   fix: changed <N> files ("1 file" for one); now run ./checks/all.sh
 #   fix: nothing to change
 #   fix: failed; ruff could not finish (its output is on standard error)
+# (the same last line is printed, exit 1, when checks/fixmode.py cannot run at all: missing, or
+# not parseable)
 # It does not run types or tests and does not say the change is sound. Lint findings it
 # cannot fix are left in place and shown on standard error; the check still fails on them.
 #
@@ -62,8 +64,20 @@ for tool in $tools; do
 done
 
 if [ "$mode" = fix ]; then
-    "$PYTHON" checks/fixmode.py
-    exit $?
+    # The helper's last line is a "fix:" line on every path it controls. If it could not even
+    # start (missing, or not parseable), it prints nothing of the kind, so this says so.
+    out=$("$PYTHON" checks/fixmode.py)
+    code=$?
+    case $(printf '%s\n' "$out" | tail -n 1) in
+        "fix: "*) ;;
+        *)
+            [ -n "$out" ] && printf '%s\n' "$out"
+            echo "fix: failed; ruff could not finish (its output is on standard error)"
+            exit 1
+            ;;
+    esac
+    printf '%s\n' "$out"
+    exit "$code"
 fi
 
 output=$(mktemp) || exit 2

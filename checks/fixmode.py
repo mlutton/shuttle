@@ -3,7 +3,9 @@
 Run from the tree's root by all.sh with the interpreter that has ruff. Files that changed
 are found by hashing every regular file before and after, keyed by exact path (names are
 kept as str with surrogateescape, so any bytes survive), so ruff alone decides what it
-touches. A file ruff could not parse or write is named as failed. Whatever goes wrong, the
+touches. A symbolic link to a file is hashed through to its target, under the link's own
+path, unless the target is already hashed under its own (a link to a file in the tree counts
+once; a link to a file outside the tree is listed as the link). A file ruff could not parse or write is named as failed. Whatever goes wrong, the
 last line is one of the documented "fix:" lines.
 Exit codes: 0 finished; 1 ruff could not finish (the last line says so).
 """
@@ -24,7 +26,14 @@ from names import escape_name
 FAILED_LINE = "fix: failed; ruff could not finish (its output is on standard error)"
 # Diagnostics that are not lint findings: ruff could not write a file, or could not parse it.
 COULD_NOT_FINISH = (None, "E902", "invalid-syntax")
-SKIPPED_FOLDERS = (".git", "__pycache__", ".ruff_cache", ".mypy_cache")
+# Folders the hashing leaves out: ruff's own default exclusions (read with
+# `ruff check --show-settings` at the pinned version) that are not source: the repository's
+# data, ruff's cache (ruff writes it itself, so it always changes) and mypy's cache. Nothing
+# else is skipped: `__pycache__` is NOT among ruff's default exclusions, so a source folder
+# of that name is linted, fixed and therefore hashed. Only the interpreter's own `.pyc` files
+# in such a folder are left out (see is_bytecode): ruff never rewrites them and a Python
+# process running meanwhile may write them. A folder holding a pyvenv.cfg is skipped too.
+SKIPPED_FOLDERS = (".git", ".ruff_cache", ".mypy_cache")
 
 
 def changed_files(before: dict[str, str], after: dict[str, str]) -> list[str]:
@@ -102,10 +111,23 @@ def render_lines(changed: list[str], failed: list[str], format_failed: bool) -> 
     return lines
 
 
-def regular_files(root: str) -> list[str]:
-    """Every regular file under root, not followed through symbolic links (a link to a file is
-    the same content as its target and would be counted twice), skipping what ruff does not
-    own: .git, caches and virtual environments."""
+def links_to_hash(hashed_targets: set[str], links: dict[str, str]) -> list[str]:
+    """Which symbolic links to regular files to hash under their own path: those whose resolved
+    target is not itself among the files already hashed (a link to such a file is the same
+    content and would be counted twice; a link to a file outside the tree, or inside a
+    skipped folder, would otherwise be rewritten by ruff without anyone seeing it).
+    links maps a link's path to its resolved target."""
+    return sorted(link for link, target in links.items() if target not in hashed_targets)
+
+
+def is_bytecode(folder: str, name: str) -> bool:
+    """A compiled file the interpreter keeps in a folder named __pycache__."""
+    return os.path.basename(folder) == "__pycache__" and name.endswith(".pyc")
+
+
+def tree_entries(root: str) -> list[str]:
+    """Every non-folder entry under root outside what ruff does not own: .git, caches and
+    virtual environments. Symbolic links to folders are not followed."""
     found = []
     for folder, folders, files in os.walk(root):
         folders[:] = [
@@ -114,8 +136,8 @@ def regular_files(root: str) -> list[str]:
             if f not in SKIPPED_FOLDERS
             and not os.path.exists(os.path.join(folder, f, "pyvenv.cfg"))
         ]
-        found += [os.path.join(folder, n) for n in files]
-    return [path for path in found if not os.path.islink(path) and os.path.isfile(path)]
+        found += [os.path.join(folder, n) for n in files if not is_bytecode(folder, n)]
+    return found
 
 
 def file_hash(path: str) -> str | None:
@@ -130,8 +152,14 @@ def file_hash(path: str) -> str | None:
 
 
 def snapshot(root: str) -> dict[str, str]:
+    """Content hash of each regular file by its path under root, and of each symbolic link to
+    a file whose target is not hashed under its own path (read through to the target)."""
+    entries = tree_entries(root)
+    regular = [p for p in entries if not os.path.islink(p) and os.path.isfile(p)]
+    links = {p: os.path.realpath(p) for p in entries if os.path.islink(p) and os.path.isfile(p)}
+    own = {os.path.realpath(p) for p in regular}
     hashes = {}
-    for full in regular_files(root):
+    for full in regular + links_to_hash(own, links):
         digest = file_hash(full)
         if digest is not None:
             hashes[os.path.relpath(full, root)] = digest
