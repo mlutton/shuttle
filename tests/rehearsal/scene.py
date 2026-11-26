@@ -13,6 +13,7 @@ from shuttle.shell import run
 from rehearsal.simulated_world import SimulatedWorld
 
 RECORDS = "/records"
+PLACE = "/place"
 DOCUMENT = "/input.json"
 REQUEST_ID = "inj-1"
 
@@ -22,6 +23,7 @@ def document(command="tool", limit=30, **extra):
         "format_version": 1,
         "request_id": REQUEST_ID,
         "records_location": RECORDS,
+        "place": PLACE,
         "thread": "t",
         "round": 1,
         "kind": "plain",
@@ -33,11 +35,12 @@ def document(command="tool", limit=30, **extra):
 
 
 def scene(doc=None, **program):
-    """A world with the document in place and a program "tool" (see SimulatedWorld.program;
+    """A world with the document in place, a clean place, and a program "tool" (see SimulatedWorld.program;
     by default one that exits at once)."""
     world = SimulatedWorld()
     world.make_folder(RECORDS)
     world.put_shipped_data()
+    world.make_place(PLACE, {"README": "the place\n"})
     world.put_file(DOCUMENT, json.dumps(doc or document()))
     world.program("tool", **(program if program else {}))
     return world

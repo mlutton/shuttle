@@ -1,5 +1,6 @@
 """The end-to-end test: one real request through every piece that is real so far: an input check,
-a gate, the boundary and the outcome record.
+a gate, the opening fingerprint of a real place, the boundary, the closing freeze and the outcome
+record.
 
 From the input document, through the real command and the real boundary, to the outcome record,
 asserting only what a caller can see: the exit code, what is printed, the record files, and what
@@ -8,8 +9,7 @@ a pipe, and the run's end is waited for, not slept to. It skips, with its reason
 that lacks the boundary, and fails there instead when SHUTTLE_REQUIRE_BOUNDARY is set (the
 hosted runner sets it).
 
-#46 (fingerprints) and #47 (delivery) extend this test when their pieces become real; they do
-not add one of their own.
+#47 (delivery) extends this test when its piece becomes real; it does not add one of its own.
 """
 
 import hashlib
@@ -21,6 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 flat = importlib.import_module("rehearsal.receipts").flat
 real_run = importlib.import_module("rehearsal.real_run")
+real_place = importlib.import_module("rehearsal.real_place")
 
 HANGS_WITH_A_CHILD = """
 import subprocess, sys, time
@@ -46,6 +47,11 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         asked = os.path.join(self.root, "asked")
         runbook = self.script("runbook.txt", REFERENCE_TEXT)
         doc = self.document(script, [up, marker], limit=1)
+        # the place is a linked working copy of the caller's repository, as it is in use
+        callers = os.path.join(self.root, "callers-repo")
+        real_place.make_checkout(callers)
+        doc["place"] = os.path.join(self.root, "linked-place")
+        head = real_place.make_linked_checkout(callers, doc["place"])
         doc["references"] = [  # an input check that passes
             {
                 "name": "runbook",
@@ -89,7 +95,10 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
             ("time_limit", "time_limit", "none"),
         )
         self.assertIs(ending["everything_stopped"], True)
+        saw = receipt["execution"]  # the script wrote nothing in the place
+        self.assertEqual((saw["fingerprint_before"], saw["fingerprint_after"]), (head, head))
+        self.assertIs(saw["changed_nothing"], True)
         self.assertEqual(self.processes_with(marker), 0)  # the child the script started is gone
         self.assertNotEqual(self.scope_state(), "active")
         self.assertTrue(os.path.exists(asked))  # the gate was asked, said yes, and the run went on
-        self.assertEqual(self.units_left(), [])  # no scope of the run or of the gate is left
+        self.assertEqual(self.units_left(), [])  # no scope of the run, a gate or the freeze is left

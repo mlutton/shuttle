@@ -380,6 +380,7 @@ _DOCUMENT_FIELDS = (
     "gates",
     "statement_location",
     "reach",
+    "place",
 )
 _REFERENCE_FIELDS = ("name", "path", "hash", "size", "hash_source")
 _GATE_FIELDS = ("name", "command", "arguments", "limit_seconds")
@@ -540,7 +541,7 @@ def _gate_refusal(gate: Document) -> tuple[str, str] | None:
 
 def _parts_refusal(raw: Document) -> tuple[str, str] | None:
     """The shape of the parts the refusal checks judge; what they hold is judged by those checks."""
-    for field in ("instruction", "instruction_hash", "statement_location"):
+    for field in ("instruction", "instruction_hash", "statement_location", "place"):
         if field in raw and not isinstance(raw[field], str):
             return "missing_setting", f"{field} is not text"
     for field, refuse in (("references", _reference_refusal), ("gates", _gate_refusal)):
@@ -711,6 +712,8 @@ def _changed_nothing(steps: Mapping[str, StepResult]) -> Pair:
         return pairs.none()
     if is_stand_in(before) or is_stand_in(after):
         return pairs.not_built()
+    if before.get("ok") is False or after.get("ok") is False:
+        return pairs.cannot_tell()  # a freeze that failed has no fingerprint to compare
     return pairs.value(before.get("fingerprint") == after.get("fingerprint"))
 
 

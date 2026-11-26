@@ -34,9 +34,11 @@ from shuttle.core.shapes import (
     RunState,
 )
 from shuttle.shell import (
+    closing_freeze,
     gates,
     input_checks,
     launch_executor,
+    opening_fingerprint,
     records,
     stand_ins,
     stop_and_confirm_empty,
@@ -186,22 +188,8 @@ def step_set_up_run_area(state: RunState) -> None:  # stand-in
     state["facts"]["setup"] = decisions.result_status(state["stand_ins"]["setup"])
 
 
-def step_take_opening_fingerprint(state: RunState) -> None:  # stand-in
-    state["stand_ins"]["opening_fingerprint"] = stand_ins.take_opening_fingerprint(None)
-    state["facts"]["opening_freeze"] = decisions.result_status(
-        state["stand_ins"]["opening_fingerprint"]
-    )
-
-
 def step_observe(state: RunState) -> None:
     state["executor_driver_observations"] = command.observe()
-
-
-def step_take_closing_freeze(state: RunState) -> None:  # stand-in
-    state["stand_ins"]["closing_freeze"] = stand_ins.take_closing_freeze(
-        None, state["stand_ins"].get("opening_fingerprint")
-    )
-    state["facts"]["closing_freeze"] = decisions.result_status(state["stand_ins"]["closing_freeze"])
 
 
 def step_deliver(state: RunState) -> None:  # stand-in
@@ -307,12 +295,12 @@ STEPS = (
     ("run_input_checks_and_executor_driver_check", step_run_input_checks_and_executor_driver_check),
     ("run_gates", step_run_gates),
     ("set_up_run_area", step_set_up_run_area),
-    ("take_opening_fingerprint", step_take_opening_fingerprint),
+    ("take_opening_fingerprint", opening_fingerprint.step),
     ("launch_executor", launch_executor.step),
     ("wait_for_the_end", wait_for_the_end.step),
     ("stop_everything_and_confirm_empty", stop_and_confirm_empty.step),
     ("observe", step_observe),
-    ("take_closing_freeze", step_take_closing_freeze),
+    ("take_closing_freeze", closing_freeze.step),
     ("deliver", step_deliver),
     ("move_kept_files", step_move_kept_files),
     ("tear_down", step_tear_down),

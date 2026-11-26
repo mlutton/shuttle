@@ -5,9 +5,9 @@ and deliver a signal at any call: no real disk, process or time. Whatever happen
 request id is claimed, an outcome record exists.
 
 Where an operation is the way into a step (a step that looks at the environment, starts a
-process, polls it, stops the boundary), the failure is made in the operation. Eight of the steps
-of a run are placeholders that touch nothing (set-up, fingerprints, observing, closing freeze,
-delivery, tidying, tear-down, and the write step itself raising outside its own guard), and the
+process, polls it, stops the boundary), the failure is made in the operation. Six of the steps
+of a run are placeholders that touch nothing (set-up, observing, delivery, tidying, tear-down,
+and the write step itself raising outside its own guard), and the
 gates step touches nothing when the document names no gate (a gate is reached through
 `processes.start` in test_refusal_flow.py); no operation can be made to fail inside them, so those
 points are reached by passing
@@ -57,13 +57,16 @@ IF_SIGNALLED.update(
 )
 IF_SIGNALLED.update({name: ("ended_by_itself", "none", "none") for name in AFTER_THE_CLAIM[6:]})
 
-# The operation that is the way into a step, and which call of it: the failure (or the signal)
-# is made there. A step not in this table is a placeholder: it is reached through the table.
+# The operation that is the way into a step, and which call of it (the input checks look at the
+# place first; the fingerprint looks again): the failure (or the signal) is made there. A step
+# not in this table is a placeholder: it is reached through the table.
 WAY_IN = {
-    "run_input_checks_and_executor_driver_check": "processes.find_program",
-    "launch_executor": "processes.start",
-    "wait_for_the_end": "processes.poll",
-    "stop_everything_and_confirm_empty": "boundary.stop",
+    "run_input_checks_and_executor_driver_check": ("processes.find_program", 1),
+    "take_opening_fingerprint": ("git.look_at_place", 2),
+    "launch_executor": ("processes.start", 1),
+    "wait_for_the_end": ("processes.poll", 1),
+    "stop_everything_and_confirm_empty": ("boundary.stop", 1),
+    "take_closing_freeze": ("git.freeze", 1),
 }
 STEP_TABLE_ONLY = [name for name in AFTER_THE_CLAIM if name not in WAY_IN]
 NEEDS_A_LIVE_PROCESS = ("launch_executor", "wait_for_the_end")
@@ -185,7 +188,8 @@ class Injection(unittest.TestCase):
                 world = a_scene(name)
                 steps = None
                 if name in WAY_IN:
-                    world.will_raise(WAY_IN[name], RuntimeError("injected"))
+                    operation, call = WAY_IN[name]
+                    world.will_raise(operation, RuntimeError("injected"), nth=call)
                 else:
                     steps = replaced(name, boom)
                 code, lines, err = scenes.run_in(world, steps)
@@ -217,7 +221,8 @@ class Injection(unittest.TestCase):
                 world = a_scene(name)
                 steps = None
                 if name in WAY_IN:
-                    world.on_call(WAY_IN[name], lambda world=world: world.deliver("SIGINT"))
+                    operation, call = WAY_IN[name]
+                    world.on_call(operation, lambda world=world: world.deliver("SIGINT"), nth=call)
                 else:
                     real = dict(run.STEPS)[name]
 

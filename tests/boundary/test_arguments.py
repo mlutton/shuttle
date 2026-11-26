@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 real_run = importlib.import_module("rehearsal.real_run")
+real_place = importlib.import_module("rehearsal.real_place")
 names_table = importlib.import_module("hostile.names_table")
 
 TRIES_TO_WRITE_THE_RECORDS = importlib.import_module(
@@ -71,3 +72,38 @@ class ARecordsLocationWithSpecialCharacters(real_run.RealRun):
         self.assertEqual([t for t in tries if "GOT THROUGH" in t], [])
         with open(os.path.join(self.records, "old.txt")) as f:
             self.assertEqual(f.read(), "original")
+
+
+# Each row of the table that a folder can be named, one folder inside the next: the place's own
+# path holds a dollar, a braced name, a percent, a backslash, spaces, a newline, a leading dash
+# and the rest. (Names that are not valid UTF-8 are left out, as in the test above.)
+FOLDER_NAMES = [
+    row["name"]
+    for row in names_table.NAMES
+    if row["holdable"]
+    and not row["path"]
+    and "\\udc" not in ascii(row["name"])
+    and row["name"] not in (".", "..")
+]
+
+WRITES_A_FILE_IN_THE_PLACE = """
+import os, sys
+open(os.path.join(sys.argv[1], "made by the script.txt"), "w").write("x")
+"""
+
+
+class APlaceWhoseOwnPathHoldsEveryAwkwardName(real_run.RealRun):
+    def test_is_looked_at_frozen_and_counted_with_its_path_unchanged(self):
+        self.assertGreaterEqual(len(FOLDER_NAMES), 30)
+        place = os.path.join(self.root, *FOLDER_NAMES)
+        real_place.make_checkout(place)
+        head = real_place.git(place, "rev-parse", "HEAD")
+        doc = self.document(self.script("writes.py", WRITES_A_FILE_IN_THE_PLACE), [place])
+        doc["place"] = place
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
+        saw = self.outcome()["receipt"]["execution"]
+        self.assertEqual(saw["fingerprint_before"]["value"], head)
+        self.assertEqual(saw["files_added"]["value"], 1)
+        frozen = saw["fingerprint_after"]["value"]
+        self.assertEqual(real_place.git(place, "rev-parse", f"{frozen}^"), head)

@@ -5,12 +5,16 @@ by one input, and the real files show what was and was not written.
 """
 
 import hashlib
+import importlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+real_place = importlib.import_module("rehearsal.real_place")
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,6 +36,8 @@ class RealCommand(unittest.TestCase):
         self.root = self._tmp.name
         self.records = os.path.join(self.root, "records")
         os.mkdir(self.records)
+        self.place = os.path.join(self.root, "place")
+        real_place.make_checkout(self.place)
         self.witness = os.path.join(self.root, "witness.txt")
         self.script = self.write("script.py", WRITES_WITNESS)
         self.gate_script = self.write("gate.py", GATE_ANSWERS)
@@ -47,6 +53,7 @@ class RealCommand(unittest.TestCase):
             "format_version": 1,
             "request_id": "req-1",
             "records_location": self.records,
+            "place": self.place,
             "thread": "t",
             "round": 1,
             "kind": "plain",

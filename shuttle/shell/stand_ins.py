@@ -18,16 +18,8 @@ def set_up_run_area(declared_setup: object) -> StepResult:
     return _stand_in("setup")
 
 
-def take_opening_fingerprint(place: object) -> StepResult:
-    return _stand_in("opening_fingerprint")
-
-
 def stop_and_confirm_empty(boundary: object) -> StepResult:
     return _stand_in("stop_confirmation")
-
-
-def take_closing_freeze(place: object, opening_fingerprint: object) -> StepResult:
-    return _stand_in("closing_freeze")
 
 
 def deliver(destination: object, closing_freeze: object) -> StepResult:

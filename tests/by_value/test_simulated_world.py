@@ -12,7 +12,7 @@ import os
 import sys
 import unittest
 
-from shuttle.core import shapes
+from shuttle.core import place, shapes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 simulated = importlib.import_module("rehearsal.simulated_world")
@@ -43,6 +43,23 @@ CALLS = {
     "identity.host_name": (),
     "identity.new_id": (),
     "identity.process_number": (),
+    "git.look_at_place": ("/place", {}),
+    "git.freeze": (
+        [
+            "systemd-run",
+            "--unit=u",
+            "--",
+            "sh",
+            "-c",
+            place.FREEZE_SCRIPT,
+            "sh",
+            "/place",
+            "a" * 40,
+            "ref",
+            "m",
+        ],
+        {},
+    ),
 }
 
 
@@ -75,7 +92,7 @@ def call(world, child, operation):
 class EveryOperationIsCountedAndCanBeFailed(unittest.TestCase):
     def test_the_table_has_a_row_for_each_operation_of_the_record_and_no_other(self):
         self.assertEqual(sorted(CALLS), sorted(every_operation()))
-        self.assertGreaterEqual(len(CALLS), 19)
+        self.assertGreaterEqual(len(CALLS), 21)
 
     def test_each_operation_is_counted_when_called(self):
         for operation in every_operation():
