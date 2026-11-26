@@ -1,8 +1,9 @@
 """Lists the guard files a pull request changes, as a job-summary section.
 
 Usage: guards.py <base commit>   (run inside the pull request's tree)
-Exit codes: 0 listed (or none changed); 1 git could not compare the commits (the summary
-then says so); 2 misuse.
+Exit codes: 0 listed (or none changed); 1 it could not be produced, whatever the cause
+(git could not compare the commits, an unexpected error; the output is then one line saying
+so); 2 misuse. Names are kept as str with surrogateescape and printed escaped.
 """
 
 # These scripts read files and run tools; the ban on that is for the package, not for them.
@@ -11,13 +12,14 @@ then says so); 2 misuse.
 import os
 import subprocess
 import sys
+import traceback
 
 from names import escape_name
 
 GUARD_FOLDERS = ("checks/", ".githooks/", ".github/")
 GUARD_FILES = ("pyproject.toml", "requirements-dev.txt", "tests/by_value/test_rules.py")
 NONE_CHANGED = "No guard files changed in this pull request."
-COULD_NOT_LIST = "The guard file listing could not be produced: git could not compare the commits."
+COULD_NOT_LIST = "The guard file listing could not be produced; see the job log for why."
 
 
 def parse_name_status(raw: bytes) -> list[tuple[str, str]]:
@@ -72,20 +74,29 @@ def render_summary(guards: list[tuple[str, str]]) -> str:
     )
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: guards.py <base commit>", file=sys.stderr)
-        return 2
+def run(base: str) -> int:
     diff = subprocess.run(
-        ["git", "diff", "--name-status", "--no-renames", "-z", argv[1], "HEAD"],
+        ["git", "diff", "--name-status", "--no-renames", "-z", base, "HEAD"],
         capture_output=True,
     )
     if diff.returncode != 0:
-        sys.stderr.write(os.fsdecode(diff.stderr))
+        sys.stderr.buffer.write(diff.stderr)
         print(COULD_NOT_LIST)
         return 1
     sys.stdout.write(render_summary(guard_changes(parse_name_status(diff.stdout))))
     return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: guards.py <base commit>", file=sys.stderr)
+        return 2
+    try:
+        return run(argv[1])
+    except Exception:  # an empty summary must never pass for a listing
+        traceback.print_exc()
+        print(COULD_NOT_LIST)
+        return 1
 
 
 if __name__ == "__main__":

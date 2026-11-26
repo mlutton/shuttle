@@ -18,6 +18,19 @@ class EscapeNameTest(unittest.TestCase):
     def test_control_characters_and_backslash_are_escaped(self):
         self.assertEqual(names.escape_name("a\nb\tc\\d\x01"), "a\\nb\\tc\\\\d\\x01")
 
+    def test_c1_controls_and_bidirectional_controls_are_escaped(self):
+        self.assertEqual(names.escape_name("a\x85b\x9fc"), "a\\x85b\\x9fc")
+        self.assertEqual(
+            names.escape_name("a\u202eb\u2066c\u200fd\u2029"), "a\\u202eb\\u2066c\\u200fd\\u2029"
+        )
+
+    def test_a_byte_that_is_not_valid_utf8_is_shown_as_an_escape_and_the_result_prints(self):
+        name = os.fsdecode(b"bad\xff.py")
+        shown = names.escape_name(name)
+        self.assertEqual(shown, "bad\\xff.py")
+        shown.encode("utf-8")  # no surrogate is left to crash a print
+        self.assertEqual(names.escape_name("\ud800"), "\\ud800")
+
     def test_everything_else_is_kept(self):
         for name in ("my file.py", "a`b<c>|d", "é.sh"):
             self.assertEqual(names.escape_name(name), name)
@@ -30,6 +43,12 @@ class GitOutputTest(unittest.TestCase):
             guards.parse_name_status(raw),
             [("M", "my file.py"), ("A", "line\nbreak.py"), ("D", "é.sh")],
         )
+
+    def test_a_name_that_is_not_valid_utf8_survives_and_renders_escaped(self):
+        parsed = guards.parse_name_status(b"M\0checks/bad\xff.sh\0")
+        text = guards.render_summary(guards.guard_changes(parsed))
+        self.assertIn("changed checks/bad\\xff.sh", text)
+        text.encode("utf-8")
 
     def test_no_output_is_no_changes(self):
         self.assertEqual(guards.parse_name_status(b""), [])
@@ -150,6 +169,25 @@ class FixModeDecisionsTest(unittest.TestCase):
             "message": "Unused\n  more",
         }
         self.assertEqual(fixmode.remaining_findings([d], "/r"), ["a b.py:3: F841 Unused"])
+
+    def test_odd_ruff_json_is_refused_not_misread(self):
+        for text in (
+            '{"a": 1}',
+            "null",
+            "[null]",
+            '[{"code": "F401"}]',
+            '[{"filename": 3}]',
+            '[{"filename": "a.py", "code": 5}]',
+            "not json",
+            "",
+        ):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                fixmode.parse_diagnostics(text)
+
+    def test_a_sparse_but_valid_diagnostic_is_accepted_and_described(self):
+        found = fixmode.parse_diagnostics('[{"filename": "/r/a.py", "code": "F401"}]')
+        self.assertEqual(fixmode.remaining_findings(found, "/r"), ["a.py:?: F401 "])
+        self.assertEqual(fixmode.parse_diagnostics("[]"), [])
 
     def test_nothing_changed_says_so(self):
         self.assertEqual(fixmode.render_lines([], [], False), ["fix: nothing to change"])

@@ -28,6 +28,10 @@ UNUSED_VARIABLE = "def f():\n    x = 1\n    return 2\n"  # F841: its only fix is
 CLEAN = "def f():\n    return 2\n"
 
 
+def fixmode_failed_line():
+    return "fix: failed; ruff could not finish (its output is on standard error)"
+
+
 class TreeTest(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
@@ -63,7 +67,9 @@ class FixModeTest(TreeTest):
     def test_one_tree_with_every_kind_of_file(self):
         # unsafe-fixes = true in the configuration must not turn unsafe fixes on
         config = self.read("pyproject.toml").replace(
-            "[tool.ruff]\n", "[tool.ruff]\nunsafe-fixes = true\n", 1
+            "[tool.ruff]\n",
+            '[tool.ruff]\nunsafe-fixes = true\nextend-include = ["*.pyw"]\n',
+            1,
         )
         self.write("pyproject.toml", config)
         self.write("my file.py", UNFORMATTED_WITH_UNUSED_IMPORT)  # a space in the name
@@ -76,9 +82,12 @@ class FixModeTest(TreeTest):
             self.write(newline_name, UNFORMATTED_WITH_UNUSED_IMPORT)
         except OSError:
             newline_name = None
+        self.write("w.pyw", "x  =  1\n")  # a file type only the configuration includes
+        os.symlink("my file.py", os.path.join(self.tree, "link.py"))  # counted once, not twice
         expected = ["changed: a.py", "changed: my file.py"]
         if newline_name:
             expected.append("changed: two\\nlines.py")
+        expected.append("changed: w.pyw")
         expected.append(f"fix: changed {len(expected)} files; now run ./checks/all.sh")
 
         result = self.script("--fix")
@@ -86,6 +95,7 @@ class FixModeTest(TreeTest):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), expected)
         self.assertEqual(self.read("my file.py"), "def f(a):\n    return a\n")
+        self.assertEqual(self.read("w.pyw"), "x = 1\n")
         self.assertEqual(self.read("deep.py"), TOO_DEEP)
         self.assertEqual(self.read("unused.py"), UNUSED_VARIABLE)
         self.assertEqual(self.read("clean.py"), CLEAN)
@@ -122,6 +132,62 @@ class FixModeTest(TreeTest):
         )
         self.assertEqual(self.read("ok.py"), "x = 1\n")
         self.assertEqual(self.read("ro.py"), "import os\nx=1\n")
+
+    def test_a_name_that_is_not_valid_utf8_is_shown_escaped_and_ends_with_a_fix_line(self):
+        # ruff 0.14.10 itself fails on such a name (exit 2, "Failed to serialize cache data")
+        try:
+            with open(os.path.join(os.fsencode(self.tree), b"bad\xff.py"), "w") as f:
+                f.write("import os\n")
+        except OSError:
+            self.skipTest("this filesystem refuses a name that is not valid UTF-8")
+        self.write("ok.py", "import os\n")
+        result = self.script("--fix")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines()[-1],
+            "fix: failed; ruff could not finish (its output is on standard error)",
+        )
+        self.assertIn("changed: bad\\xff.py", result.stdout.splitlines())
+
+    def test_whatever_goes_wrong_inside_the_helper_the_last_line_is_a_fix_line(self):
+        stub = os.path.join(self.tree, "stub", "ruff")
+        os.makedirs(stub)
+        with open(os.path.join(stub, "__main__.py"), "w") as f:
+            f.write('print(\'{"not": "a list"}\')\n')
+        open(os.path.join(stub, "__init__.py"), "w").close()
+        env = {"PATH": os.environ["PATH"], "PYTHONPATH": os.path.join(self.tree, "stub")}
+        done = subprocess.run(
+            [sys.executable, os.path.join(self.tree, "checks", "fixmode.py")],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=self.tree,
+            timeout=60,
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stdout.splitlines(),
+            ["fix: failed; ruff could not finish (its output is on standard error)"],
+        )
+
+    def test_a_crash_inside_the_helper_still_ends_with_the_fix_line(self):
+        env = {"PATH": os.environ["PATH"]}
+        code = (
+            "import sys; sys.path.insert(0, 'checks'); import fixmode; "
+            "fixmode.run = lambda: 1 / 0; sys.exit(fixmode.main())"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=self.tree,
+            timeout=60,
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(done.stdout.splitlines()[-1], fixmode_failed_line())
+        self.assertIn("ZeroDivisionError", done.stderr)
 
     def test_an_unknown_argument_is_refused_with_one_line_on_standard_error(self):
         for args in (["--bogus"], ["--fix", "extra"]):

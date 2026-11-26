@@ -19,6 +19,9 @@ GIT_ENV = {
 }
 
 
+COULD_NOT = "The guard file listing could not be produced; see the job log for why."
+
+
 class TemporaryRepositoryTest(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
@@ -51,11 +54,14 @@ class TemporaryRepositoryTest(unittest.TestCase):
         self.git("commit", "-q", "-m", message)
         return self.git("rev-parse", "HEAD")
 
-    def run_script(self, name, *args):
+    def run_script(self, name, *args, path="", python=None):
+        env = {**GIT_ENV, "PATH": path + GIT_ENV["PATH"]}
+        if python:
+            env["PYTHON"] = python
         return subprocess.run(
             [os.path.join(self.tree, "checks", name), *args],
             cwd=self.tree,
-            env=GIT_ENV,
+            env=env,
             capture_output=True,
             text=True,
             timeout=60,
@@ -128,9 +134,36 @@ class GuardFilesTest(TemporaryRepositoryTest):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
             result.stdout.splitlines(),
-            ["The guard file listing could not be produced: git could not compare the commits."],
+            [COULD_NOT],
         )
         self.assertNotEqual(result.stderr, "")
+
+    def test_a_guard_file_whose_name_is_not_valid_utf8_is_listed_escaped(self):
+        try:
+            with open(os.path.join(os.fsencode(self.tree), b"checks", b"bad\xff.sh"), "w") as f:
+                f.write("x\n")
+        except OSError:
+            self.skipTest("this filesystem refuses a name that is not valid UTF-8")
+        self.assertIn("added   checks/bad\\xff.sh", self.listing().splitlines())
+
+    def test_an_unexpected_failure_still_ends_with_the_could_not_be_produced_line(self):
+        stub = os.path.join(self.tree, "stub")
+        os.mkdir(stub)
+        git = os.path.join(stub, "git")
+        with open(git, "w") as f:
+            f.write("#!/bin/sh\nprintf 'M\\0a\\0D'\n")  # an odd count of fields
+        os.chmod(git, 0o755)
+        result = self.run_script("guard-files.sh", self.base, path=stub + os.pathsep)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout.splitlines(), [COULD_NOT])
+        self.assertIn("Traceback", result.stderr)
+
+    def test_a_helper_that_cannot_run_or_prints_nothing_still_gets_the_line_and_a_failure(self):
+        for python in ("/nonexistent/python", "/bin/true"):
+            with self.subTest(python=python):
+                result = self.run_script("guard-files.sh", self.base, python=python)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout.splitlines(), [COULD_NOT])
 
     def test_a_missing_argument_is_refused(self):
         self.assertEqual(self.run_script("guard-files.sh").returncode, 2)
