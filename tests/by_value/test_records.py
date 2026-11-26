@@ -159,6 +159,7 @@ class WholeOrAbsent(unittest.TestCase):
         world = a_world()
 
         def the_second_claim():
+            world.pid += 1  # another process: its temporary name is its own
             claim(world, {"header": {}, "input": {"who": "second"}})
 
         world.on_call("files.link", the_second_claim)  # just before the first one's put in place
@@ -169,6 +170,41 @@ class WholeOrAbsent(unittest.TestCase):
             records.read_record(world.operations, f"{FOLDER}/w-1.request.json")["input"],
             {"who": "second"},
         )
+
+
+class TheTemporaryNameKeepsItsOldForm(unittest.TestCase):
+    """The temporary's name is the record's name, `.tmp-`, and the process number: as short as it
+    was when the process number was read directly (a longer one refuses a run whose records
+    location is near the limit on the length of a path, which the base ran)."""
+
+    def temporary_name(self, writer, pid=31337):
+        world = a_world()
+        world.pid = pid
+        names = []
+        world.on_call("files.write_new", lambda: names.append(world.log[-1][1][0]))
+        writer(world)
+        (name,) = names
+        return name
+
+    def test_it_is_the_final_name_then_tmp_then_the_process_number(self):
+        for filename, write in WRITERS.values():
+            with self.subTest(filename):
+                self.assertEqual(self.temporary_name(write), f"{FOLDER}/{filename}.tmp-31337")
+
+    def test_it_is_no_longer_than_the_old_one_for_any_process_number_there_can_be(self):
+        # the largest process number on a 64-bit system is under 2**22 (seven digits)
+        for pid in (1, 99999, 4194304):
+            with self.subTest(pid=pid):
+                name = self.temporary_name(claim, pid)
+                self.assertLessEqual(
+                    len(name), len(f"{FOLDER}/w-1.request.json") + len(".tmp-") + 7
+                )
+
+    def test_the_process_number_is_asked_of_the_operations_not_of_an_id(self):
+        world = a_world()
+        claim(world)
+        self.assertEqual(world.counts["identity.process_number"], 1)
+        self.assertNotIn("identity.new_id", world.counts)
 
 
 class JoinPath(unittest.TestCase):

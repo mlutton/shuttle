@@ -45,6 +45,7 @@ class SimulatedWorld:
     def __init__(self, host="sim-host", environment=None):
         self.t = 0.0  # seconds on the simulated clock
         self.host = host
+        self.pid = 4242  # what the simulated process is numbered
         self.variables = dict(environment or {})
         self.folders = set()
         self.files = {}  # name -> bytearray; a linked name shares the bytearray
@@ -76,7 +77,11 @@ class SimulatedWorld:
             clock=ClockOperations(now=self._now, timestamp=self._timestamp, wait=self._wait),
             signals=SignalOperations(install=self._install, name_of=self._name_of),
             environment=EnvironmentOperations(read_variable=self._read_variable),
-            identity=IdentityOperations(host_name=self._host_name, new_id=self._new_id),
+            identity=IdentityOperations(
+                host_name=self._host_name,
+                new_id=self._new_id,
+                process_number=self._process_number,
+            ),
         )
 
     # ------------------------------------------------------------ setting the scene
@@ -288,7 +293,11 @@ class SimulatedWorld:
         self._enter("identity.host_name")
         return self.host
 
+    def _process_number(self):
+        self._enter("identity.process_number")
+        return self.pid
+
     def _new_id(self):
         self._enter("identity.new_id")
         self._ids += 1
-        return f"id{self._ids}"
+        return f"{self._ids:032x}"

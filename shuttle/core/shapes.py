@@ -99,7 +99,8 @@ class EnvironmentOperations(NamedTuple):
 
 class IdentityOperations(NamedTuple):
     host_name: Callable[[], str]
-    new_id: Callable[[], str]  # a fresh id: letters and digits only, never the same twice
+    new_id: Callable[[], str]  # a fresh id: 32 lower-case hex digits, never the same twice
+    process_number: Callable[[], int]  # this process's number, as the system gives it
 
 
 class Operations(NamedTuple):

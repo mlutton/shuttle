@@ -1,5 +1,6 @@
 """Who and what: the real set."""
 
+import os
 import socket
 import uuid
 
@@ -14,4 +15,8 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
-IDENTITY = IdentityOperations(host_name=host_name, new_id=new_id)
+def process_number() -> int:
+    return os.getpid()
+
+
+IDENTITY = IdentityOperations(host_name=host_name, new_id=new_id, process_number=process_number)

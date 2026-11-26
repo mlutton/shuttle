@@ -38,7 +38,7 @@ def _put_whole(world: Operations, final: str, record: Mapping[str, Any]) -> str:
         text = json.dumps(record, indent=2) + "\n"
     except Exception as error:
         raise RecordNotBuilt(type(error).__name__) from error
-    temporary = f"{final}.tmp-{world.identity.new_id()}"
+    temporary = f"{final}.tmp-{world.identity.process_number()}"
     try:
         world.files.write_new(temporary, text)
         world.files.link(temporary, final)

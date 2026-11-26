@@ -14,6 +14,7 @@ end as soon as what is waited for has happened.
 
 import importlib
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -262,7 +263,13 @@ class ContractCases:
         self.assertIsInstance(name, str)
         self.assertTrue(name)
 
-    def test_new_ids_are_letters_and_digits_only_and_never_the_same_twice(self):
+    def test_new_ids_are_32_lower_case_hex_digits_and_never_the_same_twice(self):
         ids = [self.world.identity.new_id() for _ in range(50)]
-        self.assertTrue(all(isinstance(i, str) and i.isascii() and i.isalnum() for i in ids))
+        self.assertTrue(all(re.fullmatch(r"[0-9a-f]{32}", i) for i in ids))
         self.assertEqual(len(set(ids)), 50)
+
+    def test_the_process_number_is_a_positive_whole_number_and_the_same_each_time(self):
+        number = self.world.identity.process_number()
+        self.assertIsInstance(number, int)
+        self.assertGreater(number, 0)
+        self.assertEqual(self.world.identity.process_number(), number)
