@@ -9,7 +9,7 @@ jobs:
     name: tests (unittest)
     runs-on: ubuntu-latest
     # As of 2026-11-25 the check takes under a minute; a run past 10 minutes is a hang.
-    # The suite inside it has its own 20 second budget (see checks/all.sh).
+    # The by-value tests inside it have their own 20 second budget (see checks/all.sh).
     timeout-minutes: 10
     env:
       # The tests that run a real executor need the boundary (systemd-run, systemctl, bwrap); with
