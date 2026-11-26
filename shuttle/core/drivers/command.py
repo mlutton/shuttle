@@ -7,7 +7,7 @@ its declarations as data. It never names an ending. There is no base class.
 from collections.abc import Mapping
 from typing import Any
 
-from shuttle.shapes import LaunchSpec
+from shuttle.core.shapes import LaunchSpec
 
 NAME = "command"
 VERSION = "1"

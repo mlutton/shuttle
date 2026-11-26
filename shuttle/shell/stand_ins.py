@@ -6,8 +6,8 @@ a receipt field fed by it says "cannot tell" instead of an invented value.
 
 from typing import Any
 
-from shuttle import fixed
-from shuttle.shapes import StepResult
+from shuttle.core import fixed
+from shuttle.core.shapes import StepResult
 
 
 def _stand_in(name: str, **extra: Any) -> StepResult:

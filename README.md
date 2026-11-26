@@ -24,7 +24,7 @@ Early build. It is not usable yet, and it may not be for a while. The first incr
 
 ## Checking a change
 
-One script decides whether a change is sound: lint (ruff, including a limit of three nested blocks and a ban on a core module importing the shell or a library that reaches the world), format check (ruff), strict types (mypy, over `shuttle/`) and the tests (under a 20 second budget). The pre-push hook and the hosted `tests (unittest)` job both run it and nothing else.
+One script decides whether a change is sound: lint (ruff, including a limit of three nested blocks and a ban on anything under `shuttle/core/` importing `shuttle/shell/` or a library that reaches the world), format check (ruff), strict types (mypy, over `shuttle/`) and the tests (under a 20 second budget). The pre-push hook and the hosted `tests (unittest)` job both run it and nothing else.
 
 Shuttle needs Python 3.12 or newer: 3.12 is the lowest version on which the whole suite passes (one command test fails on 3.11), and it is the version the hosted job uses.
 
@@ -59,7 +59,7 @@ python3 -m unittest discover -s tests
 
 The tests are sorted by seam, all run by that one command:
 
-- `tests/by_value/`: decisions as functions over plain data, and the rule test. Every module in `shuttle/` is listed as core or shell in `pyproject.toml` (`[tool.shuttle.modules]`); a core module may import only other core modules and a short allow-list of standard library modules, may not mention built-ins such as `open` and `print`, and no module may import a third-party package.
+- `tests/by_value/`: decisions as functions over plain data, and the rule test. Where a module sits in `shuttle/` is its classification, and nothing is registered anywhere: `shuttle/core/` (sub-folders included, executor drivers in `shuttle/core/drivers/`) decides and touches nothing, `shuttle/shell/` reaches the world, and only `__init__.py` and `__main__.py` may sit at the package root, each kept thin (the version string; one hand-over to the shell's command line). A module under `shuttle/core/` may import only other modules under `shuttle/core/` and a short allow-list of standard library modules, and may not mention built-ins such as `open` and `print`; a module anywhere else in the package fails the test, and no module may import a third-party package.
 - `tests/command/`: the real command, the check script and the hook, run as child processes or against a temporary folder.
 - `tests/boundary/`: tests of the boundary; none yet.
 

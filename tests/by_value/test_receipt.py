@@ -2,7 +2,8 @@
 
 import unittest
 
-from shuttle import core, fixed
+from shuttle.core import decisions as core
+from shuttle.core import fixed
 
 STAND_INS = {
     name: {fixed.STAND_IN_KEY: name}

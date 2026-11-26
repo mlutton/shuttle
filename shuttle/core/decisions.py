@@ -7,8 +7,8 @@ import math
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from shuttle import fixed
-from shuttle.shapes import (
+from shuttle.core import fixed
+from shuttle.core.shapes import (
     Conclusion,
     Decision,
     Document,

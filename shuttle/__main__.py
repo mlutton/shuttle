@@ -1,5 +1,3 @@
-import sys
+from shuttle.shell import cli
 
-from shuttle import cli
-
-sys.exit(cli.main(sys.argv[1:]))
+cli.entry()

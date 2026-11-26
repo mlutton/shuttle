@@ -3,7 +3,7 @@
 import copy
 import unittest
 
-from shuttle import core
+from shuttle.core import decisions as core
 
 GOOD = {
     "format_version": 1,

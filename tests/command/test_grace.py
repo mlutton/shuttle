@@ -14,7 +14,7 @@ import tempfile
 import time
 import unittest
 
-from shuttle import run
+from shuttle.shell import run
 
 LIMIT = 0.5  # long enough that the script has started and set its handler before the limit passes
 GRACE = 0.05

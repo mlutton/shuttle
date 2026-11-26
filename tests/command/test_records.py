@@ -6,7 +6,9 @@ import shutil
 import tempfile
 import unittest
 
-from shuttle import core, fixed, records
+from shuttle.core import decisions as core
+from shuttle.core import fixed
+from shuttle.shell import records
 
 HEADER_SOURCE = {
     "request_id": "req-1",

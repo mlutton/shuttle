@@ -2,7 +2,8 @@
 
 import unittest
 
-from shuttle import core, run
+from shuttle.core import decisions as core
+from shuttle.shell import run
 
 ORDER = [
     "read_and_validate_document",
