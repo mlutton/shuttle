@@ -27,6 +27,7 @@ GUARD_FILES = (
     "pyproject.toml",
     "requirements-dev.txt",
     "tests/by_value/test_rules.py",
+    "tests/by_value/test_check_helpers.py",
     "tests/by_value/test_name_functions.py",
     "tests/by_value/test_names_table.py",
     "tests/command/test_hostile_tables.py",
