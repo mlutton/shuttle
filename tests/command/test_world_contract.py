@@ -145,6 +145,9 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
             restore()
         self.assertEqual(changed, {"SIGINT", "SIGTERM", "SIGHUP"})
 
+    def test_the_process_number_is_this_processs(self):
+        self.assertEqual(self.world.identity.process_number(), os.getpid())
+
     def test_the_steady_clock_is_the_monotonic_clock(self):
         self.assertAlmostEqual(self.world.clock.now(), time.monotonic(), delta=1.0)
         self.assertNotAlmostEqual(self.world.clock.now(), time.time(), delta=1000.0)
