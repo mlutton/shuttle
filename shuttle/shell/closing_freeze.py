@@ -29,7 +29,7 @@ def step(state: RunState) -> None:
     try:
         command = place.freeze_argv(
             scope,
-            float(raw["time_limit_seconds"]),
+            float(raw.get("freeze_limit_seconds") or raw["time_limit_seconds"]),
             world.boundary.resolve(raw["place"]),
             opening["fingerprint"],
             source["request_id"],

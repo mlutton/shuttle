@@ -381,6 +381,7 @@ _DOCUMENT_FIELDS = (
     "statement_location",
     "reach",
     "place",
+    "freeze_limit_seconds",
 )
 _REFERENCE_FIELDS = ("name", "path", "hash", "size", "hash_source")
 _GATE_FIELDS = ("name", "command", "arguments", "limit_seconds")
@@ -544,6 +545,12 @@ def _parts_refusal(raw: Document) -> tuple[str, str] | None:
     for field in ("instruction", "instruction_hash", "statement_location", "place"):
         if field in raw and not isinstance(raw[field], str):
             return "missing_setting", f"{field} is not text"
+    if "freeze_limit_seconds" in raw and not _usable_time_limit(raw["freeze_limit_seconds"]):
+        return (
+            "missing_setting",
+            "freeze_limit_seconds must be a number from "
+            f"{boundary.SHORTEST_LIMIT_SECONDS:g} to {boundary.LONGEST_LIMIT_SECONDS} seconds",
+        )
     for field, refuse in (("references", _reference_refusal), ("gates", _gate_refusal)):
         if field not in raw:
             continue

@@ -477,5 +477,18 @@ class FreezeEdgeCases(FingerprintCase):
         )
 
 
+class AFreezeThatRunsOutOfItsLimit(FingerprintCase):
+    def test_is_a_failed_closing_freeze_though_the_executors_own_limit_was_far_off(self):
+        doc = self.document_for(WRITES_NOTHING_IN_THE_PLACE)
+        doc["freeze_limit_seconds"] = 1e-6  # the scope's shortest limit: it ends the freeze at once
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err, lines[-1]), (0, "", "execution_failed"))
+        found = outcome_fields(self)
+        self.assertEqual(found["ending"]["reason"], "closing_freeze_failed")
+        self.assertIn("limit", found["ending"]["reason_text"])
+        self.assertEqual(found["execution"]["fingerprint_after"], "cannot tell")
+        self.assertEqual(self.units_left(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

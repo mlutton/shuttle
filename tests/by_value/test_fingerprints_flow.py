@@ -240,6 +240,19 @@ class TheClosingFreeze(unittest.TestCase):
         self.assertIn(f"--unit={boundary.freeze_scope_name('inj-1')}", command)
         self.assertIn("RuntimeMaxSec=7000000us", command)
 
+    def test_the_freeze_has_the_limit_the_document_gives_it_and_the_runs_when_it_gives_none(self):
+        world = a_world(scenes.document(limit=7, freeze_limit_seconds=2.5))
+        scenes.run_in(world)
+        (command, _), _ = world.calls("git.freeze")[0]
+        self.assertIn("RuntimeMaxSec=2500000us", command)
+
+    def test_a_freeze_limit_that_is_not_a_usable_number_is_refused(self):
+        for bad in (0, -1, "5", None, True, float("inf"), 10**12):
+            with self.subTest(bad=bad):
+                world = a_world(scenes.document(freeze_limit_seconds=bad))
+                scenes.run_in(world)
+                self.assertEqual(ending_of(world), (CNS, "missing_setting", "input_check"))
+
     def test_the_freeze_scope_is_stopped_by_name_and_seen_empty_after_it(self):
         world = a_world()
         scenes.run_in(world)
