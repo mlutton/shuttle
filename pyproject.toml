@@ -80,6 +80,7 @@ max-nested-blocks = 3
 "sysconfig".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
 "site".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the shell (a module under shuttle/shell/) and pass the value in as an argument."
 "shuttle.shell".msg = "Nothing under shuttle/core/ may import shuttle/shell/. Move the code that needs it into the shell folder, or pass what it computes in as an argument."
+"shuttle.__main__".msg = "The entry file belongs to the shell: nothing under shuttle/core/ may import it. Move the code that needs it into shuttle/shell/."
 
 [tool.ruff.lint.flake8-tidy-imports]
 # Absolute imports only, so that a banned module cannot be reached by a relative form
