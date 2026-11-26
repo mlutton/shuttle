@@ -228,14 +228,6 @@ class CommandSeam(unittest.TestCase):
     def deep_nesting(self):
         return "[" * 1500 + "]" * 1500
 
-    def this_python_cannot_write_the_nesting(self):
-        """One cheap probe at the depth the tests use; no search over larger depths."""
-        try:
-            json.dumps({"a": json.loads(self.deep_nesting())}, indent=2)
-        except RecursionError:
-            return True
-        return False
-
     def test_a_request_record_cut_short_by_a_file_size_limit_leaves_no_record_and_the_id_works_afterwards(
         self,
     ):
@@ -279,31 +271,9 @@ class CommandSeam(unittest.TestCase):
             sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"]
         )
 
-    def test_a_document_whose_request_record_cannot_be_built_leaves_no_record_and_the_id_works_afterwards(
+    def test_a_document_nested_deeper_than_some_pythons_can_write_as_json_gets_both_records_written_and_parseable(
         self,
     ):
-        if not self.this_python_cannot_write_the_nesting():
-            self.skipTest("this Python writes this nesting; the next test covers what happens then")
-        text = json.dumps(self.document())[:-1] + f', "surprise": {self.deep_nesting()}}}'
-        done, lines = self.run_command(text)
-        self.assertNotEqual(done.returncode, 0)
-        self.assertEqual(lines[-1], "could_not_start")
-        self.assertEqual(len(done.stderr.strip().splitlines()), 1)
-        self.assertIn("NOT spent", done.stderr)
-        self.assertEqual(os.listdir(self.records), [], "neither record may exist")
-        done, lines = self.run_command(self.document())
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(lines[-1], "ended_by_itself")
-        self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
-        self.assertEqual(self.read("req-1.outcome.json")["header"]["request_id"], "req-1")
-
-    def test_a_document_nested_deeper_than_old_pythons_could_write_gets_both_records_written_and_parseable(
-        self,
-    ):
-        if self.this_python_cannot_write_the_nesting():
-            self.skipTest(
-                "this Python cannot write this nesting; the previous test covers what happens then"
-            )
         text = json.dumps(self.document())[:-1] + f', "surprise": {self.deep_nesting()}}}'
         done, lines = self.run_command(text)
         self.assertEqual(done.returncode, 0, done.stderr)

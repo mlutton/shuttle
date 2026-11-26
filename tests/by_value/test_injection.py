@@ -304,8 +304,7 @@ class Injection(unittest.TestCase):
     ):
         # By value: the input is kept as the text the caller gave, which can always be built into
         # a record, so the step that claims the id is given something that cannot be (a loop)
-        # in the text's place (the real command's test of this, test_command.py, skips where the
-        # Python can write the nesting it uses).
+        # in the text's place.
         real = dict(run.STEPS)["claim_request_id"]
 
         def with_a_loop(state):
