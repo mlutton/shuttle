@@ -334,6 +334,9 @@ def step_write_outcome_record(state: State) -> None:
     state["conclusion"] = conclude_run(state)
 
 
+# The ordered steps of a run are the design. That `run_steps` takes the table as an argument is a test
+# seam only for the placeholder steps, which touch nothing; as each becomes a real step that uses the
+# operations, its failures are made through them and the argument goes.
 STEPS = (
     ("read_and_validate_document", step_read_and_validate_document),
     ("claim_request_id", step_claim_request_id),

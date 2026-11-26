@@ -100,19 +100,19 @@ KNOWN_GAPS = {
     (
         "files.remove",
         "first",
-    ): "the request record is in place but the temporary's name could not be removed: the claim says the id is unusable although it was claimed, and the temporary stays",
+    ): "removing the request record's temporary name fails after the record was put in place: the run ends with a refusal that says the id is unusable and nothing was done, although the request record exists (the id is spent), and the temporary file stays in the records folder",
     (
         "files.remove",
         "last",
-    ): "the outcome record is in place but the temporary's name could not be removed: the receipt is printed as not written although it was, and the temporary stays",
+    ): "removing the outcome record's temporary name fails after the record was put in place: the run exits non-zero and prints the receipt as not written, although the outcome record exists, and the temporary file stays in the records folder",
     (
         "processes.poll",
         "last",
-    ): "the last look at the child, in the run's own finally, is outside every guard: an error there ends the run with no outcome record",
+    ): "the last look at the child, in the run's own finally, is outside every guard: an error there ends the run with a traceback and no outcome record (the request record is left, the id is spent)",
     (
         "signals.install",
         "first",
-    ): "the handlers are installed before the guard: an error there ends the run before anything was claimed (nothing is left behind)",
+    ): "the handlers are installed before the guard: an error there ends the run with a traceback before anything was claimed: no record of any kind, the id is not spent, nothing is left behind",
 }
 
 

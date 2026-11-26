@@ -8,12 +8,7 @@ from shuttle.core.shapes import ProcessOperations
 
 
 def find_program(command: str) -> bool:
-    try:
-        return shutil.which(command) is not None
-    # The handler is the old locate()'s, kept as it was. No input is known to make shutil.which
-    # raise on the one Python available (3.14): a name with a NUL gives None.
-    except (ValueError, OSError):  # not tested: no known input reaches it on Python 3.14
-        return False
+    return shutil.which(command) is not None
 
 
 def start(argv: Sequence[str], environment: Mapping[str, str]) -> subprocess.Popen[bytes]:

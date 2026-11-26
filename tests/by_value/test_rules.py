@@ -1174,10 +1174,10 @@ class TestTheLinterAgreesWithTheFolders(unittest.TestCase):
         self.lint = config["ruff"]["lint"]
         self.assertNotIn("shuttle", config, "the folders are the classification: no table")
 
-    def test_the_one_ban_list_bans_the_shell_folder_and_the_entry_file_and_nothing_else(self):
+    def test_the_one_ban_list_bans_the_entry_file_and_no_other_part_of_the_package(self):
         banned = set(self.lint["flake8-tidy-imports"]["banned-api"])
         ours = {m for m in banned if m.split(".")[0] == "shuttle"}
-        self.assertEqual(ours, {"shuttle.shell", "shuttle.__main__"})
+        self.assertEqual(ours, {"shuttle.__main__"})
 
     def test_ban_messages_name_the_world_folder_for_a_library_and_the_shell_for_the_package(self):
         banned = self.lint["flake8-tidy-imports"]["banned-api"]
@@ -1187,20 +1187,11 @@ class TestTheLinterAgreesWithTheFolders(unittest.TestCase):
                 self.assertIn(where, entry["msg"])
                 self.assertNotIn("per-file-ignores", entry["msg"])
 
-    def test_only_the_world_the_shell_folder_the_entry_file_and_the_tests_are_exempt_from_the_ban(
-        self,
-    ):
-        # The shell stays exempt from the linter because the same rule bans `shuttle.shell`
-        # (so that the core cannot import it) and a shell module importing its sibling is that
-        # import; ruff cannot ban an import in one folder only. The shell's own limits (an
-        # allow-list of standard library modules, no `open` or `print`, the world only in
-        # shell/cli.py) are the rule test's, above.
+    def test_only_the_world_and_the_tests_are_exempt_from_the_ban(self):
         exempt = {
             path for path, rules in self.lint["per-file-ignores"].items() if "TID251" in rules
         }
-        self.assertEqual(
-            exempt, {"shuttle/shell/**", "shuttle/world/**", "shuttle/__main__.py", "tests/**"}
-        )
+        self.assertEqual(exempt, {"shuttle/world/**", "tests/**"})
 
     def test_relative_imports_are_banned_so_the_ban_cannot_be_walked_around(self):
         self.assertEqual(self.lint["flake8-tidy-imports"]["ban-relative-imports"], "all")

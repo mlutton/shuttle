@@ -26,7 +26,8 @@ max-nested-blocks = 3
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # The linter's half of the isolation rule: it points at the line. The other half, an allow-list
-# for everything under shuttle/core/ and shuttle/shell/, is tests/by_value/test_rules.py. Where a
+# for everything under shuttle/core/ and shuttle/shell/ (and the rules about who may import whom),
+# is tests/by_value/test_rules.py. Where a
 # module sits is its classification: shuttle/core/ decides, shuttle/shell/ orchestrates (calls
 # the operations it is handed and the core), shuttle/world/ is the real set of operations and the
 # only place that reaches the world.
@@ -81,7 +82,6 @@ max-nested-blocks = 3
 "atexit".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
 "sysconfig".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
 "site".msg = "This reaches files, processes, the clock, signals, the network or the environment. Move it to the world (a module under shuttle/world/) and reach it through the operations the shell is handed."
-"shuttle.shell".msg = "Nothing under shuttle/core/ may import shuttle/shell/. Move the code that needs it into the shell folder, or pass what it computes in as an argument."
 "shuttle.__main__".msg = "The entry file belongs to the shell: nothing under shuttle/core/ may import it. Move the code that needs it into shuttle/shell/."
 
 [tool.ruff.lint.flake8-tidy-imports]
@@ -91,15 +91,11 @@ ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
 # Where the libraries on the ban list may be imported: the world folder, and the tests. Everything
-# else under shuttle/ (the core folder, sub-folders included) is held to the ban.
-# Two more are exempt, for another reason. The shell folder and the entry file import
-# `shuttle.shell`, which the same rule bans so that the core cannot (ruff cannot ban an import in
-# one folder only). The shell holds no banned library: tests/by_value/test_rules.py gives it an
-# allow-list of standard library modules, refuses `open` and `print`, and lets only shell/cli.py
-# import the world.
+# else under shuttle/ (the core and the shell folders, sub-folders included, and the entry file)
+# is held to the ban. That the core may not import the shell is the rule test's alone
+# (tests/by_value/test_rules.py): ruff cannot ban an import in one folder only, and banning
+# `shuttle.shell` here would fire inside the shell on every import of a sibling.
 "shuttle/world/**" = ["TID251"]  # the world: files, processes, the clock, signals, the environment, identity, streams
-"shuttle/shell/**" = ["TID251"]  # imports its own siblings (see above); held to its allow-list by the rule test
-"shuttle/__main__.py" = ["TID251"]  # hands straight to the shell's command line
 "tests/**" = ["TID251"]  # tests spawn processes and use temporary folders; the ban is for the package
 
 [tool.coverage.run]
