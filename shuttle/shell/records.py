@@ -15,11 +15,11 @@ from shuttle.core.shapes import Operations, OutcomeRecord, RequestRecord
 
 
 def request_path(records_location: str, request_id: str) -> str:
-    return decisions.join_path(records_location, f"{request_id}.request.json")
+    return decisions.join_path(records_location, decisions.record_name(request_id, "request"))
 
 
 def outcome_path(records_location: str, request_id: str) -> str:
-    return decisions.join_path(records_location, f"{request_id}.outcome.json")
+    return decisions.join_path(records_location, decisions.record_name(request_id, "outcome"))
 
 
 class RecordNotBuilt(Exception):
@@ -37,7 +37,7 @@ def _put_whole(world: Operations, final: str, record: RequestRecord | OutcomeRec
         text = json.dumps(record, indent=2) + "\n"
     except Exception as error:
         raise RecordNotBuilt(type(error).__name__) from error
-    temporary = f"{final}.tmp-{world.identity.process_number()}"
+    temporary = decisions.temporary_name(final, world.identity.process_number())
     try:
         world.files.write_new(temporary, text)
         world.files.link(temporary, final)

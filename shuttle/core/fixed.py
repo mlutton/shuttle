@@ -18,6 +18,15 @@ NOT_BUILT = "not built"  # the step behind this field is still a stand-in
 # While stand-ins exist NOT_BUILT is a state; when the last one is replaced, remove it from here.
 STATES = (VALUE, NONE, CANNOT_TELL, NOT_BUILT)
 
+# The characters a request id (and an environment variable's name) may hold. A dot is not one of
+# them, so a record's name, `<id>.<kind>.json`, reads back to its id and kind unambiguously.
+ID_CHARACTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+
+# The kinds of record that live beside each other under one request id. Only the request and
+# outcome records are written; the stop record and the liveness file have their names reserved
+# here and nothing more is defined for them yet.
+RECORD_KINDS = ("request", "outcome", "stop", "liveness")
+
 ENDINGS = (
     "ended_by_itself",
     "time_limit",

@@ -385,8 +385,8 @@ _DOCUMENT_FIELDS = (
 )
 _EXECUTOR_FIELDS = ("name", "settings")
 _COMMAND_SETTINGS = ("command", "arguments")
-_ID_CHARACTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-_NAME_CHARACTERS = _ID_CHARACTERS
+_ID_CHARACTERS = fixed.ID_CHARACTERS
+_NAME_CHARACTERS = fixed.ID_CHARACTERS
 
 
 def _valid_request_id(value: object) -> bool:
@@ -602,6 +602,35 @@ def build_environment(
 
 
 # --------------------------------------------------------------------- the records
+
+
+def record_name(request_id: str, kind: str) -> str:
+    """The name of a request id's record of one kind (a kind on `fixed.RECORD_KINDS`).
+
+    The one place record names are made. A request id holds no dot, so no id makes one kind's
+    name another kind's.
+    """
+    if kind not in fixed.RECORD_KINDS:
+        raise ValueError(f"{kind!r} is not a kind of record")
+    return f"{request_id}.{kind}.json"
+
+
+def read_record_name(name: str) -> tuple[str, str] | None:
+    """(request id, kind) of a record's name, or None when it is not one.
+
+    Matches the name against each kind's ending; the name is never cut at a separator.
+    """
+    for kind in fixed.RECORD_KINDS:
+        ending = f".{kind}.json"
+        request_id = name[: -len(ending)]
+        if name.endswith(ending) and _valid_request_id(request_id):
+            return request_id, kind
+    return None
+
+
+def temporary_name(name: str, process_number: int) -> str:
+    """The name a record has while it is being written: its own, then `.tmp-`, then the process number."""
+    return f"{name}.tmp-{process_number}"
 
 
 def join_path(folder: str, name: str) -> str:
