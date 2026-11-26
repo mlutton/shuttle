@@ -861,7 +861,7 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "input_hash": pairs.cannot_tell()
         if facts["input_hash"] is None
         else pairs.observed(facts["input_hash"]),
-        "reference_hashes": pairs.none(),
+        "reference_hashes": pairs.observed(facts.get("reference_hashes", {})),
         "fingerprint_before": _from_step(steps.get("opening_fingerprint"), "fingerprint"),
         "fingerprint_after": _from_step(steps.get("closing_freeze"), "fingerprint"),
         "changed_nothing": _changed_nothing(steps),
@@ -896,6 +896,14 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "executor_driver": driver,
         "executor": _executor_group_of(steps, launched),
     }
+
+
+def verified_reference_hashes(raw: object, input_check: str | None) -> dict[str, str]:
+    """The hash of each reference by name, when the input checks passed and so found each file
+    to hold the hash the document gave; empty when a check refused the run, or there are none."""
+    if input_check or not isinstance(raw, dict):
+        return {}
+    return {reference["name"]: reference["hash"] for reference in raw.get("references", [])}
 
 
 def _text_of(decision: Mapping[str, object], key: str) -> str:

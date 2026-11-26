@@ -8,6 +8,8 @@ a pipe, and the run's end is waited for, not slept to. It skips, with its reason
 that lacks the boundary, and fails there instead when SHUTTLE_REQUIRE_BOUNDARY is set (the
 hosted runner sets it).
 
+The statement (#48) is left by the script before it hangs and reads "right shape".
+
 #46 (fingerprints) and #47 (delivery) extend this test when their pieces become real; they do
 not add one of their own.
 """
@@ -22,9 +24,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 flat = importlib.import_module("rehearsal.receipts").flat
 real_run = importlib.import_module("rehearsal.real_run")
 
+# The statement the script leaves, right-shaped and untidy (no final newline): a kept copy that
+# was tidied or completed would differ from it.
+STATEMENT_TEXT = (
+    '{"claim": "partly_done", "summary": "Started; still running.", "evidence":'
+    ' [{"claim": "it ran", "command": "true"}], "not_tested": ["everything"],'
+    ' "feedback": "none"}'
+)
+
 HANGS_WITH_A_CHILD = """
 import subprocess, sys, time
 subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)", sys.argv[2]])
+open(sys.argv[3], "w").write(sys.argv[4])  # the statement, before the hang
 open(sys.argv[1], "w").write("up")
 time.sleep(600)
 """
@@ -45,7 +56,9 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         script = self.script("hangs.py", HANGS_WITH_A_CHILD)
         asked = os.path.join(self.root, "asked")
         runbook = self.script("runbook.txt", REFERENCE_TEXT)
-        doc = self.document(script, [up, marker], limit=1)
+        statement = os.path.join(self.root, "statement.json")
+        doc = self.document(script, [up, marker, statement, STATEMENT_TEXT], limit=1)
+        doc["kind"], doc["statement_location"] = "judge", statement  # a kind that expects one
         doc["references"] = [  # an input check that passes
             {
                 "name": "runbook",
@@ -93,3 +106,15 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertNotEqual(self.scope_state(), "active")
         self.assertTrue(os.path.exists(asked))  # the gate was asked, said yes, and the run went on
         self.assertEqual(self.units_left(), [])  # no scope of the run or of the gate is left
+        kept = os.path.join(self.records, "r-1.statement.kept")
+        with open(kept, "rb") as f:  # the statement is kept as written, even at the time limit
+            self.assertEqual(f.read(), STATEMENT_TEXT.encode())
+        self.assertEqual(
+            receipt["executor"],
+            {
+                "statement_state": "right_shape",
+                "statement_hash": hashlib.sha256(STATEMENT_TEXT.encode()).hexdigest(),
+                "statement_location": kept,
+                "claim": "partly_done",
+            },
+        )

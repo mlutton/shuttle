@@ -114,6 +114,14 @@ class Refusals(RealCommand):
             ),
             ("reference_hash_mismatch", self.document(references=[ref(runbook, "different")])),
             ("statement_location_occupied", self.document(kind="judge", statement_location=taken)),
+            (
+                "reference_missing",  # a folder: it has no hash yet, so it is refused as missing
+                self.document(references=[{**ref(self.root, "x"), "path": self.root}]),
+            ),
+            (
+                "unknown_field",  # a kind that expects no statement, given a location
+                self.document(statement_location=os.path.join(self.root, "free")),
+            ),
             ("reach_not_available", self.document(reach=["x"])),
             (
                 "no_time_limit",

@@ -7,7 +7,7 @@ until the validation code has looked at it) and what `records.read_record` reads
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, Protocol, TextIO, TypedDict
+from typing import Any, NamedTuple, NotRequired, Protocol, TextIO, TypedDict
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 
@@ -103,6 +103,12 @@ class StepResult(TypedDict, total=False):
     stop_reason: str
     stop_asker: str
     duration_seconds: float  # a real step that took time says how much
+    # what the step that moves kept files found; a key left out reads "cannot tell", "" reads "none"
+    statement_state: str
+    statement_hash: str
+    statement_location: str
+    claim: str
+    session_file: str
 
 
 class Facts(TypedDict, total=False):
@@ -230,6 +236,8 @@ class ReceiptFacts(TypedDict):
     executor_driver_observations: ExecutorDriverGroup | None
     stand_ins: dict[str, StepResult]  # step name to result; a step not reached is absent
     reason_text: str | None
+    # name to hash of each reference execution checked before the start; empty when it did not
+    reference_hashes: NotRequired[dict[str, str]]
 
 
 class OutcomeRecord(TypedDict):
@@ -281,6 +289,14 @@ class FileOperations(NamedTuple):
     exists: Callable[[str], bool]  # a name is there, even if it leads nowhere
     write_new: Callable[[str, str], None]  # create, write, flush to disk; FileExistsError if there
     link: Callable[[str, str], None]  # (existing name, new name); FileExistsError if new is there
+    copy: Callable[
+        [str, str], None
+    ]  # (existing name, new name): the same bytes, flushed; FileExistsError if new is there,
+    # FileNotFoundError if existing is not, IsADirectoryError if existing is a folder; nothing
+    # is left under the new name when it raises
+    hash: Callable[
+        [str], str
+    ]  # the sha256 of the file's bytes, as 64 lower-case hex digits; raises as read
     remove: Callable[[str], None]  # FileNotFoundError when there is no such name
     usable_folder: Callable[
         [str], bool

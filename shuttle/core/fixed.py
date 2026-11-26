@@ -9,6 +9,9 @@ from typing import Final
 # `format_version`); the records carry the other (the header's `record_version`).
 INPUT_VERSION = 1
 RECORD_VERSION = 2
+# The version of the notice execution adds to the instruction of a kind that expects a statement
+# (shuttle.core.notice). It changes whenever the notice's fixed words do.
+NOTICE_VERSION = 1
 
 # The four states of a receipt field, in the one list. A field is a pair of a state and a value.
 VALUE = "value"  # looked, and found this

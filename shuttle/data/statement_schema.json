@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "about": "The statement an executor leaves: one JSON object. Every field is required and no other field is allowed. A field has a kind: word (text that is one of the listed words), text (text that is not blank), list (a list whose every item has the item kind; it may be empty), object (an object with exactly the listed fields). The same schema is the shape of a builder's hand-off.",
+  "fields": [
+    {
+      "name": "claim",
+      "kind": "word",
+      "words": ["done", "partly_done", "blocked", "not_done"],
+      "about": "What the executor says about the work: done, partly_done, blocked or not_done."
+    },
+    {
+      "name": "summary",
+      "kind": "text",
+      "about": "What was done or found, in a few sentences."
+    },
+    {
+      "name": "evidence",
+      "kind": "list",
+      "items": {
+        "kind": "object",
+        "fields": [
+          {
+            "name": "claim",
+            "kind": "text",
+            "about": "One thing the executor says is true."
+          },
+          {
+            "name": "command",
+            "kind": "text",
+            "about": "A command that shows it, to run again; not a pasted log."
+          }
+        ]
+      },
+      "about": "What shows the claim is true, each as a claim and a command to run."
+    },
+    {
+      "name": "not_tested",
+      "kind": "list",
+      "items": {"kind": "text"},
+      "about": "What the executor did not test, one thing per item; empty when nothing was left out."
+    },
+    {
+      "name": "feedback",
+      "kind": "text",
+      "about": "Feedback on the input (the instruction and the references); say so when there is none."
+    }
+  ]
+}

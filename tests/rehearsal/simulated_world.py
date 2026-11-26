@@ -18,6 +18,7 @@ It is held to the real operations by the contract cases in contract.py.
 """
 
 import datetime
+import hashlib
 import os
 import signal
 
@@ -87,6 +88,8 @@ class SimulatedWorld:
                 exists=self._exists,
                 write_new=self._write_new,
                 link=self._link,
+                copy=self._copy,
+                hash=self._hash,
                 remove=self._remove,
                 usable_folder=self._usable_folder,
             ),
@@ -127,7 +130,11 @@ class SimulatedWorld:
 
     def put_shipped_data(self):
         """The data files shipped with the package, which a run reads (the kinds)."""
-        for name in ("kinds_with_statement.txt", "kinds_without_statement.txt"):
+        for name in (
+            "kinds_with_statement.txt",
+            "kinds_without_statement.txt",
+            "statement_schema.json",
+        ):
             path, data = _shipped(name)
             self.files[path] = bytearray(data)
 
@@ -265,6 +272,24 @@ class SimulatedWorld:
         if new in self.files or new in self.folders or new in self.dangling:
             raise FileExistsError(new)
         self.files[new] = self.files[existing]
+
+    def _copy(self, existing, new):
+        self._enter("files.copy", existing, new)
+        if existing in self.folders:
+            raise IsADirectoryError(existing)
+        if existing not in self.files or not self._parent_exists(new):
+            raise FileNotFoundError(existing)
+        if new in self.files or new in self.folders or new in self.dangling:
+            raise FileExistsError(new)
+        self.files[new] = bytearray(self.files[existing])  # its own bytes, not a shared name
+
+    def _hash(self, path):
+        self._enter("files.hash", path)
+        if path in self.folders:
+            raise IsADirectoryError(path)
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        return hashlib.sha256(bytes(self.files[path])).hexdigest()
 
     def _remove(self, path):
         self._enter("files.remove", path)
