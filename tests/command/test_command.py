@@ -177,7 +177,7 @@ class CommandSeam(unittest.TestCase):
             ("what_execution_saw", "changed_nothing"),
             ("what_execution_saw", "delivered"),
             ("what_execution_saw", "teardown_failure"),
-            ("what_execution_saw", "peak_memory"),
+            ("what_execution_saw", "peak_memory_bytes"),
             ("the_ending", "everything_stopped"),
             ("what_the_executor_said", "claim"),
         ]:

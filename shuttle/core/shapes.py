@@ -145,11 +145,11 @@ class ExecutionGroup(TypedDict):
     started_at: Pair
     ended_at: Pair
     observed_runtime: Pair
-    duration_gates: Pair
-    duration_opening_freeze: Pair
-    duration_executor: Pair
-    duration_closing_freeze: Pair
-    duration_delivery: Pair
+    duration_gates_seconds: Pair
+    duration_opening_freeze_seconds: Pair
+    duration_executor_seconds: Pair
+    duration_closing_freeze_seconds: Pair
+    duration_delivery_seconds: Pair
     input_hash: Pair
     reference_hashes: Pair
     fingerprint_before: Pair
@@ -164,8 +164,8 @@ class ExecutionGroup(TypedDict):
     delivery_branch_reason: Pair
     exit_code: Pair
     signal: Pair
-    peak_memory: Pair
-    processor_time: Pair
+    peak_memory_bytes: Pair
+    processor_time_seconds: Pair
     session_file_kept_at: Pair
     teardown_failure: Pair
     stop_reason: Pair

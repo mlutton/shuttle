@@ -114,7 +114,7 @@ class BuildReceipt(unittest.TestCase):
         self.assertEqual(receipt["the_ending"]["host"], pair("value", "somehost"))
         self.assertEqual(saw["exit_code"], pair("value", 3))
         self.assertEqual(saw["input_hash"], pair("value", "abc123"))
-        self.assertEqual(saw["duration_executor"], pair("value", 0.9))
+        self.assertEqual(saw["duration_executor_seconds"], pair("value", 0.9))
         self.assertEqual(
             receipt["what_the_executor_driver_observed"]["executor_driver_name"],
             pair("value", "command"),
@@ -128,9 +128,9 @@ class BuildReceipt(unittest.TestCase):
             "fingerprint_after",
             "changed_nothing",
             "delivered",
-            "duration_gates",
+            "duration_gates_seconds",
             "teardown_failure",
-            "peak_memory",
+            "peak_memory_bytes",
             "observed_runtime",
         ):
             with self.subTest(field):
@@ -189,6 +189,57 @@ class BuildReceipt(unittest.TestCase):
         self.assertEqual(
             core.build_receipt(ENDED, ran_facts())["the_ending"]["reason"], pair("none")
         )
+
+
+# Every key that holds a quantity, with the unit in its name.
+QUANTITY_KEYS = {
+    "what_execution_saw": (
+        "duration_gates_seconds",
+        "duration_opening_freeze_seconds",
+        "duration_executor_seconds",
+        "duration_closing_freeze_seconds",
+        "duration_delivery_seconds",
+        "peak_memory_bytes",
+        "processor_time_seconds",
+    ),
+}
+UNITS = ("_seconds", "_bytes")
+# Words in a key that say it holds an amount of time or memory.
+AMOUNT_WORDS = ("duration", "memory", "processor_time")
+
+
+class UnitsAreInTheKeyNames(unittest.TestCase):
+    def test_each_key_that_holds_a_quantity_is_on_the_list_with_its_unit(self):
+        for group, names in QUANTITY_KEYS.items():
+            for name in names:
+                with self.subTest(name):
+                    self.assertIn(name, fixed.RECEIPT_GROUPS[group])
+                    self.assertTrue(name.endswith(UNITS), name)
+
+    def test_no_key_that_names_an_amount_of_time_or_memory_lacks_its_unit(self):
+        every = [n for names in fixed.RECEIPT_GROUPS.values() for n in names]
+        for name in every:
+            if any(word in name for word in AMOUNT_WORDS):
+                with self.subTest(name):
+                    self.assertTrue(name.endswith(UNITS), f"{name} has no unit in its name")
+
+    def test_the_old_names_without_a_unit_are_gone(self):
+        every = {n for names in fixed.RECEIPT_GROUPS.values() for n in names}
+        for old in (
+            "duration_gates",
+            "duration_opening_freeze",
+            "duration_executor",
+            "duration_closing_freeze",
+            "duration_delivery",
+            "peak_memory",
+            "processor_time",
+        ):
+            with self.subTest(old):
+                self.assertNotIn(old, every)
+
+    def test_the_executor_duration_is_a_value_in_seconds(self):
+        saw = core.build_receipt(ENDED, ran_facts())["what_execution_saw"]
+        self.assertEqual(saw["duration_executor_seconds"], pair("value", 0.9))
 
 
 class ARightFieldIsRefusedWhenItIsNotAPair(unittest.TestCase):

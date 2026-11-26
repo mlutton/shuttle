@@ -697,11 +697,11 @@ def _execution_group_of(value: Pair) -> ExecutionGroup:
         "started_at": value,
         "ended_at": value,
         "observed_runtime": value,
-        "duration_gates": value,
-        "duration_opening_freeze": value,
-        "duration_executor": value,
-        "duration_closing_freeze": value,
-        "duration_delivery": value,
+        "duration_gates_seconds": value,
+        "duration_opening_freeze_seconds": value,
+        "duration_executor_seconds": value,
+        "duration_closing_freeze_seconds": value,
+        "duration_delivery_seconds": value,
         "input_hash": value,
         "reference_hashes": value,
         "fingerprint_before": value,
@@ -716,8 +716,8 @@ def _execution_group_of(value: Pair) -> ExecutionGroup:
         "delivery_branch_reason": value,
         "exit_code": value,
         "signal": value,
-        "peak_memory": value,
-        "processor_time": value,
+        "peak_memory_bytes": value,
+        "processor_time_seconds": value,
         "session_file_kept_at": value,
         "teardown_failure": value,
         "stop_reason": value,
@@ -785,11 +785,15 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "ended_at": pairs.of_known(facts["ended_at"]),
         # The runtime is observed through the boundary, which is a stand-in.
         "observed_runtime": pairs.not_built() if launched else unlooked,
-        "duration_gates": _from_step(steps.get("gates"), "duration"),
-        "duration_opening_freeze": _from_step(steps.get("opening_fingerprint"), "duration"),
-        "duration_executor": pairs.of_known(facts["executor_duration"]),
-        "duration_closing_freeze": _from_step(steps.get("closing_freeze"), "duration"),
-        "duration_delivery": _from_step(steps.get("delivery"), "duration"),
+        "duration_gates_seconds": _from_step(steps.get("gates"), "duration_seconds"),
+        "duration_opening_freeze_seconds": _from_step(
+            steps.get("opening_fingerprint"), "duration_seconds"
+        ),
+        "duration_executor_seconds": pairs.of_known(facts["executor_duration"]),
+        "duration_closing_freeze_seconds": _from_step(
+            steps.get("closing_freeze"), "duration_seconds"
+        ),
+        "duration_delivery_seconds": _from_step(steps.get("delivery"), "duration_seconds"),
         "input_hash": pairs.value(facts["input_hash"])
         if facts["input_hash"]
         else pairs.cannot_tell(),
@@ -806,8 +810,10 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "delivery_branch_reason": _from_step(steps.get("delivery"), "branch_reason"),
         "exit_code": pairs.of_known(facts["exit_code"]),
         "signal": pairs.of_known(facts["signal"]),
-        "peak_memory": _from_step(boundary, "peak_memory") if launched else unlooked,
-        "processor_time": _from_step(boundary, "processor_time") if launched else unlooked,
+        "peak_memory_bytes": _from_step(boundary, "peak_memory_bytes") if launched else unlooked,
+        "processor_time_seconds": _from_step(boundary, "processor_time_seconds")
+        if launched
+        else unlooked,
         "session_file_kept_at": _from_step(steps.get("kept_files"), "session_file"),
         "teardown_failure": _from_step(steps.get("teardown"), "failure"),
         "stop_reason": _from_step(steps.get("stop_confirmation"), "stop_reason"),
