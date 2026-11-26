@@ -1,4 +1,4 @@
-"""The boundary: decisions about the box the executor runs in, as pure functions.
+"""The boundary: decisions about the box the executor (and each gate) runs in, as pure functions.
 
 The box is a systemd user scope around bubblewrap. The scope owns the time limit (its maximum
 runtime) and the grace between asking and killing (its stop timeout); it ends everything inside
@@ -9,6 +9,8 @@ here touches the world: the shell reads the properties and acts on these answers
 import json
 import math
 from collections.abc import Mapping, Sequence
+
+from shuttle.core import refusals
 
 # The limit's bounds, in seconds. The scope's timer takes whole microseconds, and a value that
 # rounds to zero microseconds means "no maximum", so the shortest limit is one microsecond. The
@@ -22,6 +24,7 @@ LONGEST_LIMIT_SECONDS = 10**9
 GRACE_SECONDS = 3
 
 SCOPE_PREFIX = "shuttle-run-"
+GATE_SCOPE_PREFIX = "shuttle-gate-"
 PROPERTIES = ("LoadState", "ActiveState", "Result")
 
 # The variables the shell needs to reach the user's systemd. The executor does not get them
@@ -187,3 +190,53 @@ def wait_cause(child_exited: bool, signal_name: str | None) -> str | None:
     if signal_name:
         return "signal"
     return None
+
+
+# A gate is not boxed in bubblewrap: it runs in a scope of its own, with its limit on the scope,
+# started through this one line of shell. The line says on the report descriptor that the gate's
+# command is about to start (the scope's own tool exits with status 1 when it cannot make the
+# scope, which a gate would read as its "no"), takes the variables that reached the user's systemd
+# out of the gate's environment, and becomes the gate's command, so the status the shell sees is
+# the gate's own.
+GATE_STARTED = "started"
+GATE_SCRIPT = f'echo {GATE_STARTED} >&"$1"; shift; unset {" ".join(BUS_VARIABLES)}; exec "$@"'
+
+
+def gate_scope_name(request_id: str, index: int) -> str:
+    """A gate's scope name: the request id and the gate's place in the list."""
+    return f"{GATE_SCOPE_PREFIX}{request_id}-{index}"
+
+
+def gate_argv(name: str, limit_seconds: float, argv: Sequence[str], report_fd: int) -> list[str]:
+    """The command that starts the gate `argv` in a scope of its own with its limit on the scope
+    and the grace between asking and killing; `report_fd` is where it says it started."""
+    return [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--quiet",
+        f"--unit={name}",
+        "-p",
+        f"RuntimeMaxSec={limit_microseconds(limit_seconds)}us",
+        "-p",
+        f"TimeoutStopSec={GRACE_SECONDS}s",
+        "--",
+        "sh",
+        "-c",
+        GATE_SCRIPT,
+        "sh",
+        str(report_fd),
+        *argv,
+    ]
+
+
+def gate_answer(report: str, why: str, returncode: int | None) -> str:
+    """A gate's answer: "yes", "no" or "failed", from what it reported, why its scope ended
+    (`why_ended`, read after the scope was stopped) and the status its process ended with.
+
+    Only a gate that said it started, whose scope was seen settled and did not end by its limit,
+    and that ended with a status (not a signal) answers by that status; any other ending is failed.
+    """
+    started = GATE_STARTED in report.split()
+    exit_code = returncode if returncode is not None and returncode >= 0 else None
+    return refusals.gate_answer(started, exit_code, why != ENDED)

@@ -84,10 +84,8 @@ class RealRun(unittest.TestCase):
         if proc.poll() is None:
             proc.kill()
             proc.communicate()
-        subprocess.run(
-            ["systemctl", "--user", "stop", f"shuttle-run-{request_id}.scope"],
-            capture_output=True,
-        )
+        for name in (f"shuttle-run-{request_id}", f"shuttle-gate-{request_id}-0"):
+            subprocess.run(["systemctl", "--user", "stop", f"{name}.scope"], capture_output=True)
 
     def run_to_the_end(self, doc, path_first=None):
         """Run the command to its end: (exit code, standard output lines, standard error)."""
@@ -98,6 +96,15 @@ class RealRun(unittest.TestCase):
     def outcome(self, request_id="r-1"):
         with open(os.path.join(self.records, f"{request_id}.outcome.json")) as f:
             return json.load(f)
+
+    def units_left(self):
+        """The Shuttle units the user's systemd still has loaded, failed ones too."""
+        done = subprocess.run(
+            ["systemctl", "--user", "list-units", "--all", "--no-legend", "shuttle-*"],
+            capture_output=True,
+            text=True,
+        )
+        return done.stdout.split()
 
     def scope_state(self, request_id="r-1"):
         done = subprocess.run(

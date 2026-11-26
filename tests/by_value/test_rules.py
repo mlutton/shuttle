@@ -656,10 +656,10 @@ class TestTheCoreImportsOnlyTheCoreAndAnAllowList(unittest.TestCase):
             "from shuttle import shell",
             "import shuttle.shell.run",
             "from shuttle.shell import run",
-            "from shuttle.shell.run import end_child",
+            "from shuttle.shell.run import run_steps",
             "from .. import shell",
             "from ..shell import run",
-            "from ..shell.run import end_child",
+            "from ..shell.run import run_steps",
             "def f():\n    from shuttle.shell import records\n    return records",
             "def f():\n    from ..shell import cli\n    return cli",
         ):

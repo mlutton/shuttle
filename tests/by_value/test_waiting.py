@@ -213,6 +213,45 @@ def a_state(world, **program):
     }
 
 
+class AGatesAnswerFromHowItsScopeEnded(unittest.TestCase):
+    def test_rows(self):
+        started = boundary.GATE_STARTED + "\n"
+        ended, timed_out, cannot_tell = boundary.ENDED, boundary.TIMED_OUT, boundary.CANNOT_TELL
+        for label, given, answer in (
+            ("exit 0 is yes", (started, ended, 0), "yes"),
+            ("exit 1 is no", (started, ended, 1), "no"),
+            ("another exit code is failed", (started, ended, 2), "failed"),
+            ("a command that could not be run is failed", (started, ended, 127), "failed"),
+            ("killed by a signal is failed", (started, ended, -9), "failed"),
+            ("no exit status is failed", (started, ended, None), "failed"),
+            ("the limit passed is failed even with exit 0", (started, timed_out, 0), "failed"),
+            ("the limit passed is failed even with exit 1", (started, timed_out, 1), "failed"),
+            ("a scope that cannot be read is failed", (started, cannot_tell, 0), "failed"),
+            ("no start reported is failed, exit 1 or not", ("", ended, 1), "failed"),
+            ("a start nobody reported is not a yes", ("", ended, 0), "failed"),
+            ("a report that is not the start is not a start", ("nope\n", ended, 0), "failed"),
+        ):
+            with self.subTest(label):
+                self.assertEqual(boundary.gate_answer(*given), answer)
+
+    def test_a_gate_runs_in_its_own_scope_with_its_limit_and_without_the_variables_for_systemd(
+        self,
+    ):
+        argv = boundary.gate_argv("shuttle-gate-r-0", 2.5, ["check", "--fast"], 7)
+        self.assertEqual(argv[:4], ["systemd-run", "--user", "--scope", "--quiet"])
+        self.assertIn("--unit=shuttle-gate-r-0", argv)
+        self.assertIn("RuntimeMaxSec=2500000us", argv)
+        self.assertIn("TimeoutStopSec=3s", argv)
+        self.assertNotIn("bwrap", argv)
+        script = argv[argv.index("-c") + 1]
+        for variable in boundary.BUS_VARIABLES:
+            self.assertIn(variable, script.split("unset")[1].split(";")[0])
+        self.assertEqual(argv[argv.index("-c") + 2 :], ["sh", "7", "check", "--fast"])
+
+    def test_a_gate_scope_is_named_from_the_request_and_its_place(self):
+        self.assertEqual(boundary.gate_scope_name("r-1", 2), "shuttle-gate-r-1-2")
+
+
 class TheWaitAndStopStepsGiveTheseFacts(unittest.TestCase):
     def test_an_executor_that_exited_gives_exited_and_a_stop_that_empties_the_boundary(self):
         world = simulated.SimulatedWorld()

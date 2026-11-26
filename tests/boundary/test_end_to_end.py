@@ -1,4 +1,5 @@
-"""The end-to-end test: one real request through every piece that is real so far.
+"""The end-to-end test: one real request through every piece that is real so far: an input check,
+a gate, the boundary and the outcome record.
 
 From the input document, through the real command and the real boundary, to the outcome record,
 asserting only what a caller can see: the exit code, what is printed, the record files, and what
@@ -11,6 +12,7 @@ hosted runner sets it).
 not add one of their own.
 """
 
+import hashlib
 import importlib
 import os
 import sys
@@ -27,12 +29,40 @@ time.sleep(600)
 """
 
 
+GATE_THAT_SAYS_YES = """
+import sys
+open(sys.argv[1], "w").write("asked")
+"""
+
+REFERENCE_TEXT = "the runbook"
+
+
 class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
     def test_a_script_that_hangs_ends_as_time_limit_and_nothing_it_started_is_left(self):
         up = self.pipe("up")
         marker = "shuttle-e2e-child-marker"
         script = self.script("hangs.py", HANGS_WITH_A_CHILD)
-        proc = self.start(self.document(script, [up, marker], limit=1))
+        asked = os.path.join(self.root, "asked")
+        runbook = self.script("runbook.txt", REFERENCE_TEXT)
+        doc = self.document(script, [up, marker], limit=1)
+        doc["references"] = [  # an input check that passes
+            {
+                "name": "runbook",
+                "path": runbook,
+                "hash": hashlib.sha256(REFERENCE_TEXT.encode()).hexdigest(),
+                "size": len(REFERENCE_TEXT),
+                "hash_source": "caller",
+            }
+        ]
+        doc["gates"] = [  # a gate that says yes
+            {
+                "name": "quota",
+                "command": sys.executable,
+                "arguments": [self.script("gate.py", GATE_THAT_SAYS_YES), asked],
+                "limit_seconds": 60,
+            }
+        ]
+        proc = self.start(doc)
         with open(up) as f:
             f.read()  # blocks until the script is running
         stdout, stderr = proc.communicate(timeout=120)
@@ -50,3 +80,5 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertIs(ending["everything_stopped"], True)
         self.assertEqual(self.processes_with(marker), 0)  # the child the script started is gone
         self.assertNotEqual(self.scope_state(), "active")
+        self.assertTrue(os.path.exists(asked))  # the gate was asked, said yes, and the run went on
+        self.assertEqual(self.units_left(), [])  # no scope of the run or of the gate is left

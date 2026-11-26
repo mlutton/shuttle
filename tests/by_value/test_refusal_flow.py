@@ -24,6 +24,11 @@ CNS = "could_not_start"
 GATE = {"name": "quota", "command": "gate", "arguments": [], "limit_seconds": 5}
 
 
+def ran(world):
+    """The programs that were run, in order, each as it was named inside its scope."""
+    return [child.argv[0] for child in world.children]
+
+
 def sha(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -49,7 +54,7 @@ class RefusalCase(unittest.TestCase):
         self.assertEqual(ending_of(world), (CNS, reason, step))
         self.assertEqual(lines[-1], CNS)
         self.assertEqual(core.check_receipt(scenes.outcome(world)["receipt"]), [])
-        self.assertNotIn("tool", [argv[0] for argv, _ in world.started], "the executor started")
+        self.assertNotIn("tool", ran(world), "the executor started")
         return world
 
 
@@ -149,18 +154,19 @@ class Gates(RefusalCase):
         self,
     ):
         doc = scenes.document(gates=[GATE])
-        world = self.assertRefused(
-            doc, "gate_said_no", "gates", gate={"exits_after": 0, "exit_code": 1}
-        )
+        world = self.assertRefused(doc, "gate_said_no", "gates", gate={"exit_code": 1})
         text = flat(scenes.outcome(world)["receipt"])["ending"]["reason_text"]
         self.assertIn("quota", text)
         self.assertIn("no", text)
 
     def test_a_gate_that_fails_refuses_with_its_name_and_answer(self):
         for label, program in (
-            ("another exit code", {"exits_after": 0, "exit_code": 3}),
-            ("never ends", {"exits_after": None}),
-            ("ignores being asked to end", {"exits_after": None, "obeys": ("kill",)}),
+            ("another exit code", {"exit_code": 3}),
+            ("passes its limit", {"times_out": True}),
+            (
+                "passes its limit and ignores being asked to end",
+                {"times_out": True, "survives_stop": True},
+            ),
         ):
             with self.subTest(label):
                 doc = scenes.document(gates=[dict(GATE, limit_seconds=1)])
@@ -176,24 +182,24 @@ class Gates(RefusalCase):
 
     def test_gates_run_in_order_before_the_executor_and_all_say_yes(self):
         doc = scenes.document(gates=[GATE, dict(GATE, name="disk")])
-        world, code, _, err = self.run_it(doc, gate={"exits_after": 0, "exit_code": 0})
+        world, code, _, err = self.run_it(doc, gate={"exit_code": 0})
         self.assertEqual(code, 0, err)
-        self.assertEqual([argv[0] for argv, _ in world.started], ["gate", "gate", "tool"])
+        self.assertEqual(ran(world), ["gate", "gate", "tool"])
         self.assertEqual(ending_of(world)[0], "ended_by_itself")
 
     def test_the_first_gate_that_does_not_say_yes_stops_the_rest(self):
         doc = scenes.document(gates=[GATE, dict(GATE, name="disk")])
-        world, _, _, _ = self.run_it(doc, gate={"exits_after": 0, "exit_code": 1})
+        world, _, _, _ = self.run_it(doc, gate={"exit_code": 1})
         self.assertEqual(len(world.started), 1)
 
     def test_a_gate_is_given_the_path_and_nothing_else(self):
         doc = scenes.document(gates=[GATE])
-        world, _, _, _ = self.run_it(doc, gate={"exits_after": 0})
+        world, _, _, _ = self.run_it(doc, gate={})
         self.assertEqual(list(world.started[0][1]), ["PATH"])
 
     def test_a_failure_in_the_operation_that_starts_a_gate_is_a_failed_gate(self):
         world = scenes.scene(scenes.document(gates=[GATE]))
-        world.program("gate", exits_after=0)
+        world.program("gate")
         world.will_raise("processes.start", OSError("injected"))
         scenes.run_in(world)
         self.assertEqual(ending_of(world), (CNS, "gate_failed", "gates"))
@@ -289,9 +295,9 @@ class TheCheckForm(unittest.TestCase):
 
     def test_gates_are_asked_and_the_executor_is_not_started(self):
         world = scenes.scene(scenes.document(gates=[GATE]))
-        world.program("gate", exits_after=0, exit_code=1)
+        world.program("gate", exit_code=1)
         _, lines, _ = self.check(world)
-        self.assertEqual([argv[0] for argv, _ in world.started], ["gate"])
+        self.assertEqual(ran(world), ["gate"])
         self.assertEqual(lines[2], "check: refused: gate_said_no")
 
     def test_a_used_request_id_is_reported_and_nothing_is_claimed(self):

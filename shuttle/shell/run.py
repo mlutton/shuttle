@@ -172,7 +172,8 @@ def driver_check(world: Operations, raw: Mapping[str, Any]) -> tuple[str | None,
 
 
 def step_run_gates(state: RunState) -> None:
-    refusal, result = gates.run_gates(state["world"], state["raw"].get("gates", []))
+    request_id = header_source_of(state)["request_id"]
+    refusal, result = gates.run_gates(state["world"], request_id, state["raw"].get("gates", []))
     state["stand_ins"]["gates"] = result
     state["facts"]["gates"] = "ok"
     if refusal:

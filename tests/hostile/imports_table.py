@@ -48,7 +48,7 @@ IMPORTS = (
     ),
     (
         "from a shell module",
-        "from shuttle.shell.run import end_child",
+        "from shuttle.shell.run import run_steps",
         CORE,
         "rule test",
         "",
@@ -56,7 +56,7 @@ IMPORTS = (
     ),
     (
         "from a shell module, aliased",
-        "from shuttle.shell.run import end_child as e",
+        "from shuttle.shell.run import run_steps as e",
         CORE,
         "rule test",
         "",
@@ -218,7 +218,7 @@ IMPORTS = (
     ),
     (
         "relative, one up, a module in it",
-        "from ..shell.run import end_child",
+        "from ..shell.run import run_steps",
         CORE,
         "rule test",
         "",

@@ -21,6 +21,7 @@ import datetime
 import os
 import signal
 
+from shuttle.core import boundary
 from shuttle.core.shapes import (
     BoundaryOperations,
     ClockOperations,
@@ -285,17 +286,23 @@ class SimulatedWorld:
         self._reports += 1
         return 2 + self._reports
 
+    def _what_runs(self, argv):
+        """(the program and its arguments, the scope's unit or None, whether it is a gate)."""
+        if not argv or argv[0] != "systemd-run":
+            return list(argv), None, False
+        unit = next(p.split("=", 1)[1] for p in argv if p.startswith("--unit=")) + ".scope"
+        inside = list(argv)[list(argv).index("--") + 1 :]
+        if inside[:3] == ["sh", "-c", boundary.GATE_SCRIPT]:  # sh, its report descriptor, the gate
+            return inside[5:], unit, True
+        if inside[:1] == ["bwrap"]:  # the box, then the executor
+            return inside[inside.index("--") + 1 :], unit, False
+        return inside, unit, False
+
     def _start(self, argv, environment, report=None):
         self._enter("processes.start", list(argv), dict(environment))
         if any("\0" in part for part in argv):
             raise ValueError("embedded null byte")
-        executor, unit = list(argv), None
-        if (
-            argv and argv[0] == "systemd-run"
-        ):  # the boundary's command: its unit, then the executor's
-            unit = next(p.split("=", 1)[1] for p in argv if p.startswith("--unit=")) + ".scope"
-            after_bwrap = list(argv)[list(argv).index("bwrap") :]
-            executor = after_bwrap[after_bwrap.index("--") + 1 :]
+        executor, unit, gate = self._what_runs(argv)
         if not executor or executor[0] not in self.programs:
             raise FileNotFoundError(executor[0] if executor else "")
         behaviour = self.programs[executor[0]]
@@ -306,7 +313,9 @@ class SimulatedWorld:
         if not behaviour["hangs"]:
             child.returncode = behaviour["exit_code"]
         if report is not None:
-            if behaviour["report"] is not None:
+            if gate:
+                child.report = "" if behaviour["fails_to_start"] else boundary.GATE_STARTED + "\n"
+            elif behaviour["report"] is not None:
                 child.report = behaviour["report"]
             elif not behaviour["fails_to_start"]:
                 child.report = '{"child-pid": 2}\n'
@@ -324,6 +333,9 @@ class SimulatedWorld:
 
     def _poll(self, child):
         self._enter("processes.poll", child.argv)
+        return self._status_after_the_timer(child)
+
+    def _status_after_the_timer(self, child):
         if child.returncode is None and child.behaviour["times_out"]:
             child.returncode = -signal.SIGTERM
             self.units[child.unit] = dict(_TIMED_OUT)
@@ -333,7 +345,7 @@ class SimulatedWorld:
         self._enter("processes.wait", child.argv, seconds)
         self._waits += 1
         assert self._waits < WAITS_BEFORE_GIVING_UP, "the run would wait forever"
-        return self._status(child)
+        return self._status_after_the_timer(child)
 
     def _show(self, unit, properties):
         self._enter("boundary.show", unit, tuple(properties))
