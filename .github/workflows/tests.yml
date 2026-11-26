@@ -38,6 +38,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
       - name: List the guard files this pull request changes
+        # The listing never fails the job; if it cannot be made, the summary says so.
         run: ./checks/guard-files.sh "$BASE_SHA" >> "$GITHUB_STEP_SUMMARY" || true
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

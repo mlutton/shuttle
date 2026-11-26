@@ -63,40 +63,58 @@ class TemporaryRepositoryTest(unittest.TestCase):
 
 
 class GuardFilesTest(TemporaryRepositoryTest):
-    def listed(self, *paths):
-        for path in paths:
-            self.write(path, "changed\n")
+    def setUp(self):
+        super().setUp()
+        for name in ("guards.py", "names.py"):
+            shutil.copy(os.path.join(REPO, "checks", name), os.path.join(self.tree, "checks"))
+        self.write("pyproject.toml", "x\n")
+        self.write(".github/w.yml", "x\n")
+        self.base = self.commit("base with guards")
+
+    def listing(self):
         self.commit("pull request")
         result = self.run_script("guard-files.sh", self.base)
         self.assertEqual(result.returncode, 0, result.stderr)
-        return result.stdout.splitlines()
+        return result.stdout
 
-    def test_every_kind_of_guard_file_is_listed_one_line_each_under_a_heading(self):
-        guards = [
-            "checks/all.sh",
-            ".githooks/pre-push",
-            ".github/workflows/tests.yml",
-            "pyproject.toml",
-            "requirements-dev.txt",
-            "tests/by_value/test_rules.py",
-        ]
-        lines = self.listed(*guards)
-        self.assertEqual(lines[0], "## This pull request changes the guardrails")
-        self.assertIn("The reviewer should read these files:", lines)
-        self.assertEqual(
-            sorted(line for line in lines if line.startswith("- ")),
-            sorted(f"- `{g}`" for g in guards),
-        )
+    def test_changed_added_and_deleted_guard_files_are_listed_with_what_happened(self):
+        self.write("pyproject.toml", "changed\n")
+        self.write("requirements-dev.txt", "new\n")
+        self.write("shuttle/x.py", "not a guard\n")
+        self.git("rm", "-q", ".github/w.yml")
+        out = self.listing()
+        self.assertIn("## This pull request changes the guardrails", out)
+        lines = out.splitlines()
+        self.assertIn("changed pyproject.toml", lines)
+        self.assertIn("added   requirements-dev.txt", lines)
+        self.assertIn("deleted .github/w.yml", lines)
+        self.assertNotIn("shuttle/x.py", out)
 
-    def test_other_files_are_not_listed_even_when_the_name_is_similar(self):
-        lines = self.listed(
-            "shuttle/core/x.py", "tests/by_value/test_other.py", "docs/pyproject.toml", "checks.md"
-        )
-        self.assertEqual(lines, ["No guard files changed in this pull request."])
+    def test_a_guard_file_moved_away_is_listed_as_deleted(self):
+        os.makedirs(os.path.join(self.tree, ".githubx"))
+        self.git("mv", "pyproject.toml", "old.toml")
+        self.git("mv", ".github/w.yml", ".githubx/w.yml")
+        lines = self.listing().splitlines()
+        self.assertIn("deleted pyproject.toml", lines)
+        self.assertIn("deleted .github/w.yml", lines)
+        self.assertNotIn("old.toml", "\n".join(lines))
 
-    def test_only_the_guard_files_among_the_changes_are_listed(self):
-        lines = self.listed("shuttle/x.py", "pyproject.toml")
-        self.assertEqual([x for x in lines if x.startswith("- ")], ["- `pyproject.toml`"])
+    def test_a_non_ascii_guard_file_is_listed(self):
+        self.write("checks/\u00e9.sh", "x\n")
+        self.assertIn("checks/\u00e9.sh", self.listing())
+
+    def test_names_with_a_backtick_or_a_newline_cannot_break_the_block(self):
+        self.write("checks/a`b.sh", "x\n")
+        try:
+            self.write("checks/x\n```\n# injected.sh", "x\n")
+        except OSError:
+            self.skipTest("this filesystem does not allow a newline in a file name")
+        lines = self.listing().splitlines()
+        fences = [x for x in lines if x.startswith("```")]
+        self.assertEqual(len(fences), 2, lines)
+        self.assertEqual(fences[0], fences[1])
+        self.assertNotIn("# injected.sh", lines)
+        self.assertTrue(any(x.endswith("checks/x\\n```\\n# injected.sh") for x in lines))
 
     def test_no_change_says_so_and_exits_0(self):
         result = self.run_script("guard-files.sh", self.base)
@@ -104,6 +122,15 @@ class GuardFilesTest(TemporaryRepositoryTest):
         self.assertEqual(
             result.stdout.splitlines(), ["No guard files changed in this pull request."]
         )
+
+    def test_a_comparison_git_cannot_make_says_so_on_standard_output_and_exits_1(self):
+        result = self.run_script("guard-files.sh", "0" * 40)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["The guard file listing could not be produced: git could not compare the commits."],
+        )
+        self.assertNotEqual(result.stderr, "")
 
     def test_a_missing_argument_is_refused(self):
         self.assertEqual(self.run_script("guard-files.sh").returncode, 2)
@@ -151,6 +178,14 @@ class BaseCheckTest(TemporaryRepositoryTest):
         result = self.run_script("base-check.sh", no_script)
         self.assertEqual(result.returncode, 2)
         self.assertIn("could not read checks/all.sh", result.stderr)
+
+    def test_a_tree_that_already_has_base_all_sh_is_refused_and_the_file_is_left_alone(self):
+        self.write("checks/base-all.sh", "mine\n")
+        result = self.run_script("base-check.sh", self.base)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("checks/base-all.sh already exists", result.stderr)
+        with open(os.path.join(self.tree, "checks", "base-all.sh")) as f:
+            self.assertEqual(f.read(), "mine\n")
 
     def test_a_missing_argument_is_refused_with_exit_3(self):
         self.assertEqual(self.run_script("base-check.sh").returncode, 3)

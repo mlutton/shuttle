@@ -5,7 +5,7 @@
 # Runs, in order, and stops at the first stage that fails:
 #   lint    ruff check .
 #   format  ruff format --check .
-#   types   mypy (strict, over shuttle/; see pyproject.toml)
+#   types   mypy (strict, over shuttle/ and checks/; see pyproject.toml)
 #   tests   python -m unittest discover -s tests, under a 20 second budget
 # Prints one line per stage ("<stage>: passed" or "<stage>: failed"; a failed stage's
 # own output goes to standard error), then a last line on standard output:
@@ -16,9 +16,11 @@
 #   check: could not run: <tool> is not installed; install the tools with: <command>
 #
 # ./checks/all.sh --fix applies what ruff can change mechanically and says what changed:
-#   ruff check --fix (safe fixes only, never --unsafe-fixes), then ruff format.
-# It adds no ignore comment, edits no configuration and touches only files ruff itself
-# checks. It prints one line per file changed ("changed: <path>"), then a last line:
+#   ruff check --fix --no-unsafe-fixes, then ruff format (checks/fixmode.py does the work).
+# It adds no ignore comment, edits no configuration and only ruff touches files. It needs
+# ruff only, not mypy. It prints one line per file changed ("changed: <path>", a name's
+# control characters shown as escapes), a line "failed: <path>" for each file ruff could not
+# parse or write, then a last line:
 #   fix: changed <N> files ("1 file" for one); now run ./checks/all.sh
 #   fix: nothing to change
 #   fix: failed; ruff could not finish (its output is on standard error)
@@ -28,6 +30,7 @@
 # Exit codes:
 #   0  every stage passed; or, with --fix, it finished (whether or not it changed anything)
 #   1  a stage failed (the last line names it); or, with --fix, ruff could not finish
+#      (a file it could not parse or write, or ruff ending abnormally)
 #   2  the check could not run: a tool is missing (the last line names it and the command)
 #   3  the argument was not recognised (one line on standard error names the two forms)
 #
@@ -49,46 +52,22 @@ if [ -z "${PYTHON:-}" ]; then
 fi
 
 INSTALL="python3 -m pip install -r requirements-dev.txt"
-for tool in ruff mypy; do
+tools="ruff mypy"
+[ "$mode" = fix ] && tools=ruff
+for tool in $tools; do
     if ! "$PYTHON" -m "$tool" --version >/dev/null 2>&1; then
         echo "check: could not run: $tool is not installed; install the tools with: $INSTALL"
         exit 2
     fi
 done
 
+if [ "$mode" = fix ]; then
+    "$PYTHON" checks/fixmode.py
+    exit $?
+fi
+
 output=$(mktemp) || exit 2
-trap 'rm -f "$output" "$output.before" "$output.after"' EXIT
-
-# Fix mode. Files are compared by checksum before and after, over the files ruff checks.
-fingerprint() {
-    "$PYTHON" -m ruff check --show-files . 2>/dev/null | while IFS= read -r file; do
-        cksum "$file"
-    done | sort -k3
-}
-
-fix() {
-    fingerprint >"$output.before"
-    "$PYTHON" -m ruff check --fix --exit-zero . >&2 && "$PYTHON" -m ruff format . >&2 || {
-        echo "fix: failed; ruff could not finish (its output is on standard error)"
-        exit 1
-    }
-    fingerprint >"$output.after"
-    changed=$(diff "$output.before" "$output.after" | sed -n 's/^> [0-9]* [0-9]* //p')
-    if [ -z "$changed" ]; then
-        echo "fix: nothing to change"
-        exit 0
-    fi
-    count=0
-    for file in $changed; do
-        echo "changed: ${file#"$root"/}"
-        count=$((count + 1))
-    done
-    noun=files
-    [ "$count" -eq 1 ] && noun=file
-    echo "fix: changed $count $noun; now run ./checks/all.sh"
-    exit 0
-}
-[ "$mode" = fix ] && fix
+trap 'rm -f "$output"' EXIT
 
 stage() {
     name=$1

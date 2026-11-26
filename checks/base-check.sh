@@ -6,11 +6,16 @@
 # file, then placed beside the tree's own as checks/base-all.sh (removed on exit). The tree's
 # checks/all.sh stays in place, so the tests that exercise it still see the pull request's.
 # Prints whether the two copies differ, then the base script's own output.
-# Exit codes: the base script's (0, 1, 2); 2 also when it could not be fetched; 3 on misuse.
+# Exit codes: the base script's (0, 1, 2); 2 also when it could not be fetched or when the tree
+# already has a checks/base-all.sh (it is never overwritten or removed); 3 on misuse.
 [ "$#" -eq 1 ] || { echo "usage: checks/base-check.sh <base commit>" >&2; exit 3; }
 root=$(git rev-parse --show-toplevel) || exit 2
-scratch=$(mktemp -d) || exit 2
 copy="$root/checks/base-all.sh"
+if [ -e "$copy" ]; then
+    echo "base check: checks/base-all.sh already exists in this tree; not overwriting it" >&2
+    exit 2
+fi
+scratch=$(mktemp -d) || exit 2
 trap 'rm -rf "$scratch" "$copy"' EXIT
 git -C "$root" show "$1:checks/all.sh" >"$scratch/all.sh" || {
     echo "base check: could not read checks/all.sh at $1" >&2
