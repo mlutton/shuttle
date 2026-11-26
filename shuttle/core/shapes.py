@@ -365,6 +365,7 @@ class PlaceFacts(TypedDict):
     head: str | None  # the commit the checkout is at; None when it has none
     unclean: list[str]  # names git reports as changed, or new and not ignored
     nested: list[str]  # folders, below the top, that hold a git repository of their own
+    filtered: list[str]  # tracked paths with a `filter` attribute; when any, git looked no further
 
 
 class FreezeAnswer(NamedTuple):

@@ -41,7 +41,14 @@ GOOD = f"commit {OTHER}\nadded 3\nchanged 2\ndeleted 1\ndone\n".encode()
 
 
 def facts(**changes):
-    found = {"exists": True, "is_checkout": True, "head": COMMIT, "unclean": [], "nested": []}
+    found = {
+        "exists": True,
+        "is_checkout": True,
+        "head": COMMIT,
+        "unclean": [],
+        "nested": [],
+        "filtered": [],
+    }
     found.update(changes)
     return found
 
@@ -119,6 +126,19 @@ class TheRefusals(unittest.TestCase):
             ("place_has_uncommitted_changes", "input_check"),
         )
 
+    def test_a_filter_attribute_refuses_the_place_naming_a_path_before_anything_else(self):
+        found = facts(filtered=["data.big", "x.big"], unclean=["a"], nested=["inner"])
+        self.assertEqual(self.reason("/p", found), ("place_has_filter_attribute", "input_check"))
+        refusal = place.check_place("/p", found)
+        self.assertIn("filter drivers are not supported", refusal["problem"])
+        self.assertIn("'data.big'", refusal["problem"])
+
+    def test_a_document_with_no_place_says_the_place_is_missing_from_it_not_none(self):
+        refusal = place.check_place(None, None)
+        self.assertEqual(refusal["reason"], "place_missing")
+        self.assertNotIn("None", refusal["problem"])
+        self.assertIn("no place", refusal["problem"])
+
     def test_a_nested_repository_is_named_before_the_new_file_git_says_it_is(self):
         found = facts(unclean=["inner/"], nested=["inner"])
         self.assertEqual(self.reason("/p", found), ("place_has_nested_repository", "input_check"))
@@ -128,6 +148,7 @@ class TheRefusals(unittest.TestCase):
             facts(exists=False),
             facts(is_checkout=False),
             facts(nested=["x"]),
+            facts(filtered=["x"]),
             facts(unclean=["x"]),
         ):
             reason, step = self.reason("/p", found)

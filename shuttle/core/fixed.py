@@ -50,6 +50,7 @@ REASONS_BY_ENDING = {
         "reference_hash_mismatch",
         "place_missing",
         "place_not_a_git_checkout",
+        "place_has_filter_attribute",
         "place_has_uncommitted_changes",
         "place_has_nested_repository",
         "statement_location_occupied",

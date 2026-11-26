@@ -15,12 +15,13 @@ _COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def _git(
-    place: str, environment: Mapping[str, str], *arguments: str
+    place: str, environment: Mapping[str, str], *arguments: str, given: bytes | None = None
 ) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         ["git", "-C", place, *arguments],
         env=dict(environment),
-        stdin=subprocess.DEVNULL,
+        input=given,
+        stdin=None if given is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
@@ -44,6 +45,22 @@ def _nested_repositories(place: str) -> list[str]:
     return found
 
 
+def _filtered_paths(place: str, environment: Mapping[str, str]) -> list[str]:
+    """Tracked paths that carry a `filter` attribute (set, unset or given a value), by every
+    source git reads attributes from. Reading attributes runs no command."""
+    listed = _git(place, environment, "ls-files", "-z")
+    if listed.returncode != 0:
+        raise OSError(f"git ls-files failed with status {listed.returncode}")
+    if not listed.stdout:
+        return []
+    asked = _git(place, environment, "check-attr", "-z", "--stdin", "filter", given=listed.stdout)
+    if asked.returncode != 0:
+        raise OSError(f"git check-attr failed with status {asked.returncode}")
+    fields = asked.stdout.split(b"\0")
+    triples = zip(fields[0::3], fields[2::3], strict=False)
+    return sorted({os.fsdecode(path) for path, value in triples if value != b"unspecified"})
+
+
 def look_at_place(place: str, environment: Mapping[str, str]) -> PlaceFacts:
     missing: PlaceFacts = {
         "exists": False,
@@ -51,6 +68,7 @@ def look_at_place(place: str, environment: Mapping[str, str]) -> PlaceFacts:
         "head": None,
         "unclean": [],
         "nested": [],
+        "filtered": [],
     }
     if not os.path.isdir(place):
         return missing
@@ -64,6 +82,17 @@ def look_at_place(place: str, environment: Mapping[str, str]) -> PlaceFacts:
     head = text if commit.returncode == 0 and _COMMIT_ID.fullmatch(text) else None
     if head is None:
         return {**missing, "exists": True, "is_checkout": True}
+    # before the status: comparing a file with a driver's attribute would run the driver
+    filtered = _filtered_paths(place, environment)
+    if filtered:
+        return {
+            "exists": True,
+            "is_checkout": True,
+            "head": head,
+            "unclean": [],
+            "nested": [],
+            "filtered": filtered,
+        }
     status = _git(
         place,
         environment,
@@ -82,6 +111,7 @@ def look_at_place(place: str, environment: Mapping[str, str]) -> PlaceFacts:
         "head": head,
         "unclean": entries,
         "nested": _nested_repositories(place),
+        "filtered": [],
     }
 
 

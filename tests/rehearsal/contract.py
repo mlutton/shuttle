@@ -278,14 +278,28 @@ class ContractCases:
         found = self.look(f"{self.harness.folder()}/absent")
         self.assertEqual(
             found,
-            {"exists": False, "is_checkout": False, "head": None, "unclean": [], "nested": []},
+            {
+                "exists": False,
+                "is_checkout": False,
+                "head": None,
+                "unclean": [],
+                "nested": [],
+                "filtered": [],
+            },
         )
 
     def test_a_folder_that_is_not_a_checkout_exists_and_nothing_more(self):
         found = self.look(self.harness.folder())
         self.assertEqual(
             found,
-            {"exists": True, "is_checkout": False, "head": None, "unclean": [], "nested": []},
+            {
+                "exists": True,
+                "is_checkout": False,
+                "head": None,
+                "unclean": [],
+                "nested": [],
+                "filtered": [],
+            },
         )
 
     def test_a_folder_inside_a_checkout_is_not_a_checkout_of_its_own(self):
@@ -299,7 +313,14 @@ class ContractCases:
         where, head = self.harness.checkout({"a": "1\n", "dir/b": "2\n"})
         self.assertEqual(
             self.look(where),
-            {"exists": True, "is_checkout": True, "head": head, "unclean": [], "nested": []},
+            {
+                "exists": True,
+                "is_checkout": True,
+                "head": head,
+                "unclean": [],
+                "nested": [],
+                "filtered": [],
+            },
         )
 
     def test_a_new_a_changed_and_a_removed_file_are_each_unclean_and_named(self):
@@ -328,6 +349,13 @@ class ContractCases:
         self.harness.nested_repository(where, "deep/inner/deeper")
         found = self.look(where)
         self.assertEqual(found["nested"], ["deep/inner"])
+
+    def test_a_tracked_file_with_a_filter_attribute_is_named_and_nothing_else_is_looked_at(self):
+        where, _ = self.harness.checkout({"a": "1\n", "data.big": "d\n"})
+        self.harness.filter_attribute(where, "data.big")
+        self.harness.edit(where, "new", "n\n")  # unclean, but not what is found
+        found = self.look(where)
+        self.assertEqual((found["filtered"], found["unclean"]), (["data.big"], []))
 
     def test_looking_changes_nothing_in_the_checkout_not_even_its_index(self):
         where, _ = self.harness.checkout({"a": "1\n", "b": "2\n"})

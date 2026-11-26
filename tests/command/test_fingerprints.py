@@ -490,6 +490,134 @@ class AFreezeThatRunsOutOfItsLimit(FingerprintCase):
         self.assertEqual(self.units_left(), [])
 
 
+class FilterDrivers(FingerprintCase):
+    """No command from any configuration runs in Shuttle's git work, and a place that depends on
+    a filter driver is refused. The rule awaits the owner."""
+
+    def setUp(self):
+        super().setUp()
+        self.marker = os.path.join(self.root, "marker-a-driver-ran")
+
+    def define_driver(self, config_path, name, kind="clean"):
+        """A driver whose command makes the marker, then (clean) changes what it is given."""
+        command = f"touch '{self.marker}'; sed 's/^/FILTERED:/'"
+        with open(config_path, "a") as f:
+            f.write(f'[filter "{name}"]\n\t{kind} = {command}\n')
+
+    def commit_a_filtered_file(self):
+        real_place.write(self.place, ".gitattributes", "*.big filter=big\n")
+        real_place.write(self.place, "data.big", "content\n")
+        return real_place.commit_everything(self.place)
+
+    def assert_refused_for_a_filter(self, doc, variables=None):
+        code, lines, err = self.run_to_the_end(doc, variables=variables)
+        self.assertEqual((code, err, lines[-1]), (0, "", "could_not_start"))
+        found = outcome_fields(self)["ending"]
+        self.assertEqual(
+            (found["reason"], found["failed_step"]), ("place_has_filter_attribute", "input_check")
+        )
+        self.assertIn("filter drivers are not supported", found["reason_text"])
+        self.assertIn("data.big", found["reason_text"])
+        self.assertFalse(os.path.exists(self.witness), "the executor started")
+        self.assertFalse(os.path.exists(self.marker), "a driver ran")
+
+    def test_a_driver_in_the_repositorys_own_configuration_refuses_the_place_and_never_runs(self):
+        self.commit_a_filtered_file()
+        self.define_driver(os.path.join(self.main, ".git", "config"), "big")
+        doc = self.document_for(WRITES_NOTHING_IN_THE_PLACE)
+        self.assert_refused_for_a_filter(doc)
+        # the check form agrees
+        doc["request_id"] = "r-check"
+        path = os.path.join(self.root, "check.json")
+        with open(path, "w") as f:
+            json.dump(doc, f)
+        checked = subprocess.run(
+            [sys.executable, "-m", "shuttle", "check", path],
+            cwd=real_run.REPO,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            checked.stdout.splitlines()[-2], "check: refused: place_has_filter_attribute"
+        )
+        self.assertFalse(os.path.exists(self.marker), "a driver ran")
+
+    def test_an_attribute_in_the_repositorys_info_file_refuses_the_place_too(self):
+        self.define_driver(os.path.join(self.main, ".git", "config"), "big")
+        real_place.write(self.place, "data.big", "content\n")
+        real_place.commit_everything(self.place)
+        info = os.path.join(self.main, ".git", "info")
+        os.makedirs(info, exist_ok=True)
+        with open(os.path.join(info, "attributes"), "w") as f:
+            f.write("*.big filter=big\n")
+        self.assert_refused_for_a_filter(self.document_for(WRITES_NOTHING_IN_THE_PLACE))
+
+    def test_a_driver_in_the_global_configuration_refuses_the_place_fresh_or_settled(self):
+        globals_ = os.path.join(self.root, "global-config")
+        self.define_driver(globals_, "big")
+        self.commit_a_filtered_file()
+        data = os.path.join(self.place, "data.big")
+        for label, when in (("fresh", 4_000_000_000), ("settled", 1_000_000_000)):
+            with self.subTest(label):
+                os.utime(data, (when, when))  # newer than the index (racy), or long before it
+                real_place.git(self.place, "update-index", "--refresh")
+                self.assert_refused_for_a_filter(
+                    self.document_for(WRITES_NOTHING_IN_THE_PLACE),
+                    variables={"GIT_CONFIG_GLOBAL": globals_},
+                )
+                os.remove(os.path.join(self.records, "r-1.outcome.json"))
+                os.remove(os.path.join(self.records, "r-1.request.json"))
+
+    def run_a_script_that_adds_a_driver(self, kind):
+        script = (
+            "import os, sys\n"
+            "place, config, command = sys.argv[1], sys.argv[3], sys.argv[4]\n"
+            "open(config, 'a').write('[filter \"x\"]\\n\\t' + sys.argv[5] + ' = ' + command + '\\n')\n"
+            "open(os.path.join(place, '.gitattributes'), 'w').write('*.txt filter=x\\n')\n"
+            "open(os.path.join(place, 'new.txt'), 'w').write('as written\\n')\n"
+        )
+        command = f"touch '{self.marker}'; sed 's/^/FILTERED:/'"
+        if kind == "process":
+            command = f"touch '{self.marker}'"
+        doc = self.document_for(script, [os.path.join(self.main, ".git", "config"), command, kind])
+        self.finished(doc)
+        saw = outcome_fields(self)["execution"]
+        self.assertEqual(
+            (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (2, 0, 0)
+        )
+        self.assertFalse(os.path.exists(self.marker), "a driver ran")
+        self.assertEqual(
+            self.git("show", f"{saw['fingerprint_after']}:new.txt"), "as written"
+        )  # the bytes on disk
+        self.assertEqual(sorted(os.listdir(self.records)), ["r-1.outcome.json", "r-1.request.json"])
+
+    def test_a_clean_driver_added_by_the_script_during_the_run_is_never_run(self):
+        self.run_a_script_that_adds_a_driver("clean")
+
+    def test_a_process_driver_added_by_the_script_during_the_run_is_never_run(self):
+        self.run_a_script_that_adds_a_driver("process")
+
+    def test_an_info_attributes_file_written_by_the_script_never_runs_a_driver_either(self):
+        script = (
+            "import os, sys\n"
+            "config = sys.argv[3]\n"
+            "open(config, 'a').write('[filter \"x\"]\\n\\tclean = ' + sys.argv[4] + '\\n')\n"
+            "info = os.path.join(os.path.dirname(config), 'info')\n"
+            "os.makedirs(info, exist_ok=True)\n"
+            "open(os.path.join(info, 'attributes'), 'w').write('*.txt filter=x\\n')\n"
+            "open(os.path.join(sys.argv[1], 'new.txt'), 'w').write('as written\\n')\n"
+        )
+        doc = self.document_for(
+            script,
+            [os.path.join(self.main, ".git", "config"), f"touch '{self.marker}'; cat"],
+        )
+        self.finished(doc)
+        self.assertFalse(os.path.exists(self.marker), "a driver ran")
+        saw = outcome_fields(self)["execution"]
+        self.assertEqual(saw["files_added"], 1)
+
+
 PRINTS_ITS_WORKING_DIRECTORY = """
 import os, sys
 open(sys.argv[2], "w").write(os.getcwd())

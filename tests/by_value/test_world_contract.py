@@ -83,6 +83,9 @@ class SimulatedHarness:
     def nested_repository(self, where, name):
         self.world.places[where]["nested"].append(name)
 
+    def filter_attribute(self, where, name):
+        self.world.places[where]["filtered"].append(name)
+
     def commit_everything(self, where):
         return self.world.commit_everything(where)
 

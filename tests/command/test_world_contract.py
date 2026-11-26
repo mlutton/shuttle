@@ -120,6 +120,10 @@ class RealHarness:
         os.makedirs(folder, exist_ok=True)
         real_place.git(folder, "init", "-q")
 
+    def filter_attribute(self, where, name):
+        real_place.write(where, ".gitattributes", f"{name} filter=anything\n")
+        real_place.commit_everything(where)
+
     def commit_everything(self, where):
         return real_place.commit_everything(where)
 

@@ -90,6 +90,12 @@ def check_place(place: object, facts: PlaceFacts | None) -> Found | None:
     repository is named before the unclean state it also causes (git lists it as a new file).
     """
     if facts is None or not usable_place(place) or not facts["exists"]:
+        if place is None:
+            return _refused(
+                "place_missing",
+                "the document has no place; give the path of a linked working copy of the "
+                "repository",
+            )
         return _refused(
             "place_missing",
             f"the place {place!r} is not a folder that is there; give the path of a linked "
@@ -100,6 +106,13 @@ def check_place(place: object, facts: PlaceFacts | None) -> Found | None:
             "place_not_a_git_checkout",
             f"the place {place!r} is not the top of a git working copy with a commit; give a "
             "checkout made for this run (for instance with git worktree add)",
+        )
+    if facts["filtered"]:
+        return _refused(
+            "place_has_filter_attribute",
+            f"the place {place!r} has files with a filter attribute, for instance "
+            f"{facts['filtered'][0]!r}; filter drivers are not supported and never run; remove "
+            "the attribute from the repository",
         )
     if facts["nested"]:
         return _refused(
@@ -136,10 +149,21 @@ def opening_result(refusal: Found | None, facts: PlaceFacts | None, seconds: flo
 # is filled from the opening commit, then from every file in the place that the place's ignore
 # rules do not exclude, and written as a tree. A tree equal to the opening commit's is the
 # opening commit itself (nothing changed, nothing made); any other is committed with the opening
-# commit as its parent, under the neutral identity of `git_environment`. Plumbing only: no hook
-# runs and nothing is signed. The script is the whole of the freeze's git work, so one scope
-# with one limit holds it. It is given the place, the opening commit, the reference and the
-# message as arguments, never pasted into the text of the script. It ends by printing `done`.
+# commit as its parent, under the neutral identity of `git_environment`.
+#
+# No command from any configuration runs. A filter driver (`filter.<name>.clean`, `.smudge`,
+# `.process`) can only be defined in a configuration file, and git reads the configuration of
+# the repository it works in. So the files are added in a repository made empty for the purpose:
+# a scratch git directory, with no configuration of its own, whose working tree is the place and
+# whose object directory is the place's (so the objects land where the commit needs them). No
+# driver is defined there, whatever the place's own configuration, the executor's changes to it
+# or the user's and the system's configuration say (those are not read: see `git_environment`),
+# so an attribute naming a driver does nothing and a file is stored as the bytes on disk.
+# `info/attributes` and `info/exclude` are copied in, so the ignore and attribute rules are the
+# place's as before. Only `update-ref` works in the place's own repository: it runs no filter.
+# The script is the whole of the freeze's git work, so one scope with
+# one limit holds it. It is given the place, the opening commit, the reference and the message
+# as arguments, never pasted into the text of the script. It ends by printing `done`.
 FREEZE_SCRIPT = (
     "unset "
     + " ".join(boundary.BUS_VARIABLES)
@@ -148,6 +172,16 @@ set -e
 cd -- "$1"
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
+objects=$(git rev-parse --path-format=absolute --git-path objects)
+format=$(git rev-parse --show-object-format)
+common=$(git rev-parse --path-format=absolute --git-common-dir)
+git init -q --template= --object-format="$format" "$scratch/git"
+mkdir "$scratch/git/.git/info"
+for name in attributes exclude; do
+    from=$(git rev-parse --path-format=absolute --git-path "info/$name")
+    if [ -f "$from" ]; then cp -- "$from" "$scratch/git/.git/info/$name"; fi
+done
+export GIT_DIR="$scratch/git/.git" GIT_WORK_TREE="$1" GIT_OBJECT_DIRECTORY="$objects"
 export GIT_INDEX_FILE="$scratch/index"
 git read-tree "$2"
 git add -A
@@ -155,7 +189,7 @@ tree=$(git write-tree)
 commit=$2
 if [ "$tree" != "$(git rev-parse "$2^{tree}")" ]; then
     commit=$(git commit-tree "$tree" -p "$2" -m "$4")
-    git update-ref "$3" "$commit"
+    (unset GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_INDEX_FILE; GIT_DIR=$common git update-ref "$3" "$commit")
 fi
 git diff-tree -r -z --no-renames --name-only --diff-filter=A "$2" "$tree" > "$scratch/added"
 git diff-tree -r -z --no-renames --name-only --diff-filter=MT "$2" "$tree" > "$scratch/changed"

@@ -151,7 +151,12 @@ class SimulatedWorld:
             self.make_folder(f"{path}/{name}".rpartition("/")[0])
             committed[name] = data
         head = self._commit(committed, None)
-        self.places[path] = {"head": head, "committed": committed, "nested": list(nested)}
+        self.places[path] = {
+            "head": head,
+            "committed": committed,
+            "nested": list(nested),
+            "filtered": [],
+        }
         return head
 
     def _commit(self, files, parent):
@@ -418,12 +423,26 @@ class SimulatedWorld:
 
     def _look_at_place(self, place, environment):
         self._enter("git.look_at_place", place, dict(environment))
-        nothing = {"is_checkout": False, "head": None, "unclean": [], "nested": []}
+        nothing = {
+            "is_checkout": False,
+            "head": None,
+            "unclean": [],
+            "nested": [],
+            "filtered": [],
+        }
         if place not in self.folders:
             return {"exists": False, **nothing}
         held = self.places.get(place)
         if held is None:
             return {"exists": True, **nothing}
+        if held.get("filtered"):
+            return {
+                **nothing,
+                "exists": True,
+                "is_checkout": True,
+                "head": held["head"],
+                "filtered": sorted(held["filtered"]),
+            }
         now, committed = self._in_place(place), held["committed"]
         unclean = sorted(
             name for name in {*now, *committed} if now.get(name) != committed.get(name)
@@ -438,6 +457,7 @@ class SimulatedWorld:
                 for name in held["nested"]
                 if not any(name.startswith(other + "/") for other in held["nested"])
             ],
+            "filtered": [],
         }
 
     def _freeze(self, command, environment):

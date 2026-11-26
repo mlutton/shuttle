@@ -67,7 +67,11 @@ def refusals_in_the_place():
     def nested(world):
         world.places[PLACE]["nested"] = ["inner"]
 
+    def filtered(world):
+        world.places[PLACE]["filtered"] = ["data.big"]
+
     return [
+        ("a file has a filter attribute", filtered, "place_has_filter_attribute"),
         ("the place is not there", not_there, "place_missing"),
         ("the place is not a git checkout", not_a_checkout, "place_not_a_git_checkout"),
         ("a committed file was changed", uncommitted, "place_has_uncommitted_changes"),
