@@ -1,5 +1,7 @@
 """The real set of operations, whole, and the process's own edge (arguments, streams, exit)."""
 
+import contextlib
+import os
 import sys
 from collections.abc import Callable, Sequence
 from typing import TextIO
@@ -25,4 +27,12 @@ OPERATIONS = Operations(
 def start(main: Callable[[Sequence[str], TextIO, TextIO, Operations], int]) -> None:
     """Hand the process's arguments and standard streams, and the real operations, to `main`;
     end the process with the code it returns."""
-    sys.exit(main(sys.argv[1:], sys.stdout, sys.stderr, OPERATIONS))
+    code = main(sys.argv[1:], sys.stdout, sys.stderr, OPERATIONS)
+    try:
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        # The reader of standard output went away. The interpreter flushes again as it exits and
+        # would end with code 120; point standard output at nothing so the code stays the run's.
+        with contextlib.suppress(OSError, ValueError):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    sys.exit(code)

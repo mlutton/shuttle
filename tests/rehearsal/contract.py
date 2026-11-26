@@ -29,7 +29,7 @@ UNMODELLED = (
 )
 
 HOLDABLE_NAMES = [row for row in NAMES if row["holdable"] and not row["path"]]
-HANDLED_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP")
+HANDLED_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGALRM")
 TEXT = "line one\nline two \u00e9 \u2713\n"
 
 

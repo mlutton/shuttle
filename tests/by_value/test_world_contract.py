@@ -80,11 +80,11 @@ class SimulatedWorldHoldsTheContract(contract.ContractCases, unittest.TestCase):
                 self.world.clock.wait(seconds)
                 self.assertAlmostEqual(self.world.clock.now() - before, seconds, places=9)
 
-    def test_a_signal_other_than_the_three_is_not_handed_to_the_handler(self):
-        # the real half shows that only these three are installed (it cannot send the others)
+    def test_a_signal_that_is_not_one_of_the_handled_is_not_handed_to_the_handler(self):
+        # the real half shows that only the handled ones are installed (it cannot send the others)
         calls = []
         self.world.signals.install(calls.append)
-        for name in ("SIGUSR1", "SIGQUIT", "SIGCHLD"):
+        for name in ("SIGPIPE", "SIGCHLD"):
             self.simulated.deliver(name)
         self.assertEqual(calls, [])
 

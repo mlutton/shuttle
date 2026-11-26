@@ -400,6 +400,23 @@ class CommandSeam(unittest.TestCase):
         )
         self.assert_process_gone(script_pid)
 
+    def test_the_reader_of_standard_output_going_away_before_the_end_still_exits_zero_with_the_record_written(
+        self,
+    ):
+        """The one real-process test of a closed reader: the exit code 120 comes from the
+        interpreter's own flush at exit, which only a real process has."""
+        doc, pid_file = self.sleeping_document()
+        proc = self.spawn(doc)
+        proc.stdout.readline()  # the request id, printed at the start
+        self.wait_for_file(pid_file)
+        proc.stdout.close()  # the reader goes away
+        proc.send_signal(signal.SIGTERM)
+        _, stderr = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, stderr)
+        self.assertIn("could not be printed", stderr)
+        ending = flat(self.read("req-1.outcome.json")["receipt"])["ending"]["ending"]
+        self.assertEqual(ending, "stopped_from_outside")
+
     def test_a_document_without_a_time_limit_is_refused_with_no_time_limit(self):
         doc = self.document()
         del doc["time_limit_seconds"]

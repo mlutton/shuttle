@@ -30,7 +30,7 @@ from shuttle.core.shapes import (
     SignalOperations,
 )
 
-HANDLED = ("SIGINT", "SIGTERM", "SIGHUP")
+HANDLED = ("SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGALRM")
 EPOCH = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
 
@@ -145,9 +145,15 @@ class SimulatedWorld:
         self._hooks.append((operation, nth, do))
 
     def deliver(self, name):
-        """A signal arrives now: the handler installed last is called with its name."""
-        if self._handlers and name in HANDLED:  # the real handlers are for these three only
+        """A signal arrives now: the handler installed last is called with its name.
+
+        Returns whether a handler caught it. False means the signal's default action would have
+        applied to the real command (it would have died), which a test can assert never happens.
+        """
+        if self._handlers and name in HANDLED:  # the real handlers are for these signals only
             self._handlers[-1](name)
+            return True
+        return False
 
     def have_previous_handler(self, handler):
         """Something was installed before the run's own handler (for the contract's restore case)."""
