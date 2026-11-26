@@ -77,6 +77,7 @@ class SimulatedWorld:
                 write_new=self._write_new,
                 link=self._link,
                 remove=self._remove,
+                usable_folder=self._usable_folder,
             ),
             processes=ProcessOperations(
                 find_program=self._find_program,
@@ -210,6 +211,10 @@ class SimulatedWorld:
     def _exists(self, path):
         self._enter("files.exists", path)
         return path in self.files or path in self.folders or path in self.dangling
+
+    def _usable_folder(self, path):
+        self._enter("files.usable_folder", path)
+        return path in self.folders
 
     def _write_new(self, path, text):
         how, error = self._enter("files.write_new", path, text)

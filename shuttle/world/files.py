@@ -29,4 +29,15 @@ def remove(path: str) -> None:
     os.unlink(path)
 
 
-FILES = FileOperations(read=read, exists=exists, write_new=write_new, link=link, remove=remove)
+def usable_folder(path: str) -> bool:
+    return os.path.isdir(path) and os.access(path, os.W_OK | os.X_OK)
+
+
+FILES = FileOperations(
+    read=read,
+    exists=exists,
+    write_new=write_new,
+    link=link,
+    remove=remove,
+    usable_folder=usable_folder,
+)

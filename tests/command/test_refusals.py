@@ -191,7 +191,7 @@ class Refusals(RealCommand):
 
 
 class CheckForm(RealCommand):
-    def test_a_passing_check_launches_nothing_writes_nothing_and_says_it_is_not_a_promise(self):
+    def test_a_passing_check_launches_no_executor_writes_nothing_and_says_it_is_not_a_promise(self):
         done, lines = self.command("check", self.document(gates=[self.gate(0)]))
         self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(lines[0], "req-1")
@@ -209,6 +209,34 @@ class CheckForm(RealCommand):
         self.assertEqual(os.listdir(self.records), [])
         done, lines = self.command("run", self.document())  # the id was not spent
         self.assertEqual(lines[-1], "ended_by_itself")
+
+    def test_the_check_and_the_run_give_the_same_verdict_on_a_records_location_that_cannot_take_a_record(
+        self,
+    ):
+        a_file = self.write("not-a-folder", "x")
+        read_only = os.path.join(self.root, "read-only")
+        os.mkdir(read_only)
+        os.chmod(read_only, 0o500)
+        self.addCleanup(os.chmod, read_only, 0o700)
+        cases = [("absent", os.path.join(self.root, "absent")), ("a file", a_file)]
+        if not os.access(read_only, os.W_OK):  # a superuser can write anywhere
+            cases.append(("read-only", read_only))
+        for label, location in cases:
+            with self.subTest(label):
+                doc = self.document(records_location=location)
+                checked, check_lines = self.command("check", doc)
+                ran, run_lines = self.command("run", doc)
+                self.assertEqual(checked.returncode, 0, checked.stderr)
+                self.assertEqual(check_lines[-2], "check: refused: records_location_unusable")
+                self.assertEqual(
+                    self.ending(json.loads(check_lines[1])),
+                    ("could_not_start", "records_location_unusable", "id_claim"),
+                )
+                self.assertNotEqual(ran.returncode, 0)  # the run's own words for the same refusal
+                self.assertEqual(run_lines, ["req-1", "could_not_start"])
+                problem = json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"]
+                self.assertIn(problem.split(" (")[0], ran.stderr)
+                self.assertFalse(os.path.exists(self.witness))
 
     def test_an_absent_request_id_is_generated_printed_and_not_spent(self):
         doc = self.document()
