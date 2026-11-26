@@ -39,7 +39,13 @@ def step(state: RunState) -> None:
     protected = [world.boundary.resolve(source["records_location"])]
     report = world.processes.open_report()
     argv = boundary.launch_argv(
-        name, float(raw["time_limit_seconds"]), spec["argv"], names, protected, report
+        name,
+        float(raw["time_limit_seconds"]),
+        spec["argv"],
+        names,
+        protected,
+        report,
+        world.boundary.resolve(raw["place"]),
     )
     state["started_at"] = world.clock.timestamp()
     state["clock_start"] = world.clock.now()

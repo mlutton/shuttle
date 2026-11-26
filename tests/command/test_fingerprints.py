@@ -490,5 +490,18 @@ class AFreezeThatRunsOutOfItsLimit(FingerprintCase):
         self.assertEqual(self.units_left(), [])
 
 
+PRINTS_ITS_WORKING_DIRECTORY = """
+import os, sys
+open(sys.argv[2], "w").write(os.getcwd())
+"""
+
+
+class TheExecutorsWorkingDirectory(FingerprintCase):
+    def test_is_the_place(self):
+        self.finished(self.document_for(PRINTS_ITS_WORKING_DIRECTORY))
+        with open(self.witness) as f:
+            self.assertEqual(f.read(), os.path.realpath(self.place))
+
+
 if __name__ == "__main__":
     unittest.main()

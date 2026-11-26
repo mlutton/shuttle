@@ -224,6 +224,28 @@ class TheFreezeCommand(unittest.TestCase):
         self.assertTrue(place.FREEZE_SCRIPT.startswith("unset " + " ".join(boundary.BUS_VARIABLES)))
 
 
+class TheExecutorsWorkingDirectory(unittest.TestCase):
+    def test_the_executor_starts_in_the_place_when_one_is_given_and_nowhere_in_particular_otherwise(
+        self,
+    ):
+        with_place = boundary.launch_argv("n", 1, ["tool"], [], [], 3, "/p")
+        without = boundary.launch_argv("n", 1, ["tool"], [], [], 3)
+        inside = [part.replace("$$", "$") for part in with_place]
+        at = inside.index("--chdir")
+        self.assertEqual(inside[at : at + 2], ["--chdir", "/p"])
+        self.assertLess(at, inside.index("--", at))  # before the executor's own command
+        self.assertNotIn("--chdir", without)
+
+    def test_a_place_with_awkward_characters_is_one_argument_unchanged(self):
+        for where in ("/a b", "/$HOME", "/-x", "/a\nb", "/50%h"):
+            with self.subTest(where):
+                argv = [
+                    p.replace("$$", "$")
+                    for p in boundary.launch_argv("n", 1, ["t"], [], [], 3, where)
+                ]
+                self.assertEqual(argv[argv.index("--chdir") + 1], where)
+
+
 class WhatTheFreezePrints(unittest.TestCase):
     def test_a_whole_answer_gives_the_commit_and_the_three_counts(self):
         self.assertEqual(place.parse_freeze_output(GOOD), (OTHER, 3, 2, 1))

@@ -87,6 +87,7 @@ def launch_argv(
     environment_names: Sequence[str],
     protected_paths: Sequence[str],
     report_fd: int,
+    working_directory: str | None = None,
 ) -> list[str]:
     """The command that starts `argv` in the boundary.
 
@@ -95,6 +96,7 @@ def launch_argv(
     it. The variables the shell needed to reach systemd are taken out of the executor's
     environment unless the caller named them. Bubblewrap's status report goes to the descriptor
     `report_fd`, which says whether the executor was ever started (see `executor_started`).
+    The executor starts in `working_directory` when one is given.
     """
     left_out = [v for v in BUS_VARIABLES if v not in environment_names]
     return [
@@ -124,6 +126,7 @@ def launch_argv(
                 "--proc",
                 "/proc",
                 *[part for variable in left_out for part in ("--unsetenv", variable)],
+                *(["--chdir", working_directory] if working_directory is not None else []),
                 "--",
                 *argv,
             ]
