@@ -7,7 +7,7 @@ until the validation code has looked at it) and what `records.read_record` reads
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, TextIO, TypedDict
+from typing import Any, NamedTuple, Protocol, TextIO, TypedDict
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 
@@ -283,17 +283,27 @@ class FileOperations(NamedTuple):
     remove: Callable[[str], None]  # FileNotFoundError when there is no such name
 
 
+class Starter(Protocol):
+    def __call__(
+        self, argv: Sequence[str], environment: Mapping[str, str], report: int | None = None
+    ) -> Process: ...
+
+
 class ProcessOperations(NamedTuple):
     """Child processes. The handle is whatever `start` returns."""
 
     find_program: Callable[[str], bool]  # whether a command can be found and run
-    start: Callable[
-        [Sequence[str], Mapping[str, str]], Process
-    ]  # argv, environment; OSError, ValueError
+    start: Starter  # argv, environment, the number `open_report` gave or None; OSError, ValueError
     poll: Callable[[Process], int | None]  # None while running; negative: ended by that signal
     wait: Callable[
         [Process, float], int | None
     ]  # blocks up to that many seconds for the exit; the status, or None if still running
+    open_report: Callable[
+        [], int
+    ]  # a report channel for one start: the number the child sees its write end as; OSError
+    read_report: Callable[
+        [Process], str
+    ]  # what the child wrote to its report so far (nothing if it had none); never waits
 
 
 class BoundaryOperations(NamedTuple):

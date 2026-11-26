@@ -28,6 +28,8 @@ CALLS = {
     "processes.start": (["tool"], {}),
     "processes.poll": (None,),
     "processes.wait": (None, 0.01),
+    "processes.open_report": (),
+    "processes.read_report": (None,),
     "boundary.show": ("u.scope", ("ActiveState",)),
     "boundary.stop": ("u.scope",),
     "boundary.forget": ("u.scope",),

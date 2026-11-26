@@ -8,7 +8,7 @@ refines the cause of the wait: the limit is a time limit only when the scope say
 import contextlib
 from collections.abc import Mapping
 
-from shuttle.core import boundary, decisions
+from shuttle.core import boundary, decisions, fixed
 from shuttle.core.shapes import Operations, RunState
 
 
@@ -36,6 +36,12 @@ def _executor_status(state: RunState) -> None:
         returncode,
         world.signals.name_of(-returncode) if returncode is not None and returncode < 0 else None,
     )
+    if facts.get("launch") == "failed":
+        facts["exit_code"] = facts["child_signal"] = None  # nothing ran: nothing to claim
+    else:
+        # What ended is the box's own tool, which reports a child killed by signal n as 128 + n,
+        # as a script that exits with that number is reported: the signal is not read from it.
+        facts["child_signal"] = fixed.CANNOT_TELL
     state["executor_duration"] = world.clock.now() - state["clock_start"]
     state["ended_at"] = world.clock.timestamp()
 
@@ -50,6 +56,12 @@ def step(state: RunState) -> None:
             "the boundary was stopped by name but not seen empty; the place is not to be trusted"
         )
     facts["wait"] = boundary.cause_of_end(facts.get("wait"), boundary.why_ended(properties))
+    report = world.processes.read_report(state["boundary_process"])
+    if boundary.launch_failed(facts["wait"], report):
+        facts["launch"] = "failed"
+        state["problems"]["launch"] = (
+            "the boundary ended without ever starting the executor; the executor did not run"
+        )
     state["stand_ins"]["stop_confirmation"] = {
         "everything_stopped": empty,
         "stop_reason": "",

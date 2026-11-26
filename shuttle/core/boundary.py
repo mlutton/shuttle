@@ -6,6 +6,7 @@ when either runs out, and the reason it ended can be read afterwards from its pr
 here touches the world: the shell reads the properties and acts on these answers.
 """
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 
@@ -70,13 +71,15 @@ def launch_argv(
     argv: Sequence[str],
     environment_names: Sequence[str],
     protected_paths: Sequence[str],
+    report_fd: int,
 ) -> list[str]:
     """The command that starts `argv` in the boundary.
 
     A scope with the limit and the grace, around bubblewrap with its own process space that dies
     with its parent, the whole filesystem bound in and each protected path bound read-only over
     it. The variables the shell needed to reach systemd are taken out of the executor's
-    environment unless the caller named them.
+    environment unless the caller named them. Bubblewrap's status report goes to the descriptor
+    `report_fd`, which says whether the executor was ever started (see `executor_started`).
     """
     left_out = [v for v in BUS_VARIABLES if v not in environment_names]
     return [
@@ -93,6 +96,8 @@ def launch_argv(
         "bwrap",
         "--unshare-pid",
         "--die-with-parent",
+        "--json-status-fd",
+        str(report_fd),
         "--bind",
         "/",
         "/",
@@ -142,6 +147,36 @@ def cause_of_end(wait: str | None, boundary_end: str) -> str:
     if boundary_end == ENDED:
         return "exited"
     return CANNOT_TELL
+
+
+def executor_started(report: str) -> bool:
+    """Whether bubblewrap's status report says the executor was started inside the box.
+
+    The report is bubblewrap's `--json-status-fd`: one JSON object per line. Once the executor is
+    running in the box, a line with a "child-pid" member (a positive whole number) is written.
+    Lines that are not JSON objects, and members and objects not known, are ignored.
+    """
+    for line in report.splitlines():
+        try:
+            found = json.loads(line)
+        except (ValueError, RecursionError):  # not JSON, or nested too deep to read
+            continue
+        pid = found.get("child-pid") if isinstance(found, dict) else None
+        if type(pid) is int and pid > 0:
+            return True
+    return False
+
+
+def launch_failed(cause: str, report: str) -> bool:
+    """Whether the boundary never started the executor: the box was seen to end by itself and
+    bubblewrap never reported the executor running.
+
+    That reads the same whether a tool was missing, `systemd-run` could not make the scope or
+    `bwrap` could not make the box. A time limit, a signal, or a cause that cannot be told is
+    not read as a failed launch: the timer may end the box before it reports, and a failed
+    launch is never a guess.
+    """
+    return cause == "exited" and not executor_started(report)
 
 
 def wait_cause(child_exited: bool, signal_name: str | None) -> str | None:

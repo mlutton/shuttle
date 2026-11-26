@@ -29,6 +29,15 @@ open(sys.argv[1], "w").write("up")
 time.sleep(600)
 """
 
+KILLS_ITSELF = """
+import os, signal
+os.kill(os.getpid(), signal.SIGKILL)
+"""
+
+# A tool that stands in for the real one on PATH and fails as the real one does when it cannot
+# make what it was asked to: it says why on standard error and exits with status 1.
+FAILS = "#!/bin/sh\necho 'could not do it' >&2\nexit 1\n"
+
 # Each attempt on the records folder (argv 1) is one line in a file in the place (argv 2):
 # "<name> refused" or "<name> GOT THROUGH".
 TRIES_TO_WRITE_THE_RECORDS = """
@@ -65,6 +74,55 @@ def remount():
 attempt("remount read-write", remount)
 write(os.path.join(place, "new.txt"), "the place is writable")
 """
+
+
+class ABoundaryThatNeverStarted(real_run.RealRun):
+    """The boundary's tools are on the machine but cannot make the box: the executor never ran,
+    so the run could not start, and nothing about the executor's end is claimed."""
+
+    def a_failing(self, tool):
+        folder = os.path.join(self.root, "shims")
+        os.mkdir(folder)
+        path = os.path.join(folder, tool)
+        with open(path, "w") as f:
+            f.write(FAILS)
+        os.chmod(path, 0o755)
+        return folder
+
+    def assert_could_not_start_at_the_launch(self, tool):
+        script = self.script("never-runs.py", "open(__import__('sys').argv[1], 'w').write('ran')")
+        ran = os.path.join(self.root, "ran")
+        code, lines, err = self.run_to_the_end(
+            self.document(script, [ran]), path_first=self.a_failing(tool)
+        )
+        self.assertEqual((code, err, lines[-1]), (0, "", "could_not_start"))
+        receipt = self.outcome()["receipt"]
+        ending = flat(receipt)["ending"]
+        self.assertEqual(
+            (ending["ending"], ending["reason"], ending["failed_step"]),
+            ("could_not_start", "launch_failed", "launch"),
+        )
+        self.assertNotEqual(receipt["execution"]["exit_code"]["state"], "value")
+        self.assertFalse(os.path.exists(ran))
+        self.assertNotEqual(self.scope_state(), "active")
+
+    def test_a_bubblewrap_that_fails_is_a_launch_that_failed(self):
+        self.assert_could_not_start_at_the_launch("bwrap")
+
+    def test_a_systemd_run_that_fails_is_a_launch_that_failed(self):
+        self.assert_could_not_start_at_the_launch("systemd-run")
+
+
+class AScriptThatKillsItself(real_run.RealRun):
+    def test_is_recorded_with_the_exit_code_seen_and_a_signal_that_cannot_be_told(self):
+        # bubblewrap reports a signalled child as 128 + n, which is also what a script that
+        # exits with that number reports: the signal is not read out of the number.
+        script = self.script("kills.py", KILLS_ITSELF)
+        code, lines, err = self.run_to_the_end(self.document(script))
+        self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
+        saw = self.outcome()["receipt"]["execution"]
+        self.assertEqual(saw["exit_code"], {"state": "value", "value": 137})
+        self.assertEqual(saw["signal"], {"state": "cannot tell", "value": None})
 
 
 class AChildThatOutlivesItsScript(real_run.RealRun):

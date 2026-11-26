@@ -32,13 +32,14 @@ class SimulatedHarness:
         if process.returncode is None:
             process.returncode = -9
 
-    def argv(self, kind, report=None):
+    def argv(self, kind, report=None, fd=None):
         behaviours = {
             "exits_at_once": {},
             "exits_with_three": {"exit_code": 3},
             "sleeps": {"hangs": True},
             "reports_streams": {},
             "reports_session": {},
+            "writes_to_the_report": {"report": "hello\n"},
         }
         if kind in behaviours:
             self.world.program(kind, **behaviours[kind])

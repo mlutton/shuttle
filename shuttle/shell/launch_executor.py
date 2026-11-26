@@ -37,12 +37,13 @@ def step(state: RunState) -> None:
         raise RuntimeError("no header source: the document was not read")
     name = boundary.scope_name(source["request_id"])
     protected = [world.boundary.resolve(source["records_location"])]
+    report = world.processes.open_report()
     argv = boundary.launch_argv(
-        name, float(raw["time_limit_seconds"]), spec["argv"], names, protected
+        name, float(raw["time_limit_seconds"]), spec["argv"], names, protected, report
     )
     state["started_at"] = world.clock.timestamp()
     state["clock_start"] = world.clock.now()
-    state["boundary_process"] = world.processes.start(argv, environment)
+    state["boundary_process"] = world.processes.start(argv, environment, report)
     state["boundary_name"] = name
     # Peak memory and processor time are not read from the boundary yet.
     state["stand_ins"]["boundary"] = {fixed.STAND_IN_KEY: "boundary measurements"}

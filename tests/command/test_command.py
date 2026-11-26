@@ -160,7 +160,8 @@ class CommandSeam(unittest.TestCase):
         )
         saw = receipt["execution"]
         self.assertEqual(saw["exit_code"], 0)
-        self.assertEqual(saw["signal"], "none")
+        # The box's own tool ended; a signal that killed the script is not read from its status.
+        self.assertEqual(saw["signal"], "cannot tell")
         self.assertEqual(len(saw["input_hash"]), 64)
         self.assertEqual(receipt["executor_driver"]["executor_driver_name"], "command")
         self.assertEqual(saw["observed_runtime"], "not built")

@@ -124,10 +124,10 @@ def _decide_before_launch(f: Mapping[str, object]) -> Decision | None:
 
 def _decide_after_launch(f: Mapping[str, object]) -> Decision:
     wait = f.get("wait")
-    if wait not in _WAIT:
-        return _after_launch_error()
     if wait == "error" or f.get("stop") == "not_confirmed":
         return _decision(_EF, "stop_not_confirmed", "stop_not_confirmed")
+    if wait not in _WAIT:
+        return _after_launch_error()
     if f.get("stop") != "confirmed":
         return _after_launch_error()
     for step, failed_reason in (
@@ -814,7 +814,9 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         "delivery_branch": _from_step(steps.get("delivery"), "branch"),
         "delivery_branch_reason": _from_step(steps.get("delivery"), "branch_reason"),
         "exit_code": pairs.observed(facts["exit_code"]),
-        "signal": pairs.observed(facts["signal"]),
+        "signal": pairs.cannot_tell()
+        if facts["signal"] == fixed.CANNOT_TELL
+        else pairs.observed(facts["signal"]),
         "peak_memory_bytes": _from_step(boundary, "peak_memory_bytes") if launched else unlooked,
         "processor_time_seconds": _from_step(boundary, "processor_time_seconds")
         if launched

@@ -53,7 +53,7 @@ class RealHarness:
     def end(self, process):
         process.kill()
 
-    def argv(self, kind, report=None):
+    def argv(self, kind, report=None, fd=None):
         self.last_report = report or getattr(self, "last_report", None)
         python = sys.executable
         return {
@@ -62,6 +62,12 @@ class RealHarness:
             "sleeps": [python, "-c", "import time; time.sleep(60)"],
             "reports_streams": [python, "-c", REPORTS_STREAMS, report],
             "reports_session": [python, "-c", REPORTS_SESSION, report],
+            "writes_to_the_report": [
+                python,
+                "-c",
+                "import os, sys; os.write(int(sys.argv[1]), b'hello\\n')",
+                str(fd),
+            ],
             "not_a_program": [os.path.join(self.root, "no-such-program")],
         }[kind]
 

@@ -12,7 +12,7 @@ import os
 import sys
 import unittest
 
-from shuttle.core import boundary, decisions
+from shuttle.core import boundary, decisions, fixed
 from shuttle.shell import run, stop_and_confirm_empty, wait_for_the_end
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -101,6 +101,45 @@ class FromTheCauseAndTheBoundaryToAnEnding(unittest.TestCase):
                 self.assertEqual(self.ending_for(wait, why), expected)
 
 
+STARTED = '{"child-pid": 2, "namespace": 1}\n'
+STARTED_AND_ENDED = STARTED + '{"exit-code": 0}\n'
+
+
+class WhetherTheExecutorEverStarted(unittest.TestCase):
+    """bubblewrap says "child-pid" once the executor is running inside it. A run that ended
+    with no such line never started the executor, whatever the exit code of what was launched."""
+
+    def test_the_report_rows(self):
+        for report, expected in (
+            (STARTED, True),
+            (STARTED_AND_ENDED, True),
+            ('{"other": 1}\n' + STARTED, True),  # other objects and members are ignored
+            ("", False),
+            ('{"exit-code": 1}\n', False),
+            ("bwrap: no permission\n", False),  # text that is not a JSON object
+            ('["child-pid"]\n', False),
+            ('{"child-pid": 0}\n', False),
+            ('{"child-pid": true}\n', False),
+            ('{"child-pid": "7"}\n', False),
+            ("{" * 100_000, False),
+        ):
+            with self.subTest(report=report[:40]):
+                self.assertEqual(boundary.executor_started(report), expected)
+
+    def test_a_launch_failed_when_the_scope_ended_with_no_start_reported(self):
+        for cause, report, expected in (
+            ("exited", "", True),
+            ("exited", '{"exit-code": 1}\n', True),
+            ("exited", STARTED_AND_ENDED, False),
+            ("time_limit", "", False),  # the timer may end it before it reports
+            ("signal", "", False),  # a signal is a stop, not a failed launch
+            ("cannot_tell", "", False),  # never a guess
+            ("stop_record", "", False),
+        ):
+            with self.subTest(cause=cause, report=report):
+                self.assertEqual(boundary.launch_failed(cause, report), expected)
+
+
 class TheLimitTheTimerCanTake(unittest.TestCase):
     def test_rows(self):
         for value, usable in (
@@ -128,7 +167,9 @@ class TheLimitTheTimerCanTake(unittest.TestCase):
                 self.assertEqual(boundary.limit_microseconds(seconds), expected)
 
     def test_the_launch_command_carries_the_limit_the_grace_and_the_protected_paths(self):
-        argv = boundary.launch_argv("shuttle-run-r-1", 2.5, ["tool", "--", "x"], ["HOME"], ["/rec"])
+        argv = boundary.launch_argv(
+            "shuttle-run-r-1", 2.5, ["tool", "--", "x"], ["HOME"], ["/rec"], 7
+        )
         self.assertIn("--unit=shuttle-run-r-1", argv)
         self.assertIn("RuntimeMaxSec=2500000us", argv)
         self.assertIn("TimeoutStopSec=3s", argv)
@@ -139,6 +180,9 @@ class TheLimitTheTimerCanTake(unittest.TestCase):
         self.assertEqual(argv[-3:], ["tool", "--", "x"])  # the executor's own arguments untouched
         self.assertIn("--die-with-parent", argv)
         self.assertIn("--unshare-pid", argv)
+        at = argv.index("--json-status-fd")  # the report of the start goes where it was told to
+        self.assertEqual(argv[at + 1], "7")
+        self.assertLess(at, len(argv) - 3)  # before the executor, which is last
 
     def test_the_variables_that_reach_systemd_are_taken_from_the_executor_unless_named(self):
         for names, unset in (
@@ -146,15 +190,16 @@ class TheLimitTheTimerCanTake(unittest.TestCase):
             (["XDG_RUNTIME_DIR"], ["DBUS_SESSION_BUS_ADDRESS"]),
         ):
             with self.subTest(names=names):
-                argv = boundary.launch_argv("n", 1, ["tool"], names, [])
+                argv = boundary.launch_argv("n", 1, ["tool"], names, [], 3)
                 found = [argv[i + 1] for i, part in enumerate(argv) if part == "--unsetenv"]
                 self.assertEqual(found, unset)
 
 
 def a_state(world, **program):
     world.program("tool", **program)
-    process = world.operations.processes.start(
-        ["systemd-run", "--unit=shuttle-run-w", "bwrap", "--", "tool"], {}
+    processes = world.operations.processes
+    process = processes.start(
+        ["systemd-run", "--unit=shuttle-run-w", "bwrap", "--", "tool"], {}, processes.open_report()
     )
     return {
         "world": world.operations,
@@ -186,8 +231,40 @@ class TheWaitAndStopStepsGiveTheseFacts(unittest.TestCase):
         self.assertEqual(
             (state["facts"]["wait"], state["facts"]["stop"]), ("time_limit", "confirmed")
         )
-        self.assertEqual(state["facts"]["child_signal"], "SIGTERM")
+        # What ended is the scope's process; the executor's own signal is not told.
+        self.assertEqual(state["facts"]["child_signal"], fixed.CANNOT_TELL)
         self.assertEqual(len(world.calls("boundary.forget")), 1)  # the failed unit is cleared
+
+    def test_an_executor_that_never_started_gives_a_failed_launch_and_no_exit_code(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, exit_code=1, fails_to_start=True)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        facts = state["facts"]
+        self.assertEqual(
+            (facts["launch"], facts["stop"], facts["exit_code"], facts["child_signal"]),
+            ("failed", "confirmed", None, None),
+        )
+        self.assertEqual(
+            decisions.decide_ending(facts),
+            {"ending": "could_not_start", "reason": "launch_failed", "failed_step": "launch"},
+        )
+
+    def test_a_scope_that_timed_out_before_the_start_was_reported_is_still_a_time_limit(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, times_out=True, fails_to_start=True)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        self.assertNotEqual(state["facts"].get("launch"), "failed")
+        self.assertEqual(state["facts"]["wait"], "time_limit")
+
+    def test_an_executor_that_started_gives_a_signal_that_cannot_be_told_and_its_exit_code(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, exit_code=137)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        facts = state["facts"]
+        self.assertEqual((facts["exit_code"], facts["child_signal"]), (137, fixed.CANNOT_TELL))
 
     def test_a_signal_gives_signal_and_the_boundary_is_stopped_by_name(self):
         world = simulated.SimulatedWorld()

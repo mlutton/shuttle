@@ -235,6 +235,23 @@ class ContractCases:
         self.assertTrue(self.ended(process))
         self.assertEqual(self.harness.session_the_child_saw(), (True, True))
 
+    def test_what_a_child_writes_to_the_report_descriptor_it_was_given_is_read_back_every_time(
+        self,
+    ):
+        processes = self.world.processes
+        number = processes.open_report()
+        argv = self.harness.argv("writes_to_the_report", fd=number)
+        process = processes.start(argv, self.harness.environment(), number)
+        self.addCleanup(self.harness.end, process)
+        self.assertTrue(self.ended(process))
+        self.assertEqual(processes.read_report(process), "hello\n")
+        self.assertEqual(processes.read_report(process), "hello\n")
+
+    def test_a_child_started_without_a_report_descriptor_has_an_empty_report(self):
+        process = self.start("exits_at_once")
+        self.assertTrue(self.ended(process))
+        self.assertEqual(self.world.processes.read_report(process), "")
+
     # ------------------------------------------------------------------ clock
 
     def test_the_steady_clock_does_not_go_back(self):

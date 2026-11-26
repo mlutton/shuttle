@@ -55,20 +55,29 @@ class RealRun(unittest.TestCase):
             },
         }
 
-    def start(self, doc):
-        """The real command, started; the caller waits for it with `communicate`."""
+    def start(self, doc, path_first=None):
+        """The real command, started; the caller waits for it with `communicate`. With
+        `path_first`, that folder comes first on the command's PATH."""
         path = os.path.join(self.root, f"{doc['request_id']}.input.json")
         with open(path, "w") as f:
             json.dump(doc, f)
         proc = subprocess.Popen(
             [sys.executable, "-m", "shuttle", "run", path],
             cwd=REPO,
+            env=self.environment(path_first),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
         self.addCleanup(self.end, doc["request_id"], proc)
         return proc
+
+    @staticmethod
+    def environment(path_first):
+        environment = dict(os.environ)
+        if path_first:
+            environment["PATH"] = path_first + os.pathsep + environment.get("PATH", "")
+        return environment
 
     def end(self, request_id, proc):
         """Nothing a test started outlives it."""
@@ -80,9 +89,9 @@ class RealRun(unittest.TestCase):
             capture_output=True,
         )
 
-    def run_to_the_end(self, doc):
+    def run_to_the_end(self, doc, path_first=None):
         """Run the command to its end: (exit code, standard output lines, standard error)."""
-        proc = self.start(doc)
+        proc = self.start(doc, path_first)
         stdout, stderr = proc.communicate(timeout=120)
         return proc.returncode, stdout.splitlines(), stderr
 

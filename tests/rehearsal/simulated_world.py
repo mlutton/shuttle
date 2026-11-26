@@ -41,6 +41,7 @@ class _Child:
         self.behaviour = behaviour
         self.unit = unit
         self.returncode = None
+        self.report = ""
 
 
 _GONE = {"LoadState": "not-found", "ActiveState": "inactive", "Result": "success"}
@@ -67,6 +68,7 @@ class SimulatedWorld:
         self._hooks = []
         self.units = {}  # unit name -> its properties; a unit not here is gone
         self._waits = 0
+        self._reports = 0
         self._handlers = []
         self._ids = 0
         self.operations = Operations(
@@ -82,6 +84,8 @@ class SimulatedWorld:
                 start=self._start,
                 poll=self._poll,
                 wait=self._wait_for_exit,
+                open_report=self._open_report,
+                read_report=self._read_report,
             ),
             boundary=BoundaryOperations(
                 show=self._show, stop=self._stop, forget=self._forget, resolve=self._resolve
@@ -128,18 +132,24 @@ class SimulatedWorld:
         survives_stop=False,
         exit_code=0,
         creates=(),
+        fails_to_start=False,
+        report=None,
     ):
         """Say what starting `command` in the boundary makes: a child that exits at once with
         `exit_code`; or, with `hangs`, one that runs until the boundary is stopped; or, with
         `times_out`, one the boundary's timer ends (its scope fails with the result "timeout")
         the first time it is looked at. With `survives_stop` stopping the boundary does nothing.
-        The child creates the named files as it starts."""
+        The child creates the named files as it starts. A child started in the boundary reports
+        that it started, unless `fails_to_start` (the boundary's own tool exits with `exit_code`
+        before the executor runs); `report` is the text a child writes to the report it was given."""
         self.programs[command] = {
             "hangs": hangs or times_out or survives_stop,
             "times_out": times_out,
             "survives_stop": survives_stop,
             "exit_code": exit_code,
             "creates": tuple(creates),
+            "fails_to_start": fails_to_start,
+            "report": report,
         }
 
     # ------------------------------------------------------------ making things fail
@@ -250,7 +260,12 @@ class SimulatedWorld:
         self._enter("processes.find_program", command)
         return command in self.programs
 
-    def _start(self, argv, environment):
+    def _open_report(self):
+        self._enter("processes.open_report")
+        self._reports += 1
+        return 2 + self._reports
+
+    def _start(self, argv, environment, report=None):
         self._enter("processes.start", list(argv), dict(environment))
         if any("\0" in part for part in argv):
             raise ValueError("embedded null byte")
@@ -270,10 +285,19 @@ class SimulatedWorld:
         child = _Child(executor, behaviour, unit)
         if not behaviour["hangs"]:
             child.returncode = behaviour["exit_code"]
+        if report is not None:
+            if behaviour["report"] is not None:
+                child.report = behaviour["report"]
+            elif not behaviour["fails_to_start"]:
+                child.report = '{"child-pid": 2}\n'
         if unit:
             self.units[unit] = dict(_STILL_THERE)
         self.children.append(child)
         return child
+
+    def _read_report(self, child):
+        self._enter("processes.read_report", child.argv)
+        return child.report
 
     def _status(self, child):
         return child.returncode
