@@ -242,6 +242,74 @@ class Refusals(RealCommand):
         done, lines = self.command("run", doc)
         self.assertEqual(lines[-1], "ended_by_itself")
 
+    def a_program_in(self, folder):
+        """An executable in `folder` (made if it is not there) that writes the witness; the
+        command driver can name it by its absolute path."""
+        os.makedirs(folder, exist_ok=True)
+        path = self.write("the-program", f"#!{real_run.INTERPRETER}\n{WRITES_WITNESS}", folder)
+        os.chmod(path, 0o755)
+        return path
+
+    def document_naming(self, program):
+        doc = self.document()
+        doc["executor"]["settings"] = {"command": program, "arguments": [self.witness]}
+        return doc
+
+    def refused_by_both(self, doc, folder):
+        """The check and the run refuse the document with the same line, which names `folder` and
+        reach.visible; nothing is written by the check or started by the run."""
+        for name in os.listdir(self.records):
+            os.unlink(os.path.join(self.records, name))
+        checked, check_lines = self.command("check", doc)
+        self.assertEqual(check_lines[-2], "check: refused: program_not_visible")
+        self.assertEqual(os.listdir(self.records), [])
+        self.command("run", doc)
+        self.assertEqual(
+            self.ending(self.outcome()),
+            ("could_not_start", "program_not_visible", "executor_driver_check"),
+        )
+        line = self.outcome()["receipt"]["ending"]["reason_text"]["value"]
+        self.assertIn(repr(folder), line)
+        self.assertIn("reach.visible", line)
+        self.assertEqual(
+            json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"], line
+        )
+        self.assertFalse(os.path.exists(self.witness))
+
+    def test_a_program_in_a_hidden_folder_is_refused_by_the_check_and_the_run_naming_the_folder(
+        self,
+    ):
+        hidden = os.path.join(self.root, "hidden")
+        self.refused_by_both(self.document_naming(self.a_program_in(hidden)), hidden)
+
+    def test_a_link_in_a_shown_folder_to_a_hidden_file_is_refused_naming_the_folder_of_the_file(
+        self,
+    ):
+        hidden = os.path.join(self.root, "hidden")
+        real = self.a_program_in(hidden)
+        link = os.path.join(self.support, "linked-program")
+        os.symlink(real, link)
+        self.refused_by_both(self.document_naming(link), os.path.realpath(hidden))
+
+    def test_a_link_in_a_hidden_folder_is_refused_even_to_a_shown_file(self):
+        shown = self.a_program_in(self.support)
+        hidden = os.path.join(self.root, "hidden")
+        os.mkdir(hidden)
+        link = os.path.join(hidden, "linked-program")
+        os.symlink(shown, link)
+        self.refused_by_both(self.document_naming(link), os.path.realpath(hidden))
+
+    def test_a_program_the_box_shows_is_accepted_by_the_check(self):
+        program = self.a_program_in(self.support)  # a visible folder
+        _, check_lines = self.command("check", self.document_naming(program))
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+        program = self.a_program_in(os.path.join(self.root, "reference-folder"))  # a reference
+        doc = self.document_naming(program)
+        with open(program) as f:
+            doc["references"] = [ref(program, f.read())]
+        _, check_lines = self.command("check", doc)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+
     def test_a_matching_instruction_hash_and_reference_run(self):
         runbook = self.write("runbook.md", "contents")
         doc = self.document(
