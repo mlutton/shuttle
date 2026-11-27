@@ -32,11 +32,22 @@ def shipped_schema():
         return f.read()
 
 
+def as_lines(text, limit=1000):
+    """The lines of a text as the world's `read_lines` gives them."""
+    lines = text.encode().split(b"\n")
+    if lines[-1] == b"":
+        lines.pop()
+    return [(line[:limit], len(line) > limit) for line in lines]
+
+
 def saved(events=None, last_message=None, record=None):
+    def lines(name):
+        return None if name is None else as_lines(saved_text(name))
+
     return {
-        "events": None if events is None else saved_text(events),
-        "last_message": None if last_message is None else saved_text(last_message),
-        "session_record": None if record is None else saved_text(record),
+        "events": lines(events),
+        "last_message": lines(last_message),
+        "session_record": lines(record),
     }
 
 
@@ -258,13 +269,27 @@ class Observing(unittest.TestCase):
 
         self.assertEqual(set(self.group()), set(ExecutorDriverGroup.__annotations__))
 
-    def test_the_statement_text_is_the_last_message_exactly_or_none(self):
+    def test_a_reply_is_given_when_the_last_message_holds_anything(self):
         for name in ("last-message-done.txt", "last-message-question.txt"):
-            observed = codex.observe(SETTINGS, saved(last_message=name))
-            self.assertEqual(observed["statement_text"], saved_text(name))
-        self.assertIsNone(codex.observe(SETTINGS, saved())["statement_text"])
-        empty = {"events": None, "last_message": "", "session_record": None}
-        self.assertIsNone(codex.observe(SETTINGS, empty)["statement_text"])
+            self.assertTrue(codex.observe(SETTINGS, saved(last_message=name))["reply_given"])
+        self.assertFalse(codex.observe(SETTINGS, saved())["reply_given"])  # no file
+        empty = {"events": None, "last_message": [], "session_record": None}
+        self.assertFalse(codex.observe(SETTINGS, empty)["reply_given"])  # a file of nothing
+
+    def test_the_waiting_question_is_the_last_line_that_is_not_blank_and_asks(self):
+        def question(text):
+            given = {"events": None, "last_message": as_lines(text), "session_record": None}
+            return state_of(codex.observe(SETTINGS, given)["group"]["waiting_question"])
+
+        self.assertEqual(question("Notes.\nWhich one?\n\n"), ("value", "Which one?"))
+        self.assertEqual(question("Which one? I will wait.\n"), ("none", None))
+        self.assertEqual(question(""), ("none", None))
+        long_line = "q" * 20 + "?"
+        cut = {"events": None, "last_message": as_lines(long_line, 5), "session_record": None}
+        self.assertEqual(
+            state_of(codex.observe(SETTINGS, cut)["group"]["waiting_question"]),
+            ("cannot tell", None),
+        )
 
 
 def turn(usage):
@@ -272,10 +297,44 @@ def turn(usage):
 
 
 def from_events(*lines):
-    text = "".join(line + "\n" for line in lines)
-    return codex.observe(SETTINGS, {"events": text, "last_message": None, "session_record": None})[
-        "group"
-    ]
+    saved_events = as_lines("".join(line + "\n" for line in lines))
+    return codex.observe(
+        SETTINGS, {"events": saved_events, "last_message": None, "session_record": None}
+    )["group"]
+
+
+class ALineTooLongToHold(unittest.TestCase):
+    """A cut line costs nothing when its first bytes say it holds nothing that is read."""
+
+    def observe(self, *lines):
+        return codex.observe(
+            SETTINGS, {"events": list(lines), "last_message": None, "session_record": None}
+        )["group"]
+
+    def test_a_cut_item_is_counted_and_costs_no_field(self):
+        got = self.observe(
+            (b'{"type":"thread.started","thread_id":"t-1"}', False),
+            (b'{"type":"item.completed","item":{"aggregated_output":"xxxxxxxx', True),
+            (
+                b'{"type":"turn.completed","usage":{"input_tokens":4,"output_tokens":1,"cached_input_tokens":0}}',
+                False,
+            ),
+        )
+        self.assertEqual(state_of(got["activity"]), ("value", 1))
+        self.assertEqual(state_of(got["tokens_in"]), ("value", 4))
+        self.assertEqual(state_of(got["session_id"]), ("value", "t-1"))
+
+    def test_a_cut_line_that_may_have_held_a_count_or_the_id_makes_them_cannot_tell(self):
+        for head in (
+            b'{"type":"turn.completed","usage":{"input_tokens":1,"outp',
+            b'{"unknown first":',
+        ):
+            with self.subTest(head):
+                got = self.observe(
+                    (b'{"type":"thread.started","thread_id":"t-1"}', False), (head, True)
+                )
+                for field in ("tokens_in", "tokens_out", "tokens_cached", "activity", "session_id"):
+                    self.assertEqual(state_of(got[field]), ("cannot tell", None), field)
 
 
 class TheCountsAndTheSessionIdAreNeverInvented(unittest.TestCase):
@@ -377,7 +436,8 @@ class AQuestionAsTheLastMessage(unittest.TestCase):
             saved(events="events-asked-a-question.jsonl", last_message="last-message-question.txt"),
         )
         schema = json.loads(shipped_schema())
-        examined = statement.examine(observed["statement_text"].encode(), schema)
+        examined = statement.examine(saved_text("last-message-question.txt").encode(), schema)
+        self.assertTrue(observed["reply_given"])
         self.assertTrue(examined["problems"])  # wrong shape
         self.assertEqual(state_of(observed["group"]["waiting_question"])[0], "value")
         facts: Facts = {
@@ -392,9 +452,8 @@ class AQuestionAsTheLastMessage(unittest.TestCase):
         self.assertEqual(got["ending"], "ended_by_itself")
 
     def test_a_statement_in_the_right_shape_is_judged_right(self):
-        observed = codex.observe(SETTINGS, saved(last_message="last-message-statement.json"))
         schema = json.loads(shipped_schema())
-        examined = statement.examine(observed["statement_text"].encode(), schema)
+        examined = statement.examine(saved_text("last-message-statement.json").encode(), schema)
         self.assertEqual((examined["problems"], examined["claim"]), ([], "done"))
 
 

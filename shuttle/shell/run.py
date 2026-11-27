@@ -189,8 +189,8 @@ def step_run_gates(state: RunState) -> None:
 
 
 def step_observe(state: RunState) -> None:
-    """Ask the driver what the tool left. A statement the tool gives as text (and not as a file)
-    is put at the statement location, for the step that keeps it."""
+    """Ask the driver what the tool left. A final message the tool gave is copied to the
+    statement location (when nothing is there), for the step that keeps it."""
     world, raw = state["world"], state["raw"]
     driver = the_driver.of(raw)
     area = state.get("run_area")
@@ -199,9 +199,12 @@ def step_observe(state: RunState) -> None:
         saved = {"events": None, "last_message": None, "session_record": None}
     observed = driver.observe(raw["executor"]["settings"], saved)
     state["executor_driver_observations"] = observed["group"]
-    location, text = raw.get("statement_location"), observed["statement_text"]
-    if location is not None and text is not None and not world.files.exists(location):
-        world.files.write_new(location, text)
+    location = raw.get("statement_location")
+    reply = driver.output_files(area or "").get("last_message")
+    wanted = observed["reply_given"] and location is not None and reply and area
+    if wanted and not world.files.exists(location or ""):
+        with contextlib.suppress(OSError):  # nothing left there is a statement not given
+            world.files.copy(reply or "", location or "")
 
 
 def step_deliver(state: RunState) -> None:  # stand-in

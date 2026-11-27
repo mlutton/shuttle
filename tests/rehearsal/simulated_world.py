@@ -98,6 +98,7 @@ class SimulatedWorld:
         self.operations = Operations(
             files=FileOperations(
                 read=self._read,
+                read_lines=self._read_lines,
                 exists=self._exists,
                 write_new=self._write_new,
                 link=self._link,
@@ -334,6 +335,14 @@ class SimulatedWorld:
     def _read(self, path):
         self._enter("files.read", path)
         return bytes(self.files[self._regular(path, True)])
+
+    def _read_lines(self, path, limit):
+        self._enter("files.read_lines", path, limit)
+        data = bytes(self.files[self._regular(path, True)])
+        lines = data.split(b"\n")
+        if lines[-1] == b"":
+            lines.pop()  # the file ended with a line end, or is empty
+        return iter([(line[:limit], len(line) > limit) for line in lines])
 
     def _exists(self, path):
         self._enter("files.exists", path)

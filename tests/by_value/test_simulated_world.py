@@ -20,6 +20,7 @@ simulated = importlib.import_module("rehearsal.simulated_world")
 # How to call each operation: its arguments (None: the handle `start` returned, the first).
 CALLS = {
     "files.read": ("/f",),
+    "files.read_lines": ("/f", 5),
     "files.exists": ("/f",),
     "files.write_new": ("/f", "text"),
     "files.link": ("/f", "/g"),

@@ -80,7 +80,7 @@ class TheTable(unittest.TestCase):
         self.assertEqual(command.setup_requests(settings, {}), [])
         self.assertEqual(command.launch(settings, {})["argv"], ["tool", "a"])
         nothing = {"events": None, "last_message": None, "session_record": None}
-        self.assertIsNone(command.observe(settings, nothing)["statement_text"])
+        self.assertFalse(command.observe(settings, nothing)["reply_given"])
 
 
 def sources_outside_the_drivers():

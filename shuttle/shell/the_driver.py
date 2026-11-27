@@ -5,13 +5,13 @@ names a driver. What is gathered is looked at, never opened: whether the program
 whether the login's name is there.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 from shuttle.core import decisions
 from shuttle.core.drivers import table
 from shuttle.core.drivers.interface import Driver
-from shuttle.core.shapes import DriverFacts, LaunchContext, Operations, SavedOutput
+from shuttle.core.shapes import DriverFacts, LaunchContext, Line, Operations, SavedOutput
 
 
 def of(raw: Mapping[str, Any]) -> Driver:
@@ -53,21 +53,27 @@ def launch_context(world: Operations, raw: Mapping[str, Any], run_area: str) -> 
     }
 
 
+# The longest line read from the tool's output. It bounds what one line can cost; the stream as a
+# whole has no size limit, since it is never held.
+LINE_LIMIT = 1 << 20
+
+
 def saved_output(world: Operations, driver: Driver, run_area: str) -> SavedOutput:
-    """The text of what the tool left, each None when it is not there or cannot be read. The
-    session record is not found yet (the file operations cannot list a folder)."""
+    """What the tool left, each file a single pass over its lines, or None when it is not there
+    or cannot be opened. The session record is not found yet (the file operations cannot list a
+    folder)."""
     files = driver.output_files(run_area)
 
-    def read(name: str | None) -> str | None:
+    def lines(name: str | None) -> Iterator[Line] | None:
         if name is None:
             return None
         try:
-            return world.files.read(name).decode("utf-8")
-        except (OSError, ValueError):
+            return world.files.read_lines(name, LINE_LIMIT)
+        except OSError:
             return None
 
     return {
-        "events": read(files.get("events")),
-        "last_message": read(files.get("last_message")),
+        "events": lines(files.get("events")),
+        "last_message": lines(files.get("last_message")),
         "session_record": None,
     }

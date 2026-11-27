@@ -106,4 +106,4 @@ def observe(settings: Settings, saved: SavedOutput) -> Observed:
         "changed_self_loaded_file": nothing,
         "waiting_question": nothing,
     }
-    return {"group": group, "statement_text": None}
+    return {"group": group, "reply_given": False}

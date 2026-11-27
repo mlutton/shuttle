@@ -74,6 +74,52 @@ class ContractCases:
         self.world.files.write_new(path, TEXT)
         self.assertEqual(self.world.files.read(path), TEXT.encode("utf-8"))
 
+    def test_a_file_read_by_lines_gives_each_line_without_its_end_and_never_a_cut_one_whole(self):
+        path = self.fresh()
+        self.world.files.write_new(path, "one\ntwo\r\n\nlast without an end")
+        lines = list(self.world.files.read_lines(path, 100))
+        self.assertEqual(
+            lines,
+            [(b"one", False), (b"two\r", False), (b"", False), (b"last without an end", False)],
+        )
+
+    def test_a_line_over_the_limit_gives_its_first_bytes_cut_and_the_lines_after_it_whole(self):
+        path = self.fresh()
+        self.world.files.write_new(path, "abcdef\n12345\nxyzzy\nabcdefghij")
+        got = list(self.world.files.read_lines(path, 5))
+        self.assertEqual(
+            got, [(b"abcde", True), (b"12345", False), (b"xyzzy", False), (b"abcde", True)]
+        )
+
+    def test_a_file_of_one_endless_line_is_read_in_bounded_pieces(self):
+        path = self.fresh()
+        self.world.files.write_new(path, "x" * 3_000_000 + "\nnext\n")
+        got = list(self.world.files.read_lines(path, 10))
+        self.assertEqual(got, [(b"x" * 10, True), (b"next", False)])
+
+    def test_reading_an_empty_file_by_lines_gives_none_and_an_end_with_a_line_end_gives_no_extra(
+        self,
+    ):
+        empty, ended = self.fresh("empty"), self.fresh("ended")
+        self.world.files.write_new(empty, "")
+        self.world.files.write_new(ended, "a\n")
+        self.assertEqual(list(self.world.files.read_lines(empty, 5)), [])
+        self.assertEqual(list(self.world.files.read_lines(ended, 5)), [(b"a", False)])
+
+    def test_reading_by_lines_raises_as_reading_does_when_the_call_is_made(self):
+        things = dict(self.not_regular_things())
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.read_lines, self.fresh("absent"), 5
+        )
+        self.assertRaisesExactly(
+            IsADirectoryError, self.world.files.read_lines, self.harness.folder(), 5
+        )
+        for label in ("a named pipe", "a device", "a link to a device", "a link to a named pipe"):
+            with self.subTest(label):
+                self.assertRaisesExactly(
+                    NotARegularFile, self.world.files.read_lines, things[label], 5
+                )
+
     def test_a_new_file_that_is_not_there_yet_is_not_there_and_then_is(self):
         path = self.fresh()
         self.assertFalse(self.world.files.exists(path))

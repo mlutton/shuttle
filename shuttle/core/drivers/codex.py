@@ -7,14 +7,18 @@ hold) are those of codex-cli 0.172.0 as of 2026-11-25; a newer tool may differ, 
 is not found reads "cannot tell" rather than a guess.
 
 The instruction reaches the tool on standard input. Its statement is its final message, which
-the tool writes to a file the launch command names; the driver hands that text back and judges
+the tool writes to a file the launch command names; the driver says whether there is one and judges
 nothing: a message that is not the statement's shape is the shell's to refuse, and the ending is
 the decisions' to name.
+
+What the tool leaves is read a line at a time, so nothing held grows with the file. A line the
+shell had to cut is judged by its first bytes: when they show it was not one a field is read from,
+it costs nothing; otherwise what it would have held reads "cannot tell".
 """
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from shuttle.core import pairs
@@ -23,6 +27,7 @@ from shuttle.core.shapes import (
     ExecutorDriverGroup,
     LaunchContext,
     LaunchSpec,
+    Line,
     Observed,
     OutputFiles,
     Pair,
@@ -166,38 +171,28 @@ def launch(settings: Settings, context: LaunchContext) -> LaunchSpec:
 
 # ---------------------------------------------------------------------------- observing
 
+# The events whose fields a number or an id is read from; a cut line of any other kind is no loss.
+_READ_FROM = ("turn.completed", "thread.started")
+_KIND = re.compile(rb'\{\s*"type"\s*:\s*"([A-Za-z0-9_.]+)"')
+_COUNTS = {
+    "tokens_in": "input_tokens",
+    "tokens_out": "output_tokens",
+    "tokens_cached": "cached_input_tokens",
+}
 
-def _lines(text: str | None) -> list[dict[str, Any]] | None:
-    """The JSON objects among the lines of a saved file; a line that is not one is skipped."""
-    if text is None:
+
+def _object(line: bytes) -> dict[str, Any] | None:
+    try:
+        held = json.loads(line)
+    except ValueError:
         return None
-    found: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        try:
-            held = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(held, dict):
-            found.append(held)
-    return found
+    return held if isinstance(held, dict) else None
 
 
-def _number(held: object) -> int | float | None:
-    return held if isinstance(held, int | float) and not isinstance(held, bool) else None
-
-
-def _first(events: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
-    return next((e for e in events if e.get("type") == kind), None)
-
-
-def _payload(record: list[dict[str, Any]] | None, kind: str) -> dict[str, Any] | None:
-    """The payload of the last record of this type (its own, or its payload's) in the session
-    record, or None."""
-    for entry in reversed(record or []):
-        held = entry.get("payload")
-        if isinstance(held, dict) and kind in (entry.get("type"), held.get("type")):
-            return held
-    return None
+def _kind_of_cut(prefix: bytes) -> str | None:
+    """The type a cut line opens with, when its first bytes say."""
+    found = _KIND.match(prefix)
+    return found.group(1).decode() if found else None
 
 
 def _count(held: object) -> int | None:
@@ -205,42 +200,121 @@ def _count(held: object) -> int | None:
     return held if isinstance(held, int) and not isinstance(held, bool) and held >= 0 else None
 
 
-def _tokens(events: list[dict[str, Any]] | None) -> tuple[Pair, Pair, Pair]:
-    """Tokens in, out and cached, summed over the turns the stream finished.
+class _Events:
+    """What the event stream says, folded one line at a time."""
 
-    No finished turn is "none" (the run did not get that far, and the tool gives no usage then).
-    A count a finished turn does not give as a number is "cannot tell", never zero.
-    """
-    if events is None:
-        return pairs.cannot_tell(), pairs.cannot_tell(), pairs.cannot_tell()
-    turns = [e for e in events if e.get("type") == "turn.completed"]
-    if not turns:
-        return pairs.none(), pairs.none(), pairs.none()
-    usages: list[dict[str, Any]] = [
-        t["usage"] if isinstance(t.get("usage"), dict) else {} for t in turns
-    ]
+    def __init__(self) -> None:
+        self.completed_items = 0
+        self.turns = 0
+        self.counts: dict[str, int | None] = {name: 0 for name in _COUNTS}
+        self.started = False
+        self.thread_id: str | None = None
+        self.lost = False  # a cut line that may have held a count or the thread id
 
-    def total(name: str) -> Pair:
-        counts = [_count(u.get(name)) for u in usages]
-        if any(c is None for c in counts):
+    def add(self, line: bytes, cut: bool) -> None:
+        kind = _kind_of_cut(line) if cut else None
+        event = None if cut else _object(line)
+        if event is not None:
+            kind = event.get("type") if isinstance(event.get("type"), str) else None
+        if cut and (kind is None or kind in _READ_FROM):
+            self.lost = True
+        if kind == "item.completed":
+            self.completed_items += 1
+        if event is None:
+            return
+        if kind == "thread.started":
+            self.started = True
+            held = event.get("thread_id")
+            self.thread_id = held if isinstance(held, str) and held else None
+        elif kind == "turn.completed":
+            self.turns += 1
+            held_usage = event.get("usage")
+            usage: dict[str, Any] = held_usage if isinstance(held_usage, dict) else {}
+            for name, key in _COUNTS.items():
+                added, had = _count(usage.get(key)), self.counts[name]
+                self.counts[name] = None if added is None or had is None else had + added
+
+    def tokens(self) -> dict[str, Pair]:
+        """Each count: "none" when no turn finished, "cannot tell" when one was lost or gave no
+        number for it, else the sum over the finished turns. A count is never made up as zero."""
+        if self.lost:
+            return {name: pairs.cannot_tell() for name in _COUNTS}
+        if self.turns == 0:
+            return {name: pairs.none() for name in _COUNTS}
+        return {
+            name: pairs.cannot_tell() if held is None else pairs.value(held)
+            for name, held in self.counts.items()
+        }
+
+    def session(self) -> Pair:
+        if self.lost:
             return pairs.cannot_tell()
-        return pairs.value(sum(c for c in counts if c is not None))
+        if not self.started:
+            return pairs.none()
+        return pairs.cannot_tell() if self.thread_id is None else pairs.value(self.thread_id)
 
-    return total("input_tokens"), total("output_tokens"), total("cached_input_tokens")
+    def activity(self) -> Pair:
+        return pairs.cannot_tell() if self.lost else pairs.value(self.completed_items)
 
 
-def _from_record(record: list[dict[str, Any]] | None, kind: str, key: str) -> Pair:
-    if record is None:
+def _fold_events(lines: Iterable[Line] | None) -> _Events | None:
+    if lines is None:
+        return None
+    folded = _Events()
+    for line, cut in lines:
+        folded.add(line, cut)
+    return folded
+
+
+# What the session record is read for: the last record of each of these types, or that it was lost.
+_RECORD_KINDS = ("session_meta", "turn_context", "token_count")
+
+
+def _fold_record(lines: Iterable[Line] | None) -> tuple[dict[str, dict[str, Any]], set[str]] | None:
+    """The payload of the last record of each kind that is read, and the kinds a cut line may
+    have held (a cut line of an unknown type, or one that wraps its type in a payload)."""
+    if lines is None:
+        return None
+    found: dict[str, dict[str, Any]] = {}
+    lost: set[str] = set()
+    for line, cut in lines:
+        if cut:
+            kind = _kind_of_cut(line)
+            lost |= {k for k in _RECORD_KINDS if kind in (None, "event_msg", k)}
+            continue
+        entry = _object(line)
+        held = entry.get("payload") if entry else None
+        if not isinstance(entry, dict) or not isinstance(held, dict):
+            continue
+        for kind in _RECORD_KINDS:
+            if kind in (entry.get("type"), held.get("type")):
+                found[kind] = held
+    return found, lost
+
+
+def _from_record(
+    record: tuple[dict[str, dict[str, Any]], set[str]] | None, kind: str, key: str
+) -> Pair:
+    if record is None or kind in record[1]:
         return pairs.cannot_tell()
-    held = (_payload(record, kind) or {}).get(key)
+    held = record[0].get(kind, {}).get(key)
     return pairs.value(held) if isinstance(held, str) and held else pairs.cannot_tell()
 
 
-def _limits(record: list[dict[str, Any]] | None) -> tuple[Pair, Pair, Pair]:
+def _number(held: object) -> int | float | None:
+    return held if isinstance(held, int | float) and not isinstance(held, bool) else None
+
+
+def _limits(
+    record: tuple[dict[str, dict[str, Any]], set[str]] | None,
+) -> tuple[Pair, Pair, Pair]:
     """The quota used, whether a limit was reached, and when it resets (only if it was)."""
-    limits = (_payload(record, "token_count") or {}).get("rate_limits")
+    unknown = pairs.cannot_tell(), pairs.cannot_tell(), pairs.cannot_tell()
+    if record is None or "token_count" in record[1]:
+        return unknown
+    limits = record[0].get("token_count", {}).get("rate_limits")
     if not isinstance(limits, dict):
-        return pairs.cannot_tell(), pairs.cannot_tell(), pairs.cannot_tell()
+        return unknown
     held = limits.get("primary")
     primary: dict[str, Any] = held if isinstance(held, dict) else {}
     used, reset = _number(primary.get("used_percent")), _number(primary.get("resets_at"))
@@ -252,29 +326,41 @@ def _limits(record: list[dict[str, Any]] | None) -> tuple[Pair, Pair, Pair]:
     )
 
 
-def _is_question(message: str | None) -> Pair:
-    if message is None:
-        return pairs.cannot_tell()
-    return pairs.value(message) if message.rstrip().endswith("?") else pairs.none()
+def _read_last_message(lines: Iterable[Line] | None) -> tuple[bool, Pair]:
+    """(whether the tool gave a final message, the waiting question): the message's last line
+    that is not blank when that line ends in a question mark. A last line that was cut, or is not
+    text, cannot be told."""
+    if lines is None:
+        return False, pairs.cannot_tell()
+    given = False
+    last: Line | None = None
+    for line, cut in lines:
+        given = True
+        if line.strip() or cut:
+            last = (line, cut)
+    if last is None:
+        return given, pairs.none()
+    try:
+        text = last[0].decode("utf-8")
+    except UnicodeDecodeError:
+        return given, pairs.cannot_tell()
+    if last[1]:
+        return given, pairs.cannot_tell()
+    return given, pairs.value(text.strip()) if text.rstrip().endswith("?") else pairs.none()
 
 
 def observe(settings: Settings, saved: SavedOutput) -> Observed:
-    """The driver group from the saved event stream, last message and session record, and the
-    last message as the statement. A file that could not be read, or a field it lacks (a count
-    that is not a number, a start with no id), is "cannot tell"; "none" is for a stream that ran
-    and holds no finished turn or no start at all.
+    """The driver group from the saved event stream, last message and session record, each read
+    once, a line at a time. A file that could not be opened, or a field it lacks (a count that is
+    not a number, a start with no id), is "cannot tell"; "none" is for a stream that ran and holds
+    no finished turn or no start at all.
 
     Time is not here: the tool writes none, and the run's own clock measures it.
     """
-    events, record = _lines(saved["events"]), _lines(saved["session_record"])
-    started = None if events is None else _first(events, "thread.started")
-    session = pairs.cannot_tell() if events is None else pairs.none()
-    if started:  # a start that gives no usable id is a field the tool lacks
-        held = started.get("thread_id")
-        session = pairs.value(held) if isinstance(held, str) and held else pairs.cannot_tell()
-    done = None if events is None else sum(1 for e in events if e.get("type") == "item.completed")
+    events, record = _fold_events(saved["events"]), _fold_record(saved["session_record"])
+    given, question = _read_last_message(saved["last_message"])
     unknown = pairs.cannot_tell()
-    tokens_in, tokens_out, tokens_cached = _tokens(events)
+    tokens = events.tokens() if events else {name: unknown for name in _COUNTS}
     quota, reached, reset = _limits(record)
     group: ExecutorDriverGroup = {
         "executor_driver_name": pairs.value(NAME),
@@ -282,11 +368,11 @@ def observe(settings: Settings, saved: SavedOutput) -> Observed:
         "tool_version": _from_record(record, "session_meta", "cli_version"),
         "model": _from_record(record, "turn_context", "model"),
         "effort": _from_record(record, "turn_context", "effort"),
-        "tokens_in": tokens_in,
-        "tokens_out": tokens_out,
-        "tokens_cached": tokens_cached,
-        "activity": unknown if done is None else pairs.value(done),
-        "session_id": session,
+        "tokens_in": tokens["tokens_in"],
+        "tokens_out": tokens["tokens_out"],
+        "tokens_cached": tokens["tokens_cached"],
+        "activity": events.activity() if events else unknown,
+        "session_id": events.session() if events else unknown,
         "refused_actions": unknown,  # the tool marks a refused action only in the text it prints
         "quota_level": quota,
         "vendor_limit_reached": reached,
@@ -295,6 +381,6 @@ def observe(settings: Settings, saved: SavedOutput) -> Observed:
         "load_lists_differ": unknown,
         "load_lists_kept_file": unknown,
         "changed_self_loaded_file": unknown,
-        "waiting_question": _is_question(saved["last_message"]),
+        "waiting_question": question,
     }
-    return {"group": group, "statement_text": saved["last_message"] or None}
+    return {"group": group, "reply_given": given}

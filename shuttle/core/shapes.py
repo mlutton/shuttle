@@ -6,7 +6,7 @@ outside and are checked by value: `Document` (the input document as read from JS
 until the validation code has looked at it) and what `records.read_record` reads back from disk.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any, Literal, NamedTuple, NotRequired, Protocol, TextIO, TypedDict
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
@@ -117,17 +117,22 @@ class OutputFiles(TypedDict, total=False):
     last_message: str
 
 
-class SavedOutput(TypedDict):
-    """The text of what the tool left, each None when it could not be read."""
+# One line of a saved file, as `FileOperations.read_lines` gives it: the bytes, and whether the
+# line was longer than the limit and so cut.
+Line = tuple[bytes, bool]
 
-    events: str | None
-    last_message: str | None
-    session_record: str | None
+
+class SavedOutput(TypedDict):
+    """What the tool left, each a single pass over its lines, or None when it could not be opened."""
+
+    events: Iterable[Line] | None
+    last_message: Iterable[Line] | None
+    session_record: Iterable[Line] | None
 
 
 class Observed(TypedDict):
     group: "ExecutorDriverGroup"
-    statement_text: str | None  # what the tool says is its statement; None when it has none
+    reply_given: bool  # the tool gave a final message that holds something
 
 
 SetupAction = Literal["copy", "share", "leave_out", "write", "writable", "variable"]
@@ -376,6 +381,12 @@ class FileOperations(NamedTuple):
     read: Callable[[str], bytes]  # a regular file, or a link to one; raises OSError
     # (FileNotFoundError, IsADirectoryError, NotARegularFile for a pipe, a device, a socket, a
     # link to one of those), and never waits on what is there
+    # read_lines: (name, limit): the same file as `read`, handed back a line at a time so what is
+    # held never grows with the file. Each line is its bytes without the line's end, at most
+    # `limit` of them, and whether it was cut: a longer line gives its first `limit` bytes and
+    # True, and the rest of it is skipped, never held. A file that ends without a line end gives
+    # its last line as it is; an empty file gives none. Raises, when called, as `read` does
+    read_lines: Callable[[str, int], Iterator[tuple[bytes, bool]]]
     exists: Callable[[str], bool]  # a name is there, even if it leads nowhere
     write_new: Callable[[str, str], None]  # create, write, flush to disk; FileExistsError if there
     link: Callable[[str, str], None]  # (existing name, new name); FileExistsError if new is there
