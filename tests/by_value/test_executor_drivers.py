@@ -239,23 +239,26 @@ class ARunNamingTheCodexDriver(unittest.TestCase):
             group["tool_version"], "cannot tell"
         )  # the session record is not found yet
 
-    def test_its_tool_home_is_made_in_the_run_area_and_the_login_is_only_linked(self):
+    def test_its_tool_home_is_in_the_executors_home_in_the_run_area_and_the_login_is_copied_in(
+        self,
+    ):
         world = world_for("events-finished.jsonl", "last-message-statement.json")
         self.run_it(world)
         _, environment = world.started[-1]
-        self.assertEqual(environment["CODEX_HOME"], f"{AREA}/home")
-        self.assertEqual(environment["TMPDIR"], f"{AREA}/tmp")
-        self.assertEqual(
-            [args for args, _ in world.calls("files.share_by_link")],
-            [(LOGIN, f"{AREA}/home/auth.json")],
-        )
-        for operation in ("files.read", "files.hash", "files.copy", "files.copy_path"):
+        self.assertEqual(environment["CODEX_HOME"], f"{AREA}/home/.codex")
+        for variable in ("TMPDIR", "XDG_CACHE_HOME"):  # the box gives it its own `/tmp` and home
+            self.assertNotIn(variable, environment)
+        for operation in ("files.read", "files.hash", "files.copy", "files.link"):
             touched = [args for args, _ in world.calls(operation)]
             self.assertFalse(any(LOGIN in args for args in touched), operation)
         self.assertEqual(
             [args for args, _ in world.calls("files.copy_path")],
-            [("/h/.codex/config.toml", f"{AREA}/home/config.toml", ())],
+            [
+                ("/h/.codex/config.toml", f"{AREA}/home/.codex/config.toml", ()),
+                (LOGIN, f"{AREA}/home/.codex/auth.json", ()),  # a copy, never a link
+            ],
         )
+        self.assertEqual(world.links, {})
 
     def test_the_area_is_removed_whole_afterwards(self):
         world = world_for("events-finished.jsonl", "last-message-done.txt")
@@ -298,7 +301,7 @@ class TheCheckAndTheRunAgreeOnWhatTheSetupNeeds(unittest.TestCase):
         self.a_command_driver_that_asks_for(
             [
                 {"action": "copy", "name": "settings", "source": "/there"},
-                {"action": "share", "name": "login", "source": "/there"},
+                {"action": "copy", "name": "login", "source": "/there"},
             ]
         )
         world = scenes.scene()
@@ -330,8 +333,9 @@ class TheCheckAndTheRunAgreeOnWhatTheSetupNeeds(unittest.TestCase):
         checked, ending, _ = self.verdicts(world)
         self.assertNotIn("setup_failed", checked)
         self.assertEqual(ending["ending"], "ended_by_itself")
-        self.assertEqual(world.calls("files.copy_path"), [])  # the settings file was not asked for
-        self.assertEqual(len(world.calls("files.share_by_link")), 1)  # the login still is
+        copied = [args[0] for args, _ in world.calls("files.copy_path")]
+        self.assertEqual(copied, [LOGIN])  # the settings file was not asked for
+        self.assertEqual(len(world.calls("files.copy_path")), 1)  # the login still is copied
 
 
 class TheCheckFormWithTheCodexDriver(unittest.TestCase):

@@ -20,6 +20,13 @@ flat = importlib.import_module("rehearsal.receipts").flat
 AREA = "/tmp/area"
 
 
+# What every plan starts with: the executor's own home and `/tmp`, empty.
+STARTING_STEPS = [
+    {"do": "folder", "target": f"{AREA}/home"},
+    {"do": "folder", "target": f"{AREA}/tmp"},
+]
+
+
 def copy(name, source="/src/x"):
     return {"action": "copy", "name": name, "source": source}
 
@@ -29,13 +36,13 @@ class ThePlan(unittest.TestCase):
         got = run_area.plan(
             AREA,
             [
-                copy("home", "/data/with space/$HOME"),
-                {"action": "leave_out", "name": "home/history"},
-                {"action": "leave_out", "name": "home/cache/deep"},
-                {"action": "share", "name": "home/login", "source": "/data/login"},
+                copy("tool", "/data/with space/$HOME"),
+                {"action": "leave_out", "name": "tool/history"},
+                {"action": "leave_out", "name": "tool/cache/deep"},
+                copy("home/login", "/data/login"),
                 {"action": "write", "name": "config/generated.toml", "text": "a = 1\n"},
-                {"action": "writable", "name": "home"},
-                {"action": "variable", "variable": "TOOL_HOME", "in_run_area": "home"},
+                {"action": "writable", "name": "tool"},
+                {"action": "variable", "variable": "TOOL_HOME", "in_run_area": "tool"},
                 {"action": "variable", "variable": "MODE", "value": "quiet"},
             ],
         )
@@ -43,32 +50,43 @@ class ThePlan(unittest.TestCase):
         self.assertEqual(
             got["steps"],
             [
+                *STARTING_STEPS,
                 {
                     "do": "copy",
                     "source": "/data/with space/$HOME",
-                    "target": f"{AREA}/home",
+                    "target": f"{AREA}/tool",
                     "leave_out": ["history", "cache/deep"],
                 },
                 {"do": "folder", "target": f"{AREA}/home"},
-                {"do": "share", "source": "/data/login", "target": f"{AREA}/home/login"},
+                {
+                    "do": "copy",
+                    "source": "/data/login",
+                    "target": f"{AREA}/home/login",
+                    "leave_out": [],
+                },
                 {"do": "folder", "target": f"{AREA}/config"},
                 {"do": "write", "target": f"{AREA}/config/generated.toml", "text": "a = 1\n"},
-                {"do": "writable", "target": f"{AREA}/home"},
+                {"do": "writable", "target": f"{AREA}/tool"},
             ],
         )
-        self.assertEqual(got["variables"], {"TOOL_HOME": f"{AREA}/home", "MODE": "quiet"})
+        self.assertEqual(got["variables"], {"TOOL_HOME": f"{AREA}/tool", "MODE": "quiet"})
 
     def test_a_leave_out_applies_to_a_copy_listed_after_it_too(self):
         got = run_area.plan(AREA, [{"action": "leave_out", "name": "h/old"}, copy("h")])
-        self.assertEqual(got["steps"][0]["leave_out"], ["old"])
+        self.assertEqual(got["steps"][len(STARTING_STEPS)]["leave_out"], ["old"])
 
     def test_the_statement_path_is_one_fixed_name_inside_the_area_whichever_area(self):
         self.assertEqual(run_area.STATEMENT_NAME, "shuttle-statement.json")
         for area in (AREA, "/tmp/other area-1", "/x"):
             self.assertEqual(run_area.statement_path(area), area + "/shuttle-statement.json")
 
-    def test_no_requests_is_an_empty_plan(self):
-        self.assertEqual(run_area.plan(AREA, []), {"steps": [], "variables": {}, "problem": None})
+    def test_no_requests_is_the_plan_that_makes_only_the_executors_home_and_tmp(self):
+        self.assertEqual(
+            run_area.plan(AREA, []),
+            {"steps": STARTING_STEPS, "variables": {}, "problem": None},
+        )
+        self.assertEqual(run_area.home_path(AREA), f"{AREA}/home")
+        self.assertEqual(run_area.tmp_path(AREA), f"{AREA}/tmp")
 
     def test_every_refused_request_says_which_and_plans_nothing(self):
         table = {
@@ -89,22 +107,9 @@ class ThePlan(unittest.TestCase):
             "a source with a null": [copy("a", "/x\0y")],
             "a write with no text": [{"action": "write", "name": "a"}],
             "a name made twice": [copy("a"), copy("a")],
-            "a name under a shared name": [
-                {"action": "share", "name": "login", "source": "/l"},
-                {"action": "write", "name": "login/x", "text": ""},
-            ],
-            "a copy under a shared name": [
-                {"action": "share", "name": "login", "source": "/l"},
-                copy("login/x"),
-            ],
-            "a shared name made writable": [
-                {"action": "share", "name": "login", "source": "/l"},
-                {"action": "writable", "name": "login"},
-            ],
-            "a name below a shared one made writable": [
-                {"action": "share", "name": "login", "source": "/l"},
-                {"action": "writable", "name": "login/x"},
-            ],
+            "a share, which is no action": [{"action": "share", "name": "login", "source": "/l"}],
+            "the executor's home made again": [copy("home")],
+            "the executor's tmp made again": [{"action": "write", "name": "tmp", "text": ""}],
             "a name nothing made, made writable": [{"action": "writable", "name": "x"}],
             "a leave-out no copy holds": [
                 copy("a"),
@@ -132,7 +137,6 @@ class ThePlan(unittest.TestCase):
         for name in (n + tail for n in kept_names for tail in ("", "/z", "/a/b")):
             for action in (
                 copy(name),
-                {"action": "share", "name": name, "source": "/l"},
                 {"action": "write", "name": name, "text": ""},
                 {"action": "writable", "name": name},
                 {"action": "leave_out", "name": name},
@@ -176,13 +180,15 @@ class ThePlan(unittest.TestCase):
                 )
                 self.assertIsNone(got["problem"])
 
-    def test_a_name_below_a_copy_may_be_written_shared_or_made_writable(self):
+    def test_a_name_below_a_copy_or_below_the_executors_home_may_be_written_or_made_writable(self):
         got = run_area.plan(
             AREA,
             [
                 copy("h"),
-                {"action": "share", "name": "h/login", "source": "/l"},
+                {"action": "write", "name": "h/login", "text": ""},
                 {"action": "writable", "name": "h/deeper/file"},
+                {"action": "write", "name": "home/.tool/settings", "text": ""},
+                {"action": "writable", "name": "home/.tool"},
             ],
         )
         self.assertIsNone(got["problem"])
@@ -204,34 +210,30 @@ class TheSteps(unittest.TestCase):
     def test_every_action_lands_in_the_run_area_and_nothing_outside_it(self):
         before = dict(self.world.files)
         requests = [
-            {"action": "copy", "name": "home", "source": "/src"},
-            {"action": "leave_out", "name": "home/history"},
-            {"action": "leave_out", "name": "home/login"},
-            {"action": "share", "name": "home/login", "source": "/src/login"},
-            {"action": "write", "name": "home/generated", "text": "made"},
-            {"action": "writable", "name": "home/settings"},
-            {"action": "variable", "variable": "HOME_OF_TOOL", "in_run_area": "home"},
+            {"action": "copy", "name": "tool", "source": "/src"},
+            {"action": "leave_out", "name": "tool/history"},
+            {"action": "leave_out", "name": "tool/login"},
+            {"action": "copy", "name": "home/login", "source": "/src/login"},
+            {"action": "write", "name": "tool/generated", "text": "made"},
+            {"action": "writable", "name": "tool/settings"},
+            {"action": "variable", "variable": "HOME_OF_TOOL", "in_run_area": "tool"},
         ]
         got = set_up_run_area.set_up(self.state, requests)
         area = self.state["run_area"]
         self.assertEqual(got, {"ok": True})
-        self.assertEqual(self.world.text_of(f"{area}/home/settings"), "settings text")
-        self.assertEqual(self.world.text_of(f"{area}/home/generated"), "made")
-        self.assertEqual(self.world.links[f"{area}/home/login"], "/src/login")
-        self.assertNotIn(f"{area}/home/history/old", self.world.files)
-        self.assertEqual(self.state["setup_variables"], {"HOME_OF_TOOL": f"{area}/home"})
+        self.assertEqual(self.world.text_of(f"{area}/tool/settings"), "settings text")
+        self.assertEqual(self.world.text_of(f"{area}/tool/generated"), "made")
+        self.assertEqual(self.world.text_of(f"{area}/home/login"), "LOGIN-STAND-IN")  # a copy
+        self.assertNotIn(f"{area}/home/login", self.world.links)
+        self.assertIn(f"{area}/tmp", self.world.folders)  # the executor's own, empty
+        self.assertNotIn(f"{area}/tool/history/old", self.world.files)
+        self.assertEqual(self.state["setup_variables"], {"HOME_OF_TOOL": f"{area}/tool"})
         outside = {n: d for n, d in self.world.files.items() if not n.startswith(area + "/")}
         self.assertEqual(outside, before)  # nothing outside the area was made, changed or removed
-        self.assertEqual(
-            [args for args, _ in self.world.calls("files.share_by_link")],
-            [("/src/login", f"{area}/home/login")],
-        )
         self.assertEqual(self.world.calls("files.read"), [])  # nothing was read, the login least
 
     def test_the_run_area_is_new_and_the_tear_down_removes_it_whole_and_leaves_the_original(self):
-        set_up_run_area.set_up(
-            self.state, [{"action": "share", "name": "l", "source": "/src/login"}]
-        )
+        set_up_run_area.set_up(self.state, [copy("l", "/src/login")])
         area = self.state["run_area"]
         self.assertTrue(self.world.operations.files.usable_folder(area))
         self.assertEqual(tear_down.remove(self.state), {"failure": ""})
@@ -260,18 +262,14 @@ class TheSteps(unittest.TestCase):
         got = set_up_run_area.set_up(self.state, [copy("h", "/src"), copy("i", "/src")])
         self.assertEqual(got, {"ok": False})
         line = self.state["problems"]["setup"]
-        self.assertIn("setup step 1 (copy) failed (PermissionError)", line)
+        # the steps that make the executor's home and tmp come first
+        self.assertIn("setup step 3 (copy) failed (PermissionError)", line)
         self.assertNotIn("secret detail", line)
 
     def test_a_source_that_is_not_there_fails_the_step(self):
         self.assertEqual(
             set_up_run_area.set_up(self.state, [copy("h", "/src/absent")]), {"ok": False}
         )
-        self.assertEqual(
-            set_up_run_area.set_up(a_state(self.world), [
-                {"action": "share", "name": "l", "source": "/src/absent"}]),
-            {"ok": False},
-        )  # fmt: skip
 
     def test_a_tear_down_that_fails_says_so_by_the_error_and_the_area_is_not_tried_again(self):
         set_up_run_area.set_up(self.state, [])

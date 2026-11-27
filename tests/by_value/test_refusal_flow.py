@@ -87,7 +87,6 @@ class Refusals(RefusalCase):
             ("visible_missing", d(reach={"visible": ["/opt/absent"]})),
             ("visible_not_a_folder", d(reach={"visible": ["/refs/runbook"]})),
             ("visible_overlaps_the_records", d(reach={"visible": ["/records"]})),
-            ("visible_overlaps_the_records", d(reach={"visible": ["/"]})),
             ("no_time_limit", {k: v for k, v in d().items() if k != "time_limit_seconds"}),
             ("unknown_executor", {**d(), "executor": {"name": "nonesuch", "settings": {}}}),
             (
