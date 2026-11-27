@@ -5,6 +5,7 @@ passes or fails the stage it is told to, so these tests do not run the real suit
 """
 
 import os
+import resource
 import shutil
 import stat
 import subprocess
@@ -14,6 +15,8 @@ import unittest
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPT = os.path.join(REPO, "checks", "all.sh")
 INTERPRETER = os.path.join(REPO, "checks", "interpreter.sh")
+FILE_BLOCKS = 262144  # the limits the script sets on its real stage, as `ulimit -f` and `-v` count
+ADDRESS_KB = 3145728
 FIX_FAILED = "fix: failed; ruff could not finish (its output is on standard error)"
 
 STAND_IN = """#!/bin/sh
@@ -38,8 +41,19 @@ exit 0
 """
 
 
+def outer_limit_is_lower(which, kilobytes):
+    """Whether this process's own hard limit is below what the script sets (a limit counted in
+    kilobytes here), so the script would refuse to run."""
+    hard = resource.getrlimit(which)[1]
+    return hard != resource.RLIM_INFINITY and hard < kilobytes * 1024
+
+
 class CheckScriptTest(unittest.TestCase):
     def setUp(self):
+        if outer_limit_is_lower(resource.RLIMIT_AS, ADDRESS_KB) or outer_limit_is_lower(
+            resource.RLIMIT_FSIZE, FILE_BLOCKS // 2
+        ):
+            self.skipTest("this shell's own limit is below the script's; the script refuses to run")
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.stand_in = os.path.join(folder.name, "python")
@@ -117,12 +131,38 @@ class CheckScriptTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         with open(record) as f:
             lines = f.read().splitlines()
-        # 262144 blocks of 512 bytes is 128 MB; 3145728 kilobytes is 3 GB.
-        limits = "file blocks 262144, address kilobytes 3145728"
+        limits = f"file blocks {FILE_BLOCKS}, address kilobytes {ADDRESS_KB}"
         self.assertEqual(
             [line for line in lines if line.startswith("real:")],
             [f"real: {limits}", f"real: {limits}"],
         )
+
+    def test_a_limit_the_shell_will_not_raise_is_could_not_run_naming_the_limit_and_the_fix(self):
+        lowered = {
+            "address-space": (resource.RLIMIT_AS, ADDRESS_KB * 1024 // 2, "-v"),
+            "file-size": (resource.RLIMIT_FSIZE, FILE_BLOCKS * 512 // 2, "-f"),
+        }
+        for name, (which, size, option) in lowered.items():
+            with self.subTest(limit=name):
+                result = subprocess.run(
+                    [SCRIPT],
+                    capture_output=True,
+                    text=True,
+                    env={"PATH": os.environ["PATH"], "PYTHON": self.stand_in},
+                    cwd=REPO,
+                    timeout=60,
+                    preexec_fn=lambda which=which, size=size: resource.setrlimit(
+                        which, (size, size)
+                    ),
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(
+                    self.last_line(result),
+                    f"check: could not run: the real stage's {name} limit cannot be set, because "
+                    f"this shell's own limit is lower; raise it (ulimit {option}) or start a "
+                    "shell without it",
+                )
+                self.assertNotIn("real:", result.stdout)
 
     def test_a_failing_stage_stops_the_later_stages(self):
         result = self.check(FAIL_STAGE="lint")

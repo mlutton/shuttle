@@ -4,6 +4,7 @@
 wrong out. The walk over the real script and folder is a thin layer over it.
 """
 
+import fnmatch
 import os
 import re
 import unittest
@@ -22,6 +23,12 @@ def stage_folders(script: str) -> dict[str, list[str]]:
         if len(words) > 1 and words[0] == "stage" and words[1] in STAGES:
             found.setdefault(words[1], []).extend(re.findall(r"unittest discover -s (\S+)", line))
     return found
+
+
+def holds_tests(names: list[str]) -> bool:
+    """Whether a folder with these file names holds tests: the pattern `unittest discover` uses
+    when it is not given another."""
+    return any(fnmatch.fnmatch(name, "test*.py") for name in names)
 
 
 def folder_problems(script: str, existing: set[str], holding: set[str]) -> list[str]:
@@ -88,6 +95,21 @@ class StageFoldersTest(unittest.TestCase):
         )
 
 
+class HoldsTestsTest(unittest.TestCase):
+    def test_a_name_unittest_picks_up_by_default_counts(self):
+        for name in ("test_x.py", "testing.py", "test.py", "testfoo.py"):
+            with self.subTest(name=name):
+                self.assertTrue(holds_tests(["README.md", name]))
+
+    def test_a_name_it_does_not_pick_up_does_not_count(self):
+        for name in ("mytest.py", "test_x.txt", "test_x.pyc", "helper.py", "Test_x.py"):
+            with self.subTest(name=name):
+                self.assertFalse(holds_tests([name]))
+
+    def test_a_folder_with_no_files_holds_none(self):
+        self.assertFalse(holds_tests([]))
+
+
 class RealScriptTest(unittest.TestCase):
     def test_every_folder_of_tests_that_holds_tests_is_run_by_exactly_one_stage(self):
         with open(os.path.join(ROOT, "checks", "all.sh")) as f:
@@ -95,11 +117,6 @@ class RealScriptTest(unittest.TestCase):
         top = os.path.join(ROOT, "tests")
         existing = {f"tests/{n}" for n in os.listdir(top) if os.path.isdir(os.path.join(top, n))}
         holding = {
-            folder
-            for folder in existing
-            if any(
-                n.startswith("test_") and n.endswith(".py")
-                for n in os.listdir(os.path.join(ROOT, folder))
-            )
+            folder for folder in existing if holds_tests(os.listdir(os.path.join(ROOT, folder)))
         }
         self.assertEqual(folder_problems(script, existing, holding), [])
