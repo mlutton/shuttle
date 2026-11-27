@@ -64,11 +64,9 @@ def _every_check(state: RunState) -> list[Found | None]:
         return [
             {"reason": shape, "step": "input_check", "problem": state["problems"]["input_check"]}
         ]
-    found: list[Found | None] = [
-        _id_claim_refusal(state),
-        *input_checks.run_input_checks(world, raw),
-    ]
-    reason, text = run.driver_check(world, raw)
+    inputs = input_checks.run_input_checks(world, raw)
+    found: list[Found | None] = [_id_claim_refusal(state), *inputs]
+    reason, text = run.driver_check(world, raw, refusals.first_refusal(inputs) is None)
     if reason:
         found.append({"reason": reason, "step": "executor_driver_check", "problem": text or ""})
     gate_refusal, _ = gates.run_gates(

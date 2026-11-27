@@ -30,10 +30,14 @@ def caller_variables(world: Operations, driver: Driver) -> dict[str, str]:
     return found
 
 
-def gather(world: Operations, raw: Mapping[str, Any]) -> tuple[DriverFacts, boundary.ProgramFacts]:
+def gather(
+    world: Operations, raw: Mapping[str, Any], inputs_accepted: bool
+) -> tuple[DriverFacts, boundary.ProgramFacts]:
     """What the driver's check reads, and what the decision on whether the box shows its program
     reads: where the caller's machine finds the program the driver asks for and the file that
-    leads to (looked at only when it is found), with the paths the box would show."""
+    leads to (looked at only when it is found), with the paths the box would show. Those are
+    gathered only when the input checks passed: a document refused for its place, reach or
+    references has no reach to judge the program against, and is refused anyway."""
     driver = of(raw)
     login = driver.login_path(caller_variables(world, driver))
     network, changes = decisions.standard_settings(raw)
@@ -45,7 +49,7 @@ def gather(world: Operations, raw: Mapping[str, Any]) -> tuple[DriverFacts, boun
         "changes_allowed": changes,
     }
     program: boundary.ProgramFacts = {"found_at": found, "resolves_to": None, "shown": None}
-    if found is not None:
+    if found is not None and inputs_accepted:
         program["resolves_to"] = world.boundary.resolve(found)
         program["shown"] = the_reach.shown(world, raw)
     return driver_facts, program

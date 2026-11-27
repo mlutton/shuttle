@@ -173,6 +173,13 @@ class TheCheckFormOnTheSimulatedWorld(unittest.TestCase):
         code, text = self.check(world)
         self.assertEqual(code, 0, text)
 
+    def test_a_document_the_input_checks_refuse_is_judged_by_them_alone(self):
+        world = self.scene("/opt/hidden/bin/tool", reach={"visible": ["/opt/absent"]})
+        world.program("/opt/hidden/bin/tool")
+        _, text = self.check(world)
+        self.assertIn("visible_missing", text)
+        self.assertNotIn("program_not_visible", text)
+
     def test_a_command_in_the_place_or_a_reference_or_a_system_folder_is_accepted(self):
         for command in ("/place/tool", "/usr/bin/tool", "/refs/runbook/tool"):
             with self.subTest(command):
