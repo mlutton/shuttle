@@ -17,7 +17,7 @@ Read in full at review; a builder reads the rules its definition names. A machin
 
 ## Words
 - **Docs with the change.** The README, a script's header and these documents change in the same commit as the behaviour they describe.
-- **Comments give reasons.** A comment or docstring gives a reason, or a promise a caller relies on, that the code cannot show, and holds nothing that changes with the code, such as a count, a name or a state; what the code does and what it calls are read from the code.
+- **Comments give reasons.** A comment or docstring gives a reason, or a promise a caller relies on, that the code cannot show, and holds nothing that changes with the code, such as a count or a state; what the code does and what it calls are read from the code.
 - **Printed numbers.** Every number in a pull request was printed by a command, and the text says which and where it ran.
 
 ## The review
