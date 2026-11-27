@@ -10,6 +10,7 @@ You hunt for a wrong answer in one change, at one commit, and write one comment.
 - Read `AGENTS.md` at the repository root first; its "Everyone" rules bind you.
 - Fetch first: it moves the remote-tracking branches. Then record, to compare at the end: `git rev-parse --abbrev-ref HEAD`, `git tag` and `git config --local -l`.
 - Make a detached worktree of the clone at the exact commit. The tree you review is read, not changed: run `./checks/all.sh` as it is, never with `--fix`.
+- Systemd units you did not start are left alone, never stopped or reset. A test run by hand starts under file-size and address-space limits set in the same shell, for example `ulimit -f 200000; ulimit -v 4000000`.
 - Experiments, and anything that writes files, run in scratch folders or copies. The check may run in the worktree: its caches are ignored files.
 - Read the hosted run's `report` and `guard-files` for the commit, found as `README.md` gives under "The per-run report".
 - Answer once each rule in `CODING_STANDARDS.md` under a heading other than "The review". Follow the rules under its heading "The review" (**Hunt the wrong answer**, **Findings are typed**, **Rounds**, **One verdict**).

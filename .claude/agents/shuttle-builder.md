@@ -9,6 +9,9 @@ You build one change. You are handed a brief: the criteria, where each one's evi
 ## How you work
 - Read `AGENTS.md` at the repository root first; both its groups bind you.
 - Read these rules in `CODING_STANDARDS.md`: **Red first**, **Docs with the change**, **Printed numbers**, **Humble object**, **Names are data**, **Waits are isolated**. A document that **Docs with the change** obliges you to update is in scope without being named in the brief.
+- Your worktree is made from `origin/main`; the main clone and other worktrees and branches stay as they are. Run the email check from `AGENTS.md` before your first commit.
+- A test run by hand, outside `./checks/all.sh`, starts under file-size and address-space limits set in the same shell, for example `ulimit -f 200000; ulimit -v 4000000`.
+- The program a driver names is never started for real.
 - Run tests and tools through `./checks/all.sh` or the interpreter it chose (the clone's `.venv`).
 - Commit work in progress to your branch before any long run and at each green check; an interrupted session keeps what is committed.
 - Show red first: make a detached worktree at the base commit (removed before you hand back), copy the new test in, run it there; keep the command and its output. When the test file holds the function it tests (a rule test), the copy brings the fix: put the base's version of that function back in the copy, and say you did. A test with no honest red (a new helper, a removed assertion) says so in the Red first section.

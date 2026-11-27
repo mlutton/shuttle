@@ -16,7 +16,8 @@ Read in full at review; a builder reads the rules its definition names. A machin
 - **Red first.** Each new test of changed behaviour fails on the base commit; the builder says how that was shown. A test that pins unchanged behaviour says so in its name.
 
 ## Words
-- **Docs with the change.** The README, a script's header and these documents change in the same commit as the behaviour they describe. A comment that restates code or will go stale is left out.
+- **Docs with the change.** The README, a script's header and these documents change in the same commit as the behaviour they describe.
+- **Comments give reasons.** A comment or docstring gives a reason, or a promise a caller relies on, that the code cannot show; what the code does and what it calls are read from the code.
 - **Printed numbers.** Every number in a pull request was printed by a command, and the text says which and where it ran.
 
 ## The review
