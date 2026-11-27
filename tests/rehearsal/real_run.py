@@ -138,7 +138,11 @@ class RealRun(unittest.TestCase):
         """The part of every run whose request record is in a records folder of this test."""
         parts = []
         for records in self.records_folders:
-            for name in sorted(os.listdir(records)):
+            try:
+                names = sorted(os.listdir(records))
+            except FileNotFoundError:
+                continue  # the test's folder is already gone, and its records with it
+            for name in names:
                 if name.endswith(".request.json"):
                     parts.append(self.run_part(name[: -len(".request.json")], records))
         return parts

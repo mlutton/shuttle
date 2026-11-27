@@ -366,7 +366,12 @@ class CommandSeam(unittest.TestCase):
         with open(os.path.join(self.records, f"{request_id}.request.json")) as f:
             part = boundary.run_part_of(json.load(f))
         done = subprocess.run(
-            ["systemctl", "--user", "is-active", boundary.unit_of(boundary.scope_name(request_id, part))],
+            [
+                "systemctl",
+                "--user",
+                "is-active",
+                boundary.unit_of(boundary.scope_name(request_id, part)),
+            ],
             capture_output=True,
             text=True,
         )

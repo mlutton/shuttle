@@ -31,7 +31,12 @@ def units_started(world):
     """The unit names asked of the scope tool, from the processes and the freeze."""
     commands = [args[0] for args, _ in world.calls("processes.start")]
     commands += [args[0] for args, _ in world.calls("git.freeze")]
-    return [part[len("--unit=") :] for command in commands for part in command if part.startswith("--unit=")]
+    return [
+        part[len("--unit=") :]
+        for command in commands
+        for part in command
+        if part.startswith("--unit=")
+    ]
 
 
 def another_place(world, records, place):

@@ -129,7 +129,9 @@ class UnitsOfTheOldNamesHeldByAnotherUser(real_run.RealRun):
     @staticmethod
     def let_go_of(name, holder):
         subprocess.run(["systemctl", "--user", "stop", f"{name}.scope"], capture_output=True)
-        subprocess.run(["systemctl", "--user", "reset-failed", f"{name}.scope"], capture_output=True)
+        subprocess.run(
+            ["systemctl", "--user", "reset-failed", f"{name}.scope"], capture_output=True
+        )
         holder.wait()
 
     @staticmethod
@@ -168,7 +170,9 @@ class UnitsOfTheOldNamesHeldByAnotherUser(real_run.RealRun):
 
 class ACheckWhileARunOfTheSameDocumentIsInItsGates(real_run.RealRun):
     def test_disturbs_neither(self):
-        request_id = "check-" + uuid.uuid4().hex[:8]  # so the units listed below are this test's own
+        request_id = (
+            "check-" + uuid.uuid4().hex[:8]
+        )  # so the units listed below are this test's own
         script = self.script("waits.py", SAYS_IT_IS_UP_AND_WAITS_TO_BE_LET_GO)
         up, go = self.pipe("up"), self.pipe("go")
         doc = self.document(self.script("ends.py", "raise SystemExit(0)"), request_id=request_id)
