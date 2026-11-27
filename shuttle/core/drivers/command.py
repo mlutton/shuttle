@@ -1,7 +1,9 @@
 """The command driver: the executor driver for a plain command.
 
 It offers the functions of `shuttle.core.drivers.interface`. It asks of the run area nothing, has
-no login, and leaves no statement of its own: the command writes the statement file itself.
+no login, and leaves no statement of its own: the command writes the statement file itself. It
+refuses a document that asks for a restriction of the two standard settings (network off, changes
+to the place not allowed), since nothing yet enforces either for it.
 """
 
 from collections.abc import Mapping
@@ -58,6 +60,18 @@ def login_path(environment: Mapping[str, str]) -> str | None:
 
 
 def check(settings: Settings, facts: DriverFacts) -> tuple[str, str] | None:
+    # The boundary does not yet restrict the network or the place's writes for any driver, so a
+    # restriction asked for would be silently unhonoured: refuse it instead.
+    for asked, what in (
+        (facts["network"] is False, "network off"),
+        (facts["changes_allowed"] is False, "changes_to_place not"),
+    ):
+        if asked:
+            return (
+                "unknown_setting",
+                f"the command driver cannot enforce {what} yet; leave the setting out or "
+                "choose an executor that can",
+            )
     if not facts["tool_found"]:
         return (
             "tool_not_installed",

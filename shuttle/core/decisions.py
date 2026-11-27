@@ -540,7 +540,7 @@ def _gate_refusal(gate: Document) -> tuple[str, str] | None:
 def _standard_settings_refusal(raw: Document) -> tuple[str, str] | None:
     for field, words in (("network", ("on", "off")), ("changes_to_place", ("allowed", "not"))):
         if field in raw and raw[field] not in words:
-            return "missing_setting", f"{field} must be one of: {', '.join(words)}"
+            return "unknown_setting", f"{field} must be one of: {', '.join(words)}"
     return None
 
 

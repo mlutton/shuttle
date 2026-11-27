@@ -107,6 +107,42 @@ class NothingOutsideTheTableNamesADriver(unittest.TestCase):
         self.assertEqual(found, [])
 
 
+class TheCommandDriverRefusesWhatItCannotEnforce(unittest.TestCase):
+    def verdict(self, **standard):
+        world = scenes.scene(scenes.document(**standard))
+        out, err = io.StringIO(), io.StringIO()
+        check_form.check(scenes.DOCUMENT, out, err, world.operations)
+        scenes.run_in(world)
+        return out.getvalue(), flat(scenes.outcome(world)["receipt"])["ending"], world
+
+    def test_a_restriction_is_refused_by_the_check_and_the_run_with_the_same_reason(self):
+        for label, standard in (
+            ("network off", {"network": "off"}),
+            ("changes not allowed", {"changes_to_place": "not"}),
+        ):
+            with self.subTest(label):
+                checked, ending, world = self.verdict(**standard)
+                self.assertIn("unknown_setting", checked)
+                self.assertIn("cannot enforce", checked)
+                self.assertEqual(
+                    (ending["ending"], ending["reason"], ending["failed_step"]),
+                    ("could_not_start", "unknown_setting", "executor_driver_check"),
+                )
+                self.assertEqual(world.started, [])  # nothing was launched
+
+    def test_no_restriction_asked_for_changes_nothing(self):
+        for label, standard in (
+            ("neither named", {}),
+            ("network on", {"network": "on"}),
+            ("changes allowed", {"changes_to_place": "allowed"}),
+            ("both permissions", {"network": "on", "changes_to_place": "allowed"}),
+        ):
+            with self.subTest(label):
+                checked, ending, _ = self.verdict(**standard)
+                self.assertNotIn("executor_driver_check", checked)
+                self.assertEqual(ending["ending"], "ended_by_itself")
+
+
 class ARunNamingTheCodexDriver(unittest.TestCase):
     def run_it(self, world):
         code, lines, err = scenes.run_in(world)
