@@ -131,21 +131,9 @@ with open(sys.argv[2], "w") as f:
 class TheReachOfTheExecutor(real_run.RealRun):
     """The table, once, for the folders of the test wherever they are (see the subclasses)."""
 
-    # Where the test's own folders are made, and where the run area is made; None is the
-    # machine's temporary folder.
-    ROOT_PARENT: str | None = None
+    # ROOT_PARENT (see RealRun) is where the test's own folders are made; AREA_PARENT is where
+    # the run area is made. None is the machine's temporary folder.
     AREA_PARENT: str | None = None
-
-    def setUp(self):
-        # super().setUp makes the root in the default place; a subclass moves it first.
-        if self.ROOT_PARENT is not None:
-            self._default_temp = tempfile.tempdir
-            tempfile.tempdir = self.ROOT_PARENT
-            self.addCleanup(self.put_the_temporary_folder_back)
-        super().setUp()
-
-    def put_the_temporary_folder_back(self):
-        tempfile.tempdir = self._default_temp
 
     def made_folder(self, parent):
         folder = tempfile.mkdtemp(prefix="shuttle-reach-", dir=parent)

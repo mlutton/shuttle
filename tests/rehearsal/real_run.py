@@ -53,10 +53,14 @@ def tool_driver_names():
 class RealRun(unittest.TestCase):
     """The set-up shared by the tests that run a real script in the real boundary."""
 
+    # The folder the test's own folders are made in; None is the machine's temporary folder. A
+    # test of where the box's paths may live sets it to another.
+    ROOT_PARENT: str | None = None
+
     def setUp(self):
         the_boundary.require(self)
         self.limits = dict(DEFAULT_LIMITS)
-        tmp = tempfile.TemporaryDirectory()
+        tmp = tempfile.TemporaryDirectory(dir=self.ROOT_PARENT)
         self.addCleanup(tmp.cleanup)
         self.root = os.path.realpath(tmp.name)
         self.records = os.path.join(self.root, "records")
