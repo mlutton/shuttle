@@ -3,7 +3,7 @@
 The owner's words: "we don't want to run codex often -- it should be an isolated scenario for
 one-off cases." A real Codex run is done once, by hand, on purpose. So:
 
-- a test file that can start a real process (it imports subprocess, the os functions that exec,
+- a Python file under `tests/` or `checks/` that can start a real process (it imports subprocess, the os functions that exec,
   spawn or fork, the real operations, or the real-run harness) holds no string that names the
   program: a string that is, or ends a path with, the word followed by nothing or a space;
 - no file under checks/ that is not Python names it at all, as a word.

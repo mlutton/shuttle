@@ -2,7 +2,7 @@
 
 It runs whenever the set-up ran, even for a run that was refused after it or that ended any way at
 all. A tree removed leaves nothing behind and never follows a link (a path shared in place keeps
-its original). A failure is reported in the receipt ("teardown_failure", the error's name) and
+its original). A failure is reported in the receipt and
 changes no ending. `remove` is also the run's last resort, called when the step did not run.
 """
 

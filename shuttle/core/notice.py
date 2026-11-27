@@ -1,11 +1,11 @@
-"""The notice execution adds to the instruction of a kind that expects a statement.
+"""The notice execution adds after the instruction of every kind.
 
-One fixed, versioned text: where and how to write the statement, where each reference is found,
-that a reference wins over a file of the same name in the place, and that the executor cannot
-commit in the place. The words are fixed; only the facts (the location, the references, the
-fields of the schema) are filled in. A kind that expects no statement gets the notice without its
-statement part (the references and the no-commit parts are for every kind). The place is not named: the notice says "the place" and nothing
-depends on where it is.
+One fixed, versioned text. Its statement part (where and how to write the statement) is there only
+for a kind that expects a statement; its references part (where each reference is found, and that
+a reference wins over a file of the same name in the place) only when the document has references;
+its line that the executor cannot commit in the place always. The words are fixed; only the facts
+(the location, the references, the fields of the schema) are filled in. The place is not named: the
+notice says "the place" and nothing depends on where it is.
 """
 
 from collections.abc import Mapping, Sequence
@@ -41,11 +41,7 @@ def notice(
     schema: Mapping[str, Any],
     references: Sequence[Mapping[str, Any]],
 ) -> str:
-    """The notice's text. `references` are the document's, each with a name and a path.
-
-    The statement part is there when a statement location is given (the kind expects one); the
-    parts about references and about commits are always there.
-    """
+    """The notice's text. `references` are the document's, each with a name and a path."""
     lines = [f"Shuttle notice, version {fixed.NOTICE_VERSION}"]
     if statement_location is not None:
         lines += [

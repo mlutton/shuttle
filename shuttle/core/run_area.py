@@ -166,7 +166,7 @@ def plan(area: str, requests: Sequence[SetupRequest]) -> SetupPlan:
 
 
 def _is_made(name: str, made: dict[str, str]) -> bool:
-    """Whether a request makes this name: it is one, or is below a copy, or is a folder above one."""
+    """Whether some request makes this name, or a path through it."""
     return any(
         name == n or _under(n, name) or (how == "copy" and _under(name, n))
         for n, how in made.items()
