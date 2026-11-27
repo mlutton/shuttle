@@ -166,31 +166,64 @@ class CheckReferences(RefusalCase):
 
 class CheckStatementLocation(RefusalCase):
     def test_a_free_location_for_a_kind_that_expects_a_statement_is_accepted(self):
-        self.assertIsNone(refusals.check_statement_location(True, "/out/s.json", False))
+        self.assertIsNone(refusals.check_statement_location(True, "/out/s.json", False, False))
 
     def test_an_occupied_location_is_refused(self):
         self.assertRefusal(
-            refusals.check_statement_location(True, "/out/s.json", True),
+            refusals.check_statement_location(True, "/out/s.json", True, False),
             "statement_location_occupied",
             "input_check",
         )
 
+    def test_a_location_in_the_records_folder_is_refused_first_with_one_line_saying_what_to_do(
+        self,
+    ):
+        for occupied in (True, False):
+            with self.subTest(occupied):
+                got = refusals.check_statement_location(
+                    True, "/records/r-1.outcome.json", occupied, True
+                )
+                self.assertRefusal(got, "statement_location_in_records", "input_check")
+                self.assertEqual(
+                    got["problem"],
+                    "statement_location '/records/r-1.outcome.json' is in the records folder, "
+                    "where Shuttle writes only its own records; name a path outside the records "
+                    "folder",
+                )
+
+    def test_a_folder_holds_the_paths_at_and_below_it_and_no_look_alike(self):
+        for path, expected in (
+            ("/records", True),
+            ("/records/r-1.outcome.json", True),
+            ("/records/a/b", True),
+            ("/records2/x", False),
+            ("/records.x", False),
+            ("/other/records/x", False),
+            ("/", False),
+        ):
+            with self.subTest(path):
+                self.assertEqual(refusals.inside_folder(path, "/records"), expected)
+        self.assertTrue(refusals.inside_folder("/records/x", "/records/"))
+        self.assertTrue(refusals.inside_folder("/anything", "/"))
+
     def test_a_kind_that_expects_a_statement_needs_a_location(self):
         self.assertRefusal(
-            refusals.check_statement_location(True, None, False), "missing_setting", "input_check"
+            refusals.check_statement_location(True, None, False, False),
+            "missing_setting",
+            "input_check",
         )
 
     def test_a_kind_that_expects_none_and_is_given_no_location_is_accepted(self):
         for occupied in (True, False):
             with self.subTest(occupied):
-                self.assertIsNone(refusals.check_statement_location(False, None, occupied))
+                self.assertIsNone(refusals.check_statement_location(False, None, occupied, False))
 
     def test_a_kind_that_expects_none_and_is_given_a_location_is_refused_whether_or_not_it_is_taken(
         self,
     ):
         for occupied in (True, False):
             with self.subTest(occupied):
-                got = refusals.check_statement_location(False, "/out/s.json", occupied)
+                got = refusals.check_statement_location(False, "/out/s.json", occupied, False)
                 self.assertRefusal(got, "unknown_field", "input_check")
                 self.assertIn("expects no statement", got["problem"])
 

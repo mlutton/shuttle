@@ -136,7 +136,7 @@ class Observed(TypedDict):
     reply_given: bool
 
 
-# How a driver's tool hands over its statement: it writes a file at the statement location, or its
+# How a driver's tool hands over its statement: it writes a file at the statement path in the run area, or its
 # final message is the statement.
 StatementArrival = Literal["file", "reply"]
 SetupAction = Literal["copy", "share", "leave_out", "write", "writable", "variable"]
@@ -357,6 +357,7 @@ class RunState(TypedDict, total=False):
     boundary_name: str
     boundary_process: Any
     run_area: str  # the run's own folder, once made
+    statement_parent: str  # what the statement location's parent folder resolved to at the start
     setup_variables: dict[str, str]  # what the driver's setup passes to the executor
     executor_duration: float
     executor_driver_observations: ExecutorDriverGroup

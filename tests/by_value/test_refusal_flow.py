@@ -72,6 +72,14 @@ class Refusals(RefusalCase):
                 "statement_location_occupied",
                 d(kind="judge", statement_location="/out/statement.json"),
             ),
+            (
+                "statement_location_in_records",
+                d(kind="judge", statement_location="/records/inj-1.outcome.json"),
+            ),
+            (
+                "statement_location_in_records",
+                d(kind="judge", statement_location="/records/other.txt"),
+            ),
             ("missing_setting", d(kind="judge")),
             ("reach_not_available", d(reach={"read": ["/etc"]})),
             ("no_time_limit", {k: v for k, v in d().items() if k != "time_limit_seconds"}),

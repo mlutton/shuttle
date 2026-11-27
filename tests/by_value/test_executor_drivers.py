@@ -97,16 +97,16 @@ def sources_outside_the_drivers():
 
 class WhetherTheReplyBecomesTheStatement(unittest.TestCase):
     def test_only_a_reply_driver_that_gave_one_and_a_free_location_has_it_copied(self):
-        for arrives, location, taken, given, expected in (
-            ("reply", "/out/s", False, True, True),
-            ("reply", "/out/s", True, True, False),  # the executor already left one
-            ("reply", "/out/s", False, False, False),  # no final message
-            ("reply", None, False, True, False),  # the kind expects no statement
-            ("file", "/out/s", False, True, False),  # the tool writes its own file
+        for arrives, expects, taken, given, expected in (
+            ("reply", True, False, True, True),
+            ("reply", True, True, True, False),  # the executor already left one
+            ("reply", True, False, False, False),  # no final message
+            ("reply", False, False, True, False),  # the kind expects no statement
+            ("file", True, False, True, False),  # the tool writes its own file
         ):
-            with self.subTest(arrives=arrives, location=location, taken=taken, given=given):
+            with self.subTest(arrives=arrives, expects=expects, taken=taken, given=given):
                 self.assertEqual(
-                    decisions.copy_reply_to_statement(arrives, location, taken, given), expected
+                    decisions.copy_reply_to_statement(arrives, expects, taken, given), expected
                 )
 
 
@@ -205,8 +205,10 @@ class ARunNamingTheCodexDriver(unittest.TestCase):
         scenes.run_in(other)
         filed = other.children[-1].input.decode()
         self.assertIn(
-            f"Write your statement as one JSON file at this exact path: {LOCATION}", filed
+            f"Write your statement as one JSON file at this exact path: {AREA}/shuttle-statement.json",
+            filed,
         )
+        self.assertNotIn(LOCATION, filed)
 
     def test_a_statement_it_gives_as_its_last_message_is_kept_like_any_other(self):
         receipt = self.run_it(world_for("events-finished.jsonl", "last-message-statement.json"))

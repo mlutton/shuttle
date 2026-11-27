@@ -29,7 +29,7 @@ def put_instruction(state: RunState) -> str:
     text = notice.with_notice(
         raw.get("instruction"),
         expects,
-        raw.get("statement_location"),
+        run_area.statement_path(state["run_area"]),
         statement_schema.read_schema(world),
         raw.get("references", []),
         the_driver.of(raw).STATEMENT,

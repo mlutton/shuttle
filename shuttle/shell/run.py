@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, TextIO
 
 from shuttle import __version__
-from shuttle.core import boundary, decisions, refusals
+from shuttle.core import boundary, decisions, refusals, run_area, statement
 from shuttle.core.shapes import (
     Conclusion,
     Decision,
@@ -159,6 +159,9 @@ def step_run_input_checks_and_executor_driver_check(state: RunState) -> None:
     if refusal:
         facts["input_check"] = refusal["reason"]
         state["problems"]["input_check"] = refusal["problem"]
+    location = state["raw"].get("statement_location")
+    if isinstance(location, str):
+        state["statement_parent"] = world.boundary.resolve(statement.location_parent(location))
     reason, text = driver_check(world, state["raw"])
     if reason:
         facts["executor_driver_check"] = reason
@@ -189,8 +192,8 @@ def step_run_gates(state: RunState) -> None:
 
 
 def step_observe(state: RunState) -> None:
-    """Ask the driver what the tool left. A final message the tool gave is copied to the
-    statement location (when nothing is there), for the step that keeps it."""
+    """Ask the driver what the tool left. A final message the tool gave is copied to the statement
+    path in the run area (when nothing is there), for the step that keeps it."""
     world, raw = state["world"], state["raw"]
     driver = the_driver.of(raw)
     area = state.get("run_area")
@@ -199,18 +202,17 @@ def step_observe(state: RunState) -> None:
         saved = {"events": None, "last_message": None, "session_record": None}
     observed = driver.observe(raw["executor"]["settings"], saved)
     state["executor_driver_observations"] = observed["group"]
-    location = raw.get("statement_location")
     reply = driver.output_files(area or "").get("last_message")
-    taken = location is not None and world.files.exists(location)
-    if (
-        reply
-        and area
-        and decisions.copy_reply_to_statement(
-            driver.STATEMENT, location, taken, observed["reply_given"]
-        )
-    ):
-        with contextlib.suppress(OSError):  # nothing left there is a statement not given
-            world.files.copy(reply, location or "")
+    if reply and area:
+        inner = run_area.statement_path(area)
+        if decisions.copy_reply_to_statement(
+            driver.STATEMENT,
+            raw.get("statement_location") is not None,
+            world.files.exists(inner),
+            observed["reply_given"],
+        ):
+            with contextlib.suppress(OSError):  # nothing left there is a statement not given
+                world.files.copy(reply, inner)
 
 
 def step_deliver(state: RunState) -> None:  # stand-in

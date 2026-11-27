@@ -43,9 +43,15 @@ def _kind_checks(world: Operations, raw: Document) -> list[Found | None]:
         ]
     location = raw.get("statement_location")
     occupied = location is not None and world.files.exists(location)
+    # Resolved through links and `..`, the way the place is, so no spelling reaches the records.
+    in_records = location is not None and refusals.inside_folder(
+        world.boundary.resolve(location), world.boundary.resolve(raw["records_location"])
+    )
     return [
         refusals.check_kind(raw["kind"], known),
-        refusals.check_statement_location(known.get(raw["kind"], False), location, occupied),
+        refusals.check_statement_location(
+            known.get(raw["kind"], False), location, occupied, in_records
+        ),
     ]
 
 

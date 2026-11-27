@@ -26,6 +26,25 @@ def kept_name(request_id: str) -> str:
     return f"{request_id}.statement.kept"
 
 
+def location_parent(location: str) -> str:
+    """The folder a statement location is in, as written."""
+    head = location.rpartition("/")[0]
+    return head if head else ("/" if location.startswith("/") else ".")
+
+
+def location_copy_target(
+    location: str, parent_at_start: str | None, parent_now: str | None, stop_confirmed: bool
+) -> str | None:
+    """Where the kept statement may be copied for a document's `location`, or None: the name in
+    the folder the location's parent was when the run began, and only when that folder is still
+    what the parent resolves to and nothing of the executor can still run. A parent the executor
+    swapped for a link resolves elsewhere, and then nothing is written."""
+    if not stop_confirmed or parent_at_start is None or parent_now != parent_at_start:
+        return None
+    name = location.rpartition("/")[2]
+    return parent_at_start.rstrip("/") + "/" + name
+
+
 def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     found: dict[str, Any] = {}
     for key, value in pairs:

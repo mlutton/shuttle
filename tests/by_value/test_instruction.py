@@ -43,12 +43,16 @@ class TheInstruction(unittest.TestCase):
         scenes.run_in(world)
         self.assertTrue(given(world).startswith("Shuttle notice"))
 
-    def test_a_kind_that_expects_a_statement_gets_its_part_with_the_location(self):
+    def test_a_kind_that_expects_a_statement_gets_its_part_with_a_path_in_the_run_area_only(self):
         world = scenes.scene(scenes.document(kind="judge", statement_location=LOCATION))
         scenes.run_in(world)
         got = given(world)
+        inner = run_area.statement_path("/tmp/" + run_area.AREA_PREFIX + "000001")
         self.assertTrue(got.startswith("Do the task.\n\nShuttle notice"))
-        self.assertIn(f"Write your statement as one JSON file at this exact path: {LOCATION}", got)
+        self.assertIn(f"Write your statement as one JSON file at this exact path: {inner}", got)
+        self.assertNotIn(LOCATION, got)
+        ((arguments, environment),) = world.calls("processes.start")[-1:]
+        self.assertFalse(any(LOCATION in str(part) for part in (*arguments[0], environment)))
 
     def test_references_are_named_in_the_notice_of_every_kind(self):
         text = "the runbook"
@@ -105,6 +109,20 @@ class TheInstruction(unittest.TestCase):
                 scenes.run_in(world)
                 ending = flat(scenes.outcome(world)["receipt"])["ending"]
                 self.assertEqual(ending["reason"], "instruction_hash_mismatch")
+
+
+class ARunWithNoStatementExpected(unittest.TestCase):
+    def test_a_command_run_still_has_its_run_area_with_the_instruction_and_makes_no_statement(self):
+        world = scenes.scene()
+        scenes.run_in(world)
+        self.assertEqual(len(world.calls("files.make_temporary_folder")), 1)
+        ((arguments, _),) = world.calls("processes.start")[-1:]
+        self.assertTrue(arguments[2].endswith("/" + run_area.INSTRUCTION_NAME))
+        self.assertNotIn("exact path", given(world))
+        self.assertEqual(world.calls("files.copy"), [])
+        self.assertEqual(
+            flat(scenes.outcome(world)["receipt"])["executor"]["statement_state"], "none"
+        )
 
 
 if __name__ == "__main__":

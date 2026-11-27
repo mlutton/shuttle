@@ -62,6 +62,11 @@ class ThePlan(unittest.TestCase):
         got = run_area.plan(AREA, [{"action": "leave_out", "name": "h/old"}, copy("h")])
         self.assertEqual(got["steps"][0]["leave_out"], ["old"])
 
+    def test_the_statement_path_is_one_fixed_name_inside_the_area_whichever_area(self):
+        self.assertEqual(run_area.STATEMENT_NAME, "shuttle-statement.json")
+        for area in (AREA, "/tmp/other area-1", "/x"):
+            self.assertEqual(run_area.statement_path(area), area + "/shuttle-statement.json")
+
     def test_no_requests_is_an_empty_plan(self):
         self.assertEqual(run_area.plan(AREA, []), {"steps": [], "variables": {}, "problem": None})
 
@@ -79,6 +84,7 @@ class ThePlan(unittest.TestCase):
             "a name with a space": [copy("a b")],
             "a name that is not text": [{"action": "write", "name": 3, "text": ""}],
             "the instruction's name": [copy(run_area.INSTRUCTION_NAME)],
+            "the statement's name": [copy(run_area.STATEMENT_NAME)],
             "a relative source": [copy("a", "relative/path")],
             "a source with a null": [copy("a", "/x\0y")],
             "a write with no text": [{"action": "write", "name": "a"}],
@@ -122,8 +128,8 @@ class ThePlan(unittest.TestCase):
                 {"action": "variable", "variable": "A", "in_run_area": ".."}
             ],
         }
-        kept = run_area.INSTRUCTION_NAME
-        for name in (kept, kept + "/z", kept + "/a/b"):
+        kept_names = (run_area.INSTRUCTION_NAME, run_area.STATEMENT_NAME)
+        for name in (n + tail for n in kept_names for tail in ("", "/z", "/a/b")):
             for action in (
                 copy(name),
                 {"action": "share", "name": name, "source": "/l"},

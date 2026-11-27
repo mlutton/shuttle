@@ -4,8 +4,9 @@ One fixed, versioned text. Its statement part (where and how to write the statem
 for a kind that expects a statement; its references part (where each reference is found, and that
 a reference wins over a file of the same name in the place) only when the document has references;
 its line that the executor cannot commit in the place always. The words are fixed; only the facts
-(the location, the references, the fields of the schema) are filled in. A tool that gives its
-statement as its final message is told that instead of being given a path. The place is not named: the
+(the statement's path, the references, the fields of the schema) are filled in. A tool that gives its
+statement as its final message is told that instead of being given a path. The path is one inside
+the run area, never the document's statement location. The place is not named: the
 notice says "the place" and nothing depends on where it is.
 """
 
@@ -39,16 +40,16 @@ def _field_lines(fields: Sequence[Mapping[str, Any]], indent: str) -> list[str]:
 
 
 def notice(
-    statement_location: str | None,
+    statement_path: str | None,
     schema: Mapping[str, Any],
     references: Sequence[Mapping[str, Any]],
     arrives: StatementArrival = "file",
 ) -> str:
     """The notice's text. `references` are the document's, each with a name and a path. A tool
-    that cannot write at the statement location gives its statement as its final message
+    that cannot write at the statement path gives its statement as its final message
     (`arrives` is "reply"), and is told so instead of being given a path."""
     lines = [f"Shuttle notice, version {fixed.NOTICE_VERSION}"]
-    if statement_location is not None and arrives == "reply":
+    if statement_path is not None and arrives == "reply":
         lines += [
             "",
             "Give your statement as your final message: one JSON object with exactly these "
@@ -58,10 +59,10 @@ def notice(
             "Execution keeps your final message exactly as you wrote it and never changes or "
             "completes it.",
         ]
-    elif statement_location is not None:
+    elif statement_path is not None:
         lines += [
             "",
-            f"Write your statement as one JSON file at this exact path: {statement_location}",
+            f"Write your statement as one JSON file at this exact path: {statement_path}",
             "It must be one JSON object with exactly these fields, and no others:",
             *_field_lines(schema["fields"], "  "),
             "Execution keeps the file exactly as you wrote it and never changes or completes it.",
@@ -77,7 +78,7 @@ def notice(
 def with_notice(
     instruction: str | None,
     expects_statement: bool,
-    statement_location: str | None,
+    statement_path: str | None,
     schema: Mapping[str, Any],
     references: Sequence[Mapping[str, Any]],
     arrives: StatementArrival = "file",
@@ -85,5 +86,5 @@ def with_notice(
     """The instruction the executor is given: the caller's, then the notice. A kind that expects
     no statement gets the notice without its statement part; with no instruction either, the
     notice alone."""
-    text = notice(statement_location if expects_statement else None, schema, references, arrives)
+    text = notice(statement_path if expects_statement else None, schema, references, arrives)
     return text if instruction is None else instruction + "\n\n" + text

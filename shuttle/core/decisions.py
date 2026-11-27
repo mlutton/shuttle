@@ -611,11 +611,11 @@ def standard_settings(raw: Mapping[str, Any]) -> tuple[bool | None, bool | None]
 
 
 def copy_reply_to_statement(
-    arrives: str, location: str | None, location_taken: bool, reply_given: bool
+    arrives: str, expects_statement: bool, statement_taken: bool, reply_given: bool
 ) -> bool:
-    """Whether the tool's final message is to be copied to the statement location; a file the
-    executor left itself is never replaced."""
-    return arrives == "reply" and reply_given and location is not None and not location_taken
+    """Whether the tool's final message is to be copied to the statement path in the run area; a
+    file the executor left itself is never replaced."""
+    return arrives == "reply" and reply_given and expects_statement and not statement_taken
 
 
 def executor_driver_check(

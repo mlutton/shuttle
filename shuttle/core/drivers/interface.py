@@ -28,7 +28,7 @@ class Driver(Protocol):
     # The caller's variables the driver looks at (its tool's home, say); the shell reads exactly
     # these and hands them to `login_path` and `setup_requests`.
     READS: tuple[str, ...]
-    # The notice tells the tool which; only a "reply" tool's final message is copied to the location.
+    # The notice tells the tool which; only a "reply" tool's final message is copied to the statement path in the run area.
     STATEMENT: StatementArrival
 
     def settings_refusal(self, settings: Settings) -> tuple[str, str] | None:
