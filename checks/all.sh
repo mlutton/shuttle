@@ -11,12 +11,13 @@
 #   real    python -m unittest discover, over tests/command and then tests/boundary: the tests
 #           that start real processes, under REAL_SECONDS (below), for the two folders together.
 #           It stops at the first folder that fails, so a failure in tests/command means
-#           tests/boundary did not run. The real-process tests are bounded in time by that
-#           budget; the tests that hand the command an input without an end run under the
-#           resource limits of tests/rehearsal/real_run.py.
+#           tests/boundary did not run. The stage also runs under a file-size limit and an
+#           address-space limit (below), which every process it starts inherits; the harness
+#           of tests/rehearsal/real_run.py sets tighter ones for the command it starts.
 # The budgets, each written once below the header: TESTS_SECONDS keeps the logic tests fast;
 # REAL_SECONDS ends a real-process test that never returns, and does not police speed.
-# Every folder under tests/ that holds tests is in exactly one of the two (a test pins it);
+# Every folder under tests/ that holds tests is in exactly one of the two (tests/by_value/test_stage_folders.py
+# pins it);
 # tests/rehearsal and tests/hostile hold helpers and tables, not tests.
 # Prints one line per stage ("<stage>: passed" or "<stage>: failed"; a failed stage's
 # own output goes to standard error), then a last line on standard output:
@@ -54,6 +55,13 @@
 
 TESTS_SECONDS=20
 REAL_SECONDS=120
+# Limits of the real stage, set once so no test has to ask: a time limit does not stop a test
+# that reads a device without end from filling memory (the machine's out-of-memory killer ended a
+# whole session that way). Sizes are for `ulimit` in sh: -f counts 512-byte blocks (128 MB), -v
+# counts kilobytes (3 GB). Both sit above anything a test raises a harness limit to, and
+# well above what the stage needs.
+REAL_FILE_BLOCKS=262144
+REAL_ADDRESS_KB=3145728
 
 mode=check
 [ "$#" -eq 1 ] && [ "$1" = --fix ] && mode=fix
@@ -137,6 +145,6 @@ stage types 0 "$PYTHON" -m mypy
 # never returns reaches it. The two folders run in one command, so the one budget covers both.
 stage tests "$TESTS_SECONDS" timeout "$TESTS_SECONDS" "$PYTHON" -m unittest discover -s tests/by_value -t tests
 stage real "$REAL_SECONDS" timeout "$REAL_SECONDS" sh -c \
-    '"$0" -m unittest discover -s tests/command -t tests && "$0" -m unittest discover -s tests/boundary -t tests' \
-    "$PYTHON"
+    'ulimit -f "$1" && ulimit -v "$2" && "$0" -m unittest discover -s tests/command -t tests && "$0" -m unittest discover -s tests/boundary -t tests' \
+    "$PYTHON" "$REAL_FILE_BLOCKS" "$REAL_ADDRESS_KB"
 echo "check: passed"

@@ -5,7 +5,6 @@ passes or fails the stage it is told to, so these tests do not run the real suit
 """
 
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -32,6 +31,7 @@ case "$*" in
   *fixmode.py)          echo "fix: stand-in"; exit "${FIX_EXIT:-0}" ;;
   *) echo "unexpected call: $*" >&2; exit 99 ;;
 esac
+[ -n "$LIMITS_FILE" ] && echo "$stage: file blocks $(ulimit -f), address kilobytes $(ulimit -v)" >> "$LIMITS_FILE"
 echo "$stage: tool output"
 [ "$FAIL_STAGE" = "$stage" ] && exit "${FAIL_CODE:-1}"
 exit 0
@@ -111,25 +111,18 @@ class CheckScriptTest(unittest.TestCase):
         result = self.check(FAIL_STAGE="real", FAIL_CODE="3")
         self.assertEqual(self.last_line(result), "check: failed: real")
 
-    def test_every_folder_of_tests_is_run_by_exactly_one_stage(self):
-        with open(SCRIPT) as f:
-            script = f.read()
-        run = [
-            folder
-            for line in script.splitlines()
-            if not line.lstrip().startswith("#")
-            for folder in re.findall(r"unittest discover -s (\S+)", line)
-        ]
-        holding = sorted(
-            os.path.join("tests", name)
-            for name in os.listdir(os.path.join(REPO, "tests"))
-            if os.path.isdir(os.path.join(REPO, "tests", name))
-            and any(
-                file.startswith("test") and file.endswith(".py")
-                for file in os.listdir(os.path.join(REPO, "tests", name))
-            )
+    def test_the_real_stage_runs_under_a_file_size_limit_and_an_address_space_limit(self):
+        record = os.path.join(os.path.dirname(self.stand_in), "limits")
+        result = self.check(LIMITS_FILE=record)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(record) as f:
+            lines = f.read().splitlines()
+        # 262144 blocks of 512 bytes is 128 MB; 3145728 kilobytes is 3 GB.
+        limits = "file blocks 262144, address kilobytes 3145728"
+        self.assertEqual(
+            [line for line in lines if line.startswith("real:")],
+            [f"real: {limits}", f"real: {limits}"],
         )
-        self.assertEqual(sorted(run), holding)
 
     def test_a_failing_stage_stops_the_later_stages(self):
         result = self.check(FAIL_STAGE="lint")
