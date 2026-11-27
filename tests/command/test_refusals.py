@@ -15,6 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 real_place = importlib.import_module("rehearsal.real_place")
+real_run = importlib.import_module("rehearsal.real_run")
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,12 +39,16 @@ class RealCommand(unittest.TestCase):
         os.mkdir(self.records)
         self.place = os.path.join(self.root, "place")
         real_place.make_checkout(self.place)
-        self.witness = os.path.join(self.root, "witness.txt")
-        self.script = self.write("script.py", WRITES_WITNESS)
+        # The executor writes its witness in the place and reads its script from a folder listed
+        # as visible (see tests/rehearsal/real_run.py).
+        self.witness = os.path.join(self.place, "witness.txt")
+        self.support = os.path.join(self.root, "support")
+        os.mkdir(self.support)
+        self.script = self.write("script.py", WRITES_WITNESS, self.support)
         self.gate_script = self.write("gate.py", GATE_ANSWERS)
 
-    def write(self, name, text):
-        path = os.path.join(self.root, name)
+    def write(self, name, text, folder=None):
+        path = os.path.join(folder or self.root, name)
         with open(path, "w") as f:
             f.write(text)
         return path
@@ -58,9 +63,13 @@ class RealCommand(unittest.TestCase):
             "round": 1,
             "kind": "plain",
             "time_limit_seconds": 30,
+            "reach": {"visible": [self.support, *real_run.INTERPRETER_FOLDERS]},
             "executor": {
                 "name": "command",
-                "settings": {"command": sys.executable, "arguments": [self.script, self.witness]},
+                "settings": {
+                    "command": real_run.INTERPRETER,
+                    "arguments": [self.script, self.witness],
+                },
             },
         }
         doc.update(extra)
@@ -131,7 +140,10 @@ class Refusals(RealCommand):
             ),
             ("reach_not_valid", self.document(reach=["x"])),
             ("visible_not_absolute", self.document(reach={"visible": ["x"]})),
-            ("visible_missing", self.document(reach={"visible": [self.absent]})),
+            (
+                "visible_missing",
+                self.document(reach={"visible": [os.path.join(self.root, "absent")]}),
+            ),
             ("visible_not_a_folder", self.document(reach={"visible": [runbook]})),
             ("visible_overlaps_the_records", self.document(reach={"visible": [self.records]})),
             ("visible_overlaps_the_records", self.document(reach={"visible": [self.root]})),

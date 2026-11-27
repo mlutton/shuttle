@@ -112,7 +112,25 @@ class FingerprintCase(real_run.RealRun):
         real_place.make_checkout(self.main, FILES)
         self.place = os.path.join(self.root, "linked")
         self.head = real_place.make_linked_checkout(self.main, self.place)
-        self.witness = os.path.join(self.root, "witness")
+        # The executor can write only its place (and its run area, which goes with the run), so
+        # a script says it ran by writing a file there. The repository's own ignore list keeps
+        # that file out of the fingerprints and the counts these tests read.
+        self.witness = os.path.join(self.place, "witness")
+        self.ignore_the_witness()
+
+    def ignore_the_witness(self):
+        with open(os.path.join(self.main, ".git", "info", "exclude"), "a") as f:
+            f.write("witness\n")
+
+    def use_a_plain_place(self):
+        """A place that is a checkout of its own, whose repository the executor can reach. A
+        linked place's main repository is hidden from the executor (a later change makes it
+        visible), so a script that must change the repository's own files, or commit, runs here."""
+        self.main = self.place = os.path.join(self.root, "plain")
+        real_place.make_checkout(self.place, FILES)
+        self.head = real_place.git(self.place, "rev-parse", "HEAD")
+        self.witness = os.path.join(self.place, "witness")
+        self.ignore_the_witness()
 
     def git(self, *arguments, where=None):
         return real_place.git(where or self.place, *arguments)
@@ -268,6 +286,7 @@ class TheClosingCommit(FingerprintCase):
 
 class AScriptThatMakesItsOwnCommits(FingerprintCase):
     def test_does_not_move_the_closing_fingerprint_which_is_the_working_files_not_the_history(self):
+        self.use_a_plain_place()
         self.finished(self.document_for(MAKES_ITS_OWN_COMMITS))
         executors_commit = self.git("rev-parse", "HEAD")
         self.assertNotEqual(executors_commit, self.head)  # the script did commit
@@ -593,6 +612,7 @@ class FilterDrivers(FingerprintCase):
     def test_drivers_added_by_the_script_during_the_run_are_never_run(self):
         # a clean driver named by .gitattributes and a process driver named by info/attributes,
         # both written, with their configuration, by the script
+        self.use_a_plain_place()
         script = (
             "import os, sys\n"
             "place, config, command = sys.argv[1], sys.argv[3], sys.argv[4]\n"

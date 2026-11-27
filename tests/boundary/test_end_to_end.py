@@ -130,7 +130,9 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertIs(ending["everything_stopped"], True)
         saw = receipt["execution"]  # the script wrote its two reports in the place, nothing else
         self.assertEqual(saw["fingerprint_before"], head)
-        self.assertEqual((saw["files_added"], saw["files_changed"], saw["files_deleted"]), (2, 0, 0))
+        self.assertEqual(
+            (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (2, 0, 0)
+        )
         self.assertEqual(self.processes_with(marker), 0)  # the child the script started is gone
         self.assertNotEqual(self.scope_state(), "active")
         self.assertTrue(os.path.exists(asked))  # the gate was asked, said yes, and the run went on

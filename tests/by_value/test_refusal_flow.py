@@ -300,7 +300,9 @@ class TheCheckForm(unittest.TestCase):
         self.assertNotIn("inj-1.request.json", world.names_in(scenes.RECORDS))
 
     def test_every_check_is_run_and_every_problem_is_listed(self):
-        doc = scenes.document(kind="nonesuch", command="absent-tool", reach={"visible": ["nowhere"]})
+        doc = scenes.document(
+            kind="nonesuch", command="absent-tool", reach={"visible": ["nowhere"]}
+        )
         world = scenes.scene(doc)
         _, lines, _ = self.check(world)
         text = flat(json.loads(lines[1])["receipt"])["ending"]["reason_text"]
