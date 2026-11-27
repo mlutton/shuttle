@@ -108,7 +108,7 @@ class GitInTheBox(real_run.RealRun):
         real_place.make_linked_checkout(origin, place)
         own = os.path.realpath(real_place.git(place, "rev-parse", "--absolute-git-dir"))
         self.run_git_in(place, origin, [own, os.path.join(os.path.realpath(origin), ".git")])
-        with open(os.path.join(place, "made.txt")) as f:  # on disk, in the place
+        with open(os.path.join(place, "made.txt")) as f:
             self.assertEqual(f.read(), "made by the executor\n")
         after = flat(self.outcome()["receipt"])["execution"]["fingerprint_after"]
         self.assertEqual(real_place.git(place, "show", f"{after}:made.txt"), "made by the executor")
@@ -124,5 +124,5 @@ class GitInTheBox(real_run.RealRun):
         self.assert_read_only(seen)
         self.assertEqual(real_place.git(place, "rev-parse", "HEAD"), head)
         self.assertEqual(text_of(os.path.join(git_folder, "config")), configuration)
-        with open(os.path.join(place, "made.txt")) as f:  # the working files are still writable
+        with open(os.path.join(place, "made.txt")) as f:
             self.assertEqual(f.read(), "made by the executor\n")

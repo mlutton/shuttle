@@ -160,7 +160,7 @@ class TheCommandDriverRefusesWhatTheBoxDoesNotEnforce(unittest.TestCase):
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("could_not_start", "unknown_setting", "executor_driver_check"),
         )
-        self.assertEqual(world.started, [])  # nothing was launched
+        self.assertEqual(world.started, [])
 
     def test_changes_to_the_place_not_allowed_is_accepted_by_the_check_and_the_run(self):
         checked, ending, world = self.verdict(changes_to_place="not")

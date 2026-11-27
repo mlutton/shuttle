@@ -310,7 +310,7 @@ class CheckReach(RefusalCase):
                 self.assertTrue(got, path)
                 self.assertEqual(got["reason"], "visible_overlaps_the_runtime_folder")
                 self.assertIn(runtime, got["problem"])
-        # without a runtime folder (the caller has none) `/run` is only a folder
+        # without a runtime folder to refuse, `/run` is only a folder
         self.assertIsNone(refusals.check_reach({"visible": ["/run"]}, look("/run"), "/rec", None))
         self.assertIsNone(
             refusals.check_reach(

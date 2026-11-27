@@ -34,7 +34,8 @@ import sys
 open(sys.argv[2], "w").write("started")
 """
 
-# Makes its own commits in the place: one that changes a file, then a file that is not committed.
+# Tries to commit a change in the place, which the box refuses (the git folder is read-only), then
+# writes a file.
 MAKES_ITS_OWN_COMMITS = """
 import os, subprocess, sys
 place = sys.argv[1]
@@ -282,8 +283,8 @@ class AScriptThatMakesItsOwnCommits(FingerprintCase):
         self.assertEqual(saw["fingerprint_before"], self.head)
         self.assertNotIn(saw["fingerprint_after"], (self.head, executors_commit))
         self.assertEqual(self.git("rev-parse", f"{saw['fingerprint_after']}^"), self.head)
-        # the files as they are: the committed change and the file that was never committed,
-        # both counted against the opening commit
+        # the files as they are, both counted against the opening commit: the changed one the
+        # commit would have held and the one never committed
         self.assertEqual(
             (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (1, 1, 0)
         )
@@ -598,8 +599,9 @@ class FilterDrivers(FingerprintCase):
                 os.remove(os.path.join(self.records, "r-1.request.json"))
 
     def test_drivers_added_by_the_script_during_the_run_are_never_run(self):
-        # a clean driver named by .gitattributes and a process driver named by info/attributes,
-        # both written, with their configuration, by the script
+        # the script tries to add a clean driver named by .gitattributes and a process driver
+        # named by info/attributes, with their configuration; the box refuses the writes to the
+        # git folder, so only the files in the place arrive
         script = (
             "import os, sys\n"
             "place, config, command = sys.argv[1], sys.argv[3], sys.argv[4]\n"

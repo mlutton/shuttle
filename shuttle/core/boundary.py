@@ -5,8 +5,8 @@ The scope is a systemd user scope. It owns the time limit (its maximum runtime) 
 between asking and killing (its stop timeout); it ends everything inside when either runs out,
 and the reason it ended can be read afterwards from its properties. The box is bubblewrap, started
 inside the scope: it applies the executor's reach, which is hidden unless declared. Only what the
-box binds in is there; the system folders and `/etc` are read-only, the place and the run area are
-writable, and the rest of the machine (the caller's home folder, other checkouts, the user's
+box binds in is there; the system folders and `/etc` are read-only, the run area is writable, and
+so is the place unless the document says the executor may not change it, and the rest of the machine (the user's home folder, other checkouts, the user's
 runtime folder with its systemd and D-Bus sockets, the real `/tmp`, the records) is not. The
 reach limits what a lost or confused agent can do by mistake; it is not a security sandbox.
 Nothing here touches the world: the shell reads the properties and gathers the paths, and acts on
@@ -111,9 +111,8 @@ class Reach(TypedDict):
 
     `git_folders` are the place's own git folder and the one it shares with the checkout it was
     made from, as the shell found them: for a linked working copy (the usual place) they are
-    outside the place, and git cannot run without them. They are read-only at their real paths, so
-    the executor can read the history but not change the repository's configuration, hooks or
-    history. Nothing else of the repository the place was made from is shown. `resolver` is the file `/etc/resolv.conf` leads
+    outside the place, and git cannot run without them. They are read-only so that the executor
+    cannot change the repository's configuration, hooks or history. Nothing else of the repository the place was made from is shown. `resolver` is the file `/etc/resolv.conf` leads
     to, when there is one (see `_resolver_bind`).
     """
 
@@ -155,9 +154,9 @@ def _reach_binds(reach: Reach) -> list[str]:
     after every path above it: a folder listed as visible can hold the place, a reference can be
     inside the place, and the place can be under the machine's temporary folder, which was bound
     over before any of them. Ordered by the depth of the destination, and for equal depth with the
-    read-only ones first so a path that is both visible and the place stays writable (a listing
-    never makes anything read-only or writable that was not). A git folder inside the place comes
-    after it for its depth, so it is read-only inside a writable place.
+    read-only ones first so a path that is both visible and the place is writable when the place is
+    (a listing never makes anything read-only or writable that was not). A git folder inside the
+    place is deeper, so it comes after it and is read-only inside a writable place.
     """
     read_only = [*reach["visible"], *reach["references"], *reach["git_folders"]]
     if not reach["place_writable"]:

@@ -103,10 +103,8 @@ class TheBinds(unittest.TestCase):
         got = binds(boundary.box_arguments({**REACH, "git_folders": linked}))
         for folder in linked:
             self.assertEqual([k for k, _, d in got if d == folder], ["--ro-bind"], folder)
-        self.assertFalse([d for _, _, d in got if d == "/main"])  # nothing else of it
-        self.assertEqual(  # the place itself stays writable
-            [k for k, _, d in got if d == "/work/place"], ["--bind"]
-        )
+        self.assertFalse([d for _, _, d in got if d == "/main"])
+        self.assertEqual([k for k, _, d in got if d == "/work/place"], ["--bind"])
 
     def test_a_plain_checkouts_git_folder_inside_the_place_is_read_only_over_the_writable_place(
         self,
