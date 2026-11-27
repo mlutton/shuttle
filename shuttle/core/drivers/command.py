@@ -5,7 +5,7 @@ its declarations as data. It never names an ending. There is no base class.
 """
 
 from shuttle.core import pairs
-from shuttle.core.shapes import CommandSettings, ExecutorDriverGroup, LaunchSpec
+from shuttle.core.shapes import CommandSettings, ExecutorDriverGroup, LaunchSpec, SetupRequest
 
 NAME = "command"
 VERSION = "1"
@@ -20,6 +20,11 @@ DECLARATIONS: dict[str, list[str]] = {
 
 def declare() -> dict[str, list[str]]:
     return DECLARATIONS
+
+
+def setup_requests(settings: CommandSettings) -> list[SetupRequest]:
+    """Pure: what this tool asks of the run area. A plain command asks for nothing."""
+    return []
 
 
 def check(settings: CommandSettings, tool_found: bool) -> str | None:

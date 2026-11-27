@@ -42,10 +42,30 @@ class SimulatedHarness:
             "reports_streams": {},
             "reports_session": {},
             "writes_to_the_report": {"report": "hello\n"},
+            "copies_its_input": {},
         }
         if kind in behaviours:
             self.world.program(kind, **behaviours[kind])
         return [kind]  # "not_a_program" is never registered
+
+    def what_the_child_read(self):
+        return self.world.children[-1].input
+
+    def everything_below(self, folder):
+        found = []
+        for name in self.world._below(folder):
+            kind = "@" if name in self.world.links else "/" if name in self.world.folders else ""
+            found.append(name[len(folder) + 1 :] + kind)
+        return sorted(found)
+
+    def is_a_link(self, path):
+        return path in self.world.links
+
+    def make_read_only(self, path):
+        self.world.read_only.add(path)
+
+    def is_writable(self, path):
+        return path not in self.world.read_only
 
     # The simulated world runs no program, so what a started child sees of its streams and
     # session is what the simulated `start` is declared to give it: the same as the real one.

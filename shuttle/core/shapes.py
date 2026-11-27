@@ -93,6 +93,37 @@ class LaunchSpec(TypedDict):
     argv: list[str]
 
 
+class SetupRequest(TypedDict, total=False):
+    """One thing a driver asks of the run area (shuttle.core.run_area). `action` is one of
+    "copy" and "share" (`source`, the name made: `name`), "leave_out" (`name`: left out of any
+    copy that would hold it), "write" (`name`, `text`), "writable" (`name`) and "variable"
+    (`variable`, and either `value` or `in_run_area`, the name whose path is the value)."""
+
+    action: str
+    name: str
+    source: str
+    text: str
+    variable: str
+    value: str
+    in_run_area: str
+
+
+class SetupStep(TypedDict, total=False):
+    """What the shell does for one request, with every path whole."""
+
+    do: str  # "folder", "copy", "share", "write" or "writable"
+    source: str
+    target: str
+    leave_out: list[str]  # for a copy: names relative to the source
+    text: str
+
+
+class SetupPlan(TypedDict):
+    steps: list[SetupStep]
+    variables: dict[str, str]  # passed to the executor, by name
+    problem: str | None  # why the requests were refused, or None
+
+
 class StepResult(TypedDict, total=False):
     """What a step returns. A stand-in is marked with `stand_in`; a real step reports `ok`."""
 
@@ -114,6 +145,7 @@ class StepResult(TypedDict, total=False):
     statement_location: str
     claim: str
     session_file: str
+    failure: str  # a tear-down that failed says how; "" reads "none"
 
 
 class Facts(TypedDict, total=False):
@@ -270,6 +302,8 @@ class RunState(TypedDict, total=False):
     clock_start: float
     boundary_name: str
     boundary_process: Any
+    run_area: str  # the run's own folder, once made
+    setup_variables: dict[str, str]  # what the driver's setup passes to the executor
     executor_duration: float
     executor_driver_observations: ExecutorDriverGroup
     conclusion: Conclusion
@@ -316,11 +350,45 @@ class FileOperations(NamedTuple):
     usable_folder: Callable[
         [str], bool
     ]  # a folder a new name can be made in; looks, writes nothing
+    # The run area (shuttle.core.run_area). None of these reads a file's content except
+    # `copy_path`, which copies the bytes without looking at them, and none follows a link
+    # except `share_by_link`, which makes one.
+    make_temporary_folder: Callable[
+        [str], str
+    ]  # (name prefix): a new, empty folder only its owner can enter, in the system's temporary place; the path, absolute. OSError
+    make_folders: Callable[
+        [str], None
+    ]  # the folder and any missing folder above it; nothing if it is there; OSError (FileExistsError if the name is a file)
+    copy_path: Callable[
+        [str, str, Sequence[str]], None
+    ]  # (existing, new, left out): a regular file as `copy` does, or a folder with everything below
+    # it that is a regular file or a folder (a link, a pipe, a device or a socket below is skipped,
+    # never followed or opened) except the names left out, which are relative to `existing`
+    # ("a/b" leaves out that file or folder). FileExistsError if new is there, FileNotFoundError if
+    # existing is not or the folder above new is not, NotARegularFile if existing itself is a link,
+    # a pipe, a device or a socket. Nothing is left under the new name when it raises
+    share_by_link: Callable[
+        [str, str], None
+    ]  # (existing, new): a symbolic link at new leading to existing, which is looked at (not
+    # opened) and must be there: FileNotFoundError otherwise; FileExistsError if new is there
+    make_writable: Callable[
+        [str], None
+    ]  # the owner may write a regular file, and a folder with everything below it; a link is
+    # never followed: NotARegularFile for one at the name itself, a link below is left as it is;
+    # FileNotFoundError when nothing is there
+    remove_tree: Callable[
+        [str], None
+    ]  # a folder and everything in it, read-only parts too; a link inside is removed, never
+    # followed; FileNotFoundError when nothing is there, NotADirectoryError for a name that is not a folder
 
 
 class Starter(Protocol):
     def __call__(
-        self, argv: Sequence[str], environment: Mapping[str, str], report: int | None = None
+        self,
+        argv: Sequence[str],
+        environment: Mapping[str, str],
+        report: int | None = None,
+        input_from: str | None = None,
     ) -> Process: ...
 
 
@@ -328,7 +396,11 @@ class ProcessOperations(NamedTuple):
     """Child processes. The handle is whatever `start` returns."""
 
     find_program: Callable[[str], bool]  # whether a command can be found and run
-    start: Starter  # argv, environment, the number `open_report` gave or None; OSError, ValueError
+    # start: argv, environment, the number `open_report` gave or None, and the name of a file the
+    # child reads as its standard input (None: nothing to read, the null device). The file is
+    # opened before anything starts: FileNotFoundError and nothing started when it is not there.
+    # OSError, ValueError
+    start: Starter
     poll: Callable[[Process], int | None]  # None while running; negative: ended by that signal
     wait: Callable[
         [Process, float], int | None

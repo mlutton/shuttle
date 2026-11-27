@@ -4,6 +4,7 @@ Everything is in one temporary root: the records folder, the place the scripts m
 scripts. A script says it is up through a named pipe the test reads, so no test polls or sleeps.
 """
 
+import hashlib
 import json
 import os
 import resource
@@ -67,6 +68,15 @@ class RealRun(unittest.TestCase):
                 "settings": {"command": sys.executable, "arguments": [script, *arguments]},
             },
         }
+
+    @staticmethod
+    def expecting_a_statement(doc, location, instruction="Do the task."):
+        """The document as a kind that expects a statement takes it: the kind, where the statement
+        goes, and the instruction with its hash, which that kind must have."""
+        doc["kind"], doc["statement_location"] = "judge", location
+        doc["instruction"] = instruction
+        doc["instruction_hash"] = hashlib.sha256(instruction.encode("utf-8")).hexdigest()
+        return doc
 
     def limited(self):
         """Runs in the child just before it execs: the limits are inherited by what it starts,

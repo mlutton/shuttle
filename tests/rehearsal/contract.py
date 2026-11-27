@@ -315,6 +315,166 @@ class ContractCases:
                 self.world.files.remove(alias)
                 self.assertNotIn(row["name"], self.harness.names_in(folder))
 
+    # ------------------------------------------------------------ the run area's operations
+
+    def test_a_temporary_folder_is_new_empty_absolute_usable_and_never_the_same_twice(self):
+        first = self.world.files.make_temporary_folder("contract-area-")
+        second = self.world.files.make_temporary_folder("contract-area-")
+        self.addCleanup(self.world.files.remove_tree, first)
+        self.addCleanup(self.world.files.remove_tree, second)
+        self.assertNotEqual(first, second)
+        for path in (first, second):
+            self.assertTrue(path.startswith("/"))
+            self.assertTrue(path.rpartition("/")[2].startswith("contract-area-"))
+            self.assertTrue(self.world.files.usable_folder(path))
+            self.assertEqual(self.harness.everything_below(path), [])
+
+    def test_making_folders_makes_each_missing_one_and_is_no_change_where_they_are(self):
+        folder = self.harness.folder()
+        self.world.files.make_folders(f"{folder}/a/b/c")
+        self.world.files.make_folders(f"{folder}/a/b/c")
+        self.assertEqual(self.harness.everything_below(folder), ["a/", "a/b/", "a/b/c/"])
+
+    def test_making_folders_over_a_file_raises_file_exists_and_changes_nothing(self):
+        path = self.fresh("file")
+        self.world.files.write_new(path, "one")
+        self.assertRaisesExactly(FileExistsError, self.world.files.make_folders, path)
+        self.assertEqual(self.world.files.read(path), b"one")
+
+    def a_tree(self):
+        """A folder holding files and folders, one of each thing a copy leaves out or skips."""
+        folder = self.harness.folder()
+        files = self.world.files
+        files.make_folders(f"{folder}/inside/deeper")
+        files.make_folders(f"{folder}/history")
+        files.write_new(f"{folder}/settings", TEXT)
+        files.write_new(f"{folder}/inside/one", "one")
+        files.write_new(f"{folder}/inside/deeper/two", "two")
+        files.write_new(f"{folder}/history/old", "old")
+        files.write_new(f"{folder}/cache", "cached")
+        self.harness.make_a_link(f"{folder}/a-link", f"{folder}/settings")
+        return folder
+
+    def test_copying_a_folder_copies_every_file_and_folder_below_and_skips_a_link(self):
+        tree, other = self.a_tree(), self.harness.folder()
+        self.world.files.copy_path(tree, f"{other}/copy", [])
+        self.assertEqual(
+            self.harness.everything_below(f"{other}/copy"),
+            ["cache", "history/", "history/old", "inside/", "inside/deeper/",
+             "inside/deeper/two", "inside/one", "settings"],
+        )  # fmt: skip
+        self.assertEqual(self.world.files.read(f"{other}/copy/inside/deeper/two"), b"two")
+        self.world.files.remove(f"{tree}/settings")  # the copy has its own bytes
+        self.assertEqual(self.world.files.read(f"{other}/copy/settings"), TEXT.encode("utf-8"))
+
+    def test_copying_a_folder_leaves_out_the_names_given_a_file_or_a_whole_folder(self):
+        tree, other = self.a_tree(), self.harness.folder()
+        self.world.files.copy_path(tree, f"{other}/copy", ["history", "inside/deeper/two", "cache"])
+        self.assertEqual(
+            self.harness.everything_below(f"{other}/copy"),
+            ["inside/", "inside/deeper/", "inside/one", "settings"],
+        )
+        self.assertTrue(self.world.files.exists(f"{tree}/history/old"))  # the original is whole
+
+    def test_copying_a_file_by_copy_path_is_a_copy_and_a_left_out_name_changes_nothing(self):
+        first, second = self.fresh("first"), self.fresh("second")
+        self.world.files.write_new(first, "text")
+        self.world.files.copy_path(first, second, ["anything"])
+        self.assertEqual(self.world.files.read(second), b"text")
+
+    def test_copying_a_path_onto_a_name_that_is_there_raises_file_exists_and_changes_neither(self):
+        tree, other = self.a_tree(), self.harness.folder()
+        self.world.files.make_folders(f"{other}/copy")
+        self.assertRaisesExactly(
+            FileExistsError, self.world.files.copy_path, tree, f"{other}/copy", []
+        )
+        self.assertEqual(self.harness.everything_below(f"{other}/copy"), [])
+
+    def test_copying_a_path_that_is_not_there_or_into_a_folder_that_is_not_there_raises(self):
+        tree, other = self.a_tree(), self.harness.folder()
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.copy_path, f"{other}/absent", f"{other}/new", []
+        )
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.copy_path, tree, f"{other}/absent/new", []
+        )
+        self.assertEqual(self.harness.everything_below(other), [])
+
+    def test_copying_a_path_that_is_a_link_a_pipe_or_a_device_raises_and_makes_nothing(self):
+        for label, path in self.not_regular_things():
+            with self.subTest(label):
+                new = self.fresh("new")
+                self.assertRaisesExactly(NotARegularFile, self.world.files.copy_path, path, new, [])
+                self.assertFalse(self.world.files.exists(new))
+
+    def test_sharing_a_path_by_a_link_reads_the_original_and_writes_nothing_of_its_own(self):
+        original, folder = self.fresh("original"), self.harness.folder()
+        self.world.files.write_new(original, TEXT)
+        self.world.files.share_by_link(original, f"{folder}/shared")
+        self.assertTrue(self.harness.is_a_link(f"{folder}/shared"))
+        self.assertEqual(self.world.files.read(f"{folder}/shared"), TEXT.encode("utf-8"))
+        self.world.files.remove(f"{folder}/shared")
+        self.assertEqual(self.world.files.read(original), TEXT.encode("utf-8"))
+
+    def test_sharing_a_path_that_is_not_there_or_onto_a_name_that_is_there_raises(self):
+        folder, original = self.harness.folder(), self.fresh("original")
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.share_by_link, f"{folder}/absent", f"{folder}/new"
+        )
+        self.assertEqual(self.harness.everything_below(folder), [])
+        self.world.files.write_new(original, "one")
+        self.world.files.write_new(f"{folder}/there", "two")
+        self.assertRaisesExactly(
+            FileExistsError, self.world.files.share_by_link, original, f"{folder}/there"
+        )
+        self.assertEqual(self.world.files.read(f"{folder}/there"), b"two")
+
+    def test_making_a_read_only_tree_writable_changes_what_is_below_and_never_follows_a_link(self):
+        tree, outside = self.a_tree(), self.fresh("outside")
+        self.world.files.write_new(outside, "x")
+        self.harness.make_read_only(outside)
+        self.harness.make_a_link(f"{tree}/to-outside", outside)
+        for name in ("settings", "inside", "inside/deeper/two"):
+            self.harness.make_read_only(f"{tree}/{name}")
+        self.world.files.make_writable(tree)
+        for name in ("settings", "inside", "inside/deeper/two"):
+            self.assertTrue(self.harness.is_writable(f"{tree}/{name}"), name)
+        self.assertFalse(self.harness.is_writable(outside))
+
+    def test_making_a_link_writable_raises_not_a_regular_file_and_a_missing_name_raises(self):
+        folder, outside = self.harness.folder(), self.fresh("outside")
+        self.world.files.write_new(outside, "x")
+        self.harness.make_read_only(outside)
+        self.harness.make_a_link(f"{folder}/link", outside)
+        self.assertRaisesExactly(NotARegularFile, self.world.files.make_writable, f"{folder}/link")
+        self.assertFalse(self.harness.is_writable(outside))
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.make_writable, f"{folder}/absent"
+        )
+
+    def test_removing_a_tree_removes_all_of_it_read_only_parts_too_and_a_link_not_what_it_leads_to(
+        self,
+    ):
+        tree, elsewhere = self.a_tree(), self.harness.folder()
+        self.world.files.write_new(f"{elsewhere}/kept", "kept")
+        self.harness.make_a_link(f"{tree}/to-folder", elsewhere)
+        for name in ("inside/deeper/two", "inside/deeper", "inside"):
+            self.harness.make_read_only(f"{tree}/{name}")
+        self.world.files.remove_tree(tree)
+        self.assertFalse(self.world.files.exists(tree))
+        self.assertEqual(self.world.files.read(f"{elsewhere}/kept"), b"kept")
+
+    def test_removing_a_tree_that_is_not_there_raises_file_not_found_and_a_file_raises_not_a_directory(
+        self,
+    ):
+        folder, path = self.harness.folder(), self.fresh("file")
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.remove_tree, f"{folder}/absent"
+        )
+        self.world.files.write_new(path, "x")
+        self.assertRaisesExactly(NotADirectoryError, self.world.files.remove_tree, path)
+        self.assertEqual(self.world.files.read(path), b"x")
+
     # -------------------------------------------------------------- processes
 
     def start(self, kind, **extra):
@@ -391,6 +551,32 @@ class ContractCases:
         self.assertTrue(self.ended(process))
         self.assertEqual(processes.read_report(process), "hello\n")
         self.assertEqual(processes.read_report(process), "hello\n")
+
+    def test_a_child_started_with_an_input_file_reads_it_whole_as_its_standard_input(self):
+        text = TEXT * 2000
+        path = self.fresh("instruction")
+        self.world.files.write_new(path, text)
+        process = self.world.processes.start(
+            self.harness.argv("copies_its_input", report=self.fresh("copied")),
+            self.harness.environment(),
+            None,
+            path,
+        )
+        self.addCleanup(self.harness.end, process)
+        self.assertTrue(self.ended(process))
+        self.assertEqual(self.harness.what_the_child_read(), text.encode("utf-8"))
+
+    def test_starting_with_an_input_file_that_is_not_there_raises_file_not_found_and_starts_nothing(
+        self,
+    ):
+        self.assertRaisesExactly(
+            FileNotFoundError,
+            self.world.processes.start,
+            self.harness.argv("exits_at_once"),
+            self.harness.environment(),
+            None,
+            self.fresh("absent"),
+        )
 
     def test_a_child_started_without_a_report_descriptor_has_an_empty_report(self):
         process = self.start("exits_at_once")

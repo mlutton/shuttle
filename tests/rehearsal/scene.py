@@ -5,6 +5,7 @@ program registered. `run_in(world)` runs the real `run` on it and returns what t
 have printed. Nothing real is touched and no time passes.
 """
 
+import hashlib
 import io
 import json
 
@@ -31,6 +32,9 @@ def document(command="tool", limit=30, **extra):
         "executor": {"name": "command", "settings": {"command": command, "arguments": []}},
     }
     doc.update(extra)
+    if doc["kind"] != "plain" and "instruction" not in doc:  # a kind with a statement needs one
+        doc["instruction"] = "Do the task."
+        doc["instruction_hash"] = hashlib.sha256(doc["instruction"].encode()).hexdigest()
     return doc
 
 

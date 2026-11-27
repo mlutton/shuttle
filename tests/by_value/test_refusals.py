@@ -77,6 +77,18 @@ class CheckInstruction(RefusalCase):
     def test_neither_given_is_accepted(self):
         self.assertIsNone(refusals.check_instruction(None, None))
 
+    def test_a_kind_that_expects_a_statement_needs_both_and_a_plain_kind_needs_neither(self):
+        self.assertRefusal(
+            refusals.check_instruction(None, None, True), "missing_setting", "input_check"
+        )
+        self.assertIsNone(refusals.check_instruction("do it", digest("do it"), True))
+        self.assertIsNone(refusals.check_instruction(None, None, False))
+        self.assertRefusal(
+            refusals.check_instruction("do it", None, True),
+            "instruction_hash_mismatch",
+            "input_check",
+        )
+
     def test_a_hash_that_differs_is_refused_whatever_else_is_right(self):
         cases = (
             ("another text's hash", "do it", digest("do it ")),

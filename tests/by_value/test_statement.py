@@ -181,10 +181,23 @@ class TheNotice(unittest.TestCase):
         for field in SCHEMA["fields"]:
             self.assertIn(f"- {field['name']}:", got)
 
-    def test_a_kind_that_expects_none_gets_its_instruction_unchanged_and_no_notice(self):
-        self.assertEqual(self.given("do it", False), "do it")
-        self.assertIsNone(self.given(None, False))
-        self.assertEqual(self.given("do it", False, location=None), "do it")
+    def test_a_kind_that_expects_none_gets_the_notice_without_its_statement_part(self):
+        for location in ("/out/s.json", None):
+            with self.subTest(location=location):
+                got = self.given("do it", False, location=location)
+                self.assertTrue(got.startswith("do it\n\n"))
+                self.assertIn(f"Shuttle notice, version {fixed.NOTICE_VERSION}", got)
+                self.assertIn("cannot commit in the place", got)
+                self.assertNotIn("statement", got)
+                self.assertNotIn("/out/s.json", got)
+        got = self.given("x", False, references=self.REFERENCES)
+        self.assertIn("- runbook: /refs/run book$1.md", got)
+        self.assertIn("A reference wins over a file of the same name in the place.", got)
+
+    def test_a_kind_that_expects_none_and_has_no_instruction_gets_the_notice_alone(self):
+        got = self.given(None, False)
+        self.assertTrue(got.startswith(f"Shuttle notice, version {fixed.NOTICE_VERSION}"))
+        self.assertIn("cannot commit in the place", got)
 
     def test_a_kind_that_expects_a_statement_and_has_no_instruction_gets_the_notice_alone(self):
         got = self.given(None, True)

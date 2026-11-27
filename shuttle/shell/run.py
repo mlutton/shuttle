@@ -41,8 +41,10 @@ from shuttle.shell import (
     move_kept_files,
     opening_fingerprint,
     records,
+    set_up_run_area,
     stand_ins,
     stop_and_confirm_empty,
+    tear_down,
     wait_for_the_end,
 )
 
@@ -184,11 +186,6 @@ def step_run_gates(state: RunState) -> None:
         state["problems"]["gates"] = refusal["problem"]
 
 
-def step_set_up_run_area(state: RunState) -> None:  # stand-in
-    state["stand_ins"]["setup"] = stand_ins.set_up_run_area(command.declare()["needs_setup"])
-    state["facts"]["setup"] = decisions.result_status(state["stand_ins"]["setup"])
-
-
 def step_observe(state: RunState) -> None:
     state["executor_driver_observations"] = command.observe()
 
@@ -198,10 +195,6 @@ def step_deliver(state: RunState) -> None:  # stand-in
         None, state["stand_ins"].get("closing_freeze")
     )
     state["facts"]["delivery"] = decisions.result_status(state["stand_ins"]["delivery"])
-
-
-def step_tear_down(state: RunState) -> None:  # stand-in
-    state["stand_ins"]["teardown"] = stand_ins.tear_down(None)
 
 
 def _full_receipt(state: RunState, decision: Decision) -> Receipt:
@@ -294,7 +287,7 @@ STEPS = (
     ("claim_request_id", step_claim_request_id),
     ("run_input_checks_and_executor_driver_check", step_run_input_checks_and_executor_driver_check),
     ("run_gates", step_run_gates),
-    ("set_up_run_area", step_set_up_run_area),
+    ("set_up_run_area", set_up_run_area.step),
     ("take_opening_fingerprint", opening_fingerprint.step),
     ("launch_executor", launch_executor.step),
     ("wait_for_the_end", wait_for_the_end.step),
@@ -303,7 +296,7 @@ STEPS = (
     ("take_closing_freeze", closing_freeze.step),
     ("deliver", step_deliver),
     ("move_kept_files", move_kept_files.step),
-    ("tear_down", step_tear_down),
+    ("tear_down", tear_down.step),
     ("write_outcome_record", step_write_outcome_record),
 )
 
@@ -416,6 +409,8 @@ def _clean_up(state: RunState) -> None:
                 f"the last check on the boundary failed ({type(error).__name__}); "
                 "it cannot be said to have emptied",
             )
+    if "run_area" in state:  # the tear-down did not run, or did not finish
+        state["stand_ins"]["teardown"] = tear_down.remove(state)
     if "conclusion" not in state:  # the last step did not run, or did not finish
         state["conclusion"] = conclude_run(state)
 

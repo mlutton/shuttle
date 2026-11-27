@@ -23,7 +23,13 @@ ORDER = [
     "write_outcome_record",
 ]
 
-LAUNCHED = {"header_source": {}, "launch": "ok", "wait": "exited", "stop": "confirmed"}
+LAUNCHED = {
+    "header_source": {},
+    "setup": "ok",
+    "launch": "ok",
+    "wait": "exited",
+    "stop": "confirmed",
+}
 
 
 def runs(facts):
@@ -54,13 +60,21 @@ class StepsRun(unittest.TestCase):
             {"header_source": {}, "input_check": "unknown_field"},
             {"header_source": {}, "id_claim": "ok", "executor_driver_check": "tool_not_installed"},
             {"header_source": {}, "id_claim": "ok", "gates": "failed"},
-            {"header_source": {}, "id_claim": "ok", "setup": "failed"},
-            {"header_source": {}, "id_claim": "ok", "opening_freeze": "failed"},
-            {"header_source": {}, "id_claim": "ok", "launch": "failed"},
             {"header_source": {}, "id_claim": "ok", "launch": "stopped_before"},
         ):
             with self.subTest(facts):
                 self.assertEqual(runs(facts), ["claim_request_id", "write_outcome_record"])
+
+    def test_the_run_area_is_removed_after_any_refusal_that_came_after_its_set_up(self):
+        for fact in ({"setup": "failed"}, {"setup": "ok", "opening_freeze": "failed"}):
+            with self.subTest(fact):
+                facts = {"header_source": {}, "id_claim": "ok", **fact}
+                self.assertEqual(
+                    runs(facts), ["claim_request_id", "tear_down", "write_outcome_record"]
+                )
+        self.assertNotIn(
+            "tear_down", runs({"header_source": {}, "id_claim": "ok", "gates": "failed"})
+        )
 
     def test_a_failed_stop_confirmation_takes_no_closing_freeze_and_delivers_nothing(self):
         got = runs(dict(LAUNCHED, stop="not_confirmed"))

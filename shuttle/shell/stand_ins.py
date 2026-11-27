@@ -14,17 +14,9 @@ def _stand_in(name: str) -> StepResult:
     return {fixed.STAND_IN_KEY: name}
 
 
-def set_up_run_area(declared_setup: object) -> StepResult:
-    return _stand_in("setup")
-
-
 def stop_and_confirm_empty(boundary: object) -> StepResult:
     return _stand_in("stop_confirmation")
 
 
 def deliver(destination: object, closing_freeze: object) -> StepResult:
     return _stand_in("delivery")
-
-
-def tear_down(run_area: object) -> StepResult:
-    return _stand_in("teardown")

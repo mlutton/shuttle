@@ -4,7 +4,10 @@ import contextlib
 import errno
 import hashlib
 import os
+import shutil
 import stat
+import tempfile
+from collections.abc import Sequence
 from typing import BinaryIO
 
 from shuttle.core.shapes import FileOperations, NotARegularFile
@@ -105,6 +108,76 @@ def usable_folder(path: str) -> bool:
     return os.path.isdir(path) and os.access(path, os.W_OK | os.X_OK)
 
 
+def make_temporary_folder(prefix: str) -> str:
+    return os.path.realpath(tempfile.mkdtemp(prefix=prefix, dir=os.environ.get("TMPDIR") or None))
+
+
+def make_folders(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+def _copy_folder(existing: str, new: str, left_out: frozenset[str], below: str) -> None:
+    os.mkdir(new)
+    with os.scandir(existing) as entries:
+        found = sorted(entries, key=lambda entry: entry.name)
+    for entry in found:
+        name = below + entry.name
+        if name in left_out or entry.is_symlink():
+            continue
+        target = os.path.join(new, entry.name)
+        if entry.is_dir(follow_symlinks=False):
+            _copy_folder(entry.path, target, left_out, name + "/")
+        elif entry.is_file(follow_symlinks=False):
+            copy(entry.path, target)
+
+
+def copy_path(existing: str, new: str, left_out: Sequence[str]) -> None:
+    if not os.path.isdir(existing) or os.path.islink(existing):
+        copy(existing, new)
+        return
+    if os.path.lexists(new):
+        raise FileExistsError(errno.EEXIST, "name is there", new)
+    try:
+        _copy_folder(existing, new, frozenset(left_out), "")
+    except BaseException:
+        shutil.rmtree(new, ignore_errors=True)
+        raise
+
+
+def share_by_link(existing: str, new: str) -> None:
+    os.stat(existing)  # looks, never opens: FileNotFoundError when it is not there
+    os.symlink(existing, new)
+
+
+def _add_owner_write(path: str, mode: int) -> None:
+    os.chmod(path, mode | stat.S_IWUSR | (stat.S_IXUSR if stat.S_ISDIR(mode) else 0))
+
+
+def make_writable(path: str) -> None:
+    mode = os.lstat(path).st_mode
+    if stat.S_ISLNK(mode):
+        raise NotARegularFile(errno.EINVAL, "a link is not followed", path)
+    _add_owner_write(path, stat.S_IMODE(mode))
+    for folder, names, files in os.walk(path):
+        for name in [*names, *files]:
+            below = os.path.join(folder, name)
+            seen = os.lstat(below).st_mode
+            if not stat.S_ISLNK(seen):
+                _add_owner_write(below, stat.S_IMODE(seen))
+
+
+def remove_tree(path: str) -> None:
+    if os.path.islink(path) or not os.path.isdir(path):
+        os.lstat(path)  # FileNotFoundError when nothing is there
+        raise NotADirectoryError(errno.ENOTDIR, "not a folder", path)
+    for folder, names, _ in os.walk(path):
+        for name in [".", *names]:
+            below = os.path.join(folder, name)
+            if not os.path.islink(below):
+                os.chmod(below, stat.S_IMODE(os.lstat(below).st_mode) | stat.S_IRWXU)
+    shutil.rmtree(path)
+
+
 FILES = FileOperations(
     read=read,
     exists=exists,
@@ -114,4 +187,10 @@ FILES = FileOperations(
     hash=hash_of,
     remove=remove,
     usable_folder=usable_folder,
+    make_temporary_folder=make_temporary_folder,
+    make_folders=make_folders,
+    copy_path=copy_path,
+    share_by_link=share_by_link,
+    make_writable=make_writable,
+    remove_tree=remove_tree,
 )

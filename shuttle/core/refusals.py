@@ -60,9 +60,18 @@ def instruction_hash(instruction: str) -> str:
     return hashlib.sha256(instruction.encode("utf-8")).hexdigest()
 
 
-def check_instruction(instruction: str | None, claimed_hash: str | None) -> Found | None:
-    """The instruction against the hash the caller supplied. Both absent is accepted."""
+def check_instruction(
+    instruction: str | None, claimed_hash: str | None, expects_statement: bool = False
+) -> Found | None:
+    """The instruction against the hash the caller supplied. A kind that expects a statement
+    needs both; a plain kind may leave both out."""
     if instruction is None and claimed_hash is None:
+        if expects_statement:
+            return _found(
+                "missing_setting",
+                _INPUT,
+                "this kind expects a statement: the instruction and its hash are needed",
+            )
         return None
     if instruction is None or claimed_hash is None:
         return _found(

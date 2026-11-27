@@ -76,7 +76,7 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
             f.write(data)
         script = self.script("leaves.py", LEAVES_WHAT_IT_IS_GIVEN)
         doc = self.document(script, [location, given], request_id=request_id)
-        doc["kind"], doc["statement_location"] = "judge", location
+        self.expecting_a_statement(doc, location)
         code, lines, err = self.run_to_the_end(doc)
         self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
         return flat(self.outcome(request_id)["receipt"])["executor"]
@@ -104,8 +104,7 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
     def test_a_script_that_leaves_no_statement_shows_none(self):
         script = self.script("leaves-nothing.py", LEAVES_NOTHING)
         doc = self.document(script)
-        doc["kind"] = "judge"
-        doc["statement_location"] = os.path.join(self.root, "never-written")
+        self.expecting_a_statement(doc, os.path.join(self.root, "never-written"))
         self.run_to_the_end(doc)
         got = flat(self.outcome()["receipt"])["executor"]
         self.assertEqual(
@@ -149,7 +148,7 @@ class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
                     f.write(b"-----BEGIN PRIVATE KEY-----\n")
                 script = self.script(f"leaves-{index}.py", LEAVES_WHAT_IS_NOT_A_FILE)
                 doc = self.document(script, [location, given, row["leaves"]], request_id=request_id)
-                doc["kind"], doc["statement_location"] = "judge", location
+                self.expecting_a_statement(doc, location)
                 # `communicate` has a limit, so a run that waits on the thing fails, not hangs.
                 code, lines, err = self.run_to_the_end(doc)
                 self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
