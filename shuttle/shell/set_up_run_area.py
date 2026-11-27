@@ -9,6 +9,7 @@ fails the step with one line saying which.
 """
 
 from collections.abc import Sequence
+from typing import assert_never
 
 from shuttle.core import run_area
 from shuttle.core.drivers import command
@@ -28,8 +29,8 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
             files.write_new(step["target"], step["text"])
         case "writable":
             files.make_writable(step["target"])
-        case other:
-            raise ValueError(f"unknown setup step {other!r}")
+        case never:
+            assert_never(never)  # the type checker refuses a kind of step with no case here
 
 
 def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:

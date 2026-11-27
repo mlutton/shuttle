@@ -7,7 +7,7 @@ until the validation code has looked at it) and what `records.read_record` reads
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, NotRequired, Protocol, TextIO, TypedDict
+from typing import Any, Literal, NamedTuple, NotRequired, Protocol, TextIO, TypedDict
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 
@@ -93,13 +93,18 @@ class LaunchSpec(TypedDict):
     argv: list[str]
 
 
-class SetupRequest(TypedDict, total=False):
-    """One thing a driver asks of the run area (shuttle.core.run_area). `action` is one of
-    "copy" and "share" (`source`, the name made: `name`), "leave_out" (`name`: left out of any
-    copy that would hold it), "write" (`name`, `text`), "writable" (`name`) and "variable"
-    (`variable`, and either `value` or `in_run_area`, the name whose path is the value)."""
+SetupAction = Literal["copy", "share", "leave_out", "write", "writable", "variable"]
+SetupStepKind = Literal["folder", "copy", "share", "write", "writable"]
 
-    action: str
+
+class SetupRequest(TypedDict, total=False):
+    """One thing a driver asks of the run area (shuttle.core.run_area). `action` says which; the
+    other fields are those that action reads: `name` (the path made, or acted on, inside the
+    area), `source` (the absolute path a copy or share comes from), `text` (a written file's),
+    and for a variable, `variable` with either `value` or `in_run_area` (the name whose path is
+    the value)."""
+
+    action: SetupAction
     name: str
     source: str
     text: str
@@ -111,7 +116,7 @@ class SetupRequest(TypedDict, total=False):
 class SetupStep(TypedDict, total=False):
     """What the shell does for one request, with every path whole."""
 
-    do: str  # "folder", "copy", "share", "write" or "writable"
+    do: SetupStepKind
     source: str
     target: str
     leave_out: list[str]  # for a copy: names relative to the source
