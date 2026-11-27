@@ -915,6 +915,21 @@ class ContractCases:
         self.assertTrue(all(re.fullmatch(r"[0-9a-f]{32}", i) for i in ids))
         self.assertEqual(len(set(ids)), 50)
 
+    def test_the_account_folders_are_absolute_and_the_same_each_time(self):
+        home, runtime = self.world.identity.home_folder(), self.world.identity.runtime_folder()
+        if home is not None:  # an account may have none
+            self.assertTrue(home.startswith("/"))
+        self.assertTrue(runtime.startswith("/"))
+        self.assertEqual(self.world.identity.home_folder(), home)
+        self.assertEqual(self.world.identity.runtime_folder(), runtime)
+
+    def test_the_account_folders_are_the_systems_and_not_what_the_environment_names(self):
+        home, runtime = self.world.identity.home_folder(), self.world.identity.runtime_folder()
+        self.harness.set_variable("HOME", "/somewhere/else")
+        self.harness.set_variable("XDG_RUNTIME_DIR", "/elsewhere/too")
+        self.assertEqual(self.world.identity.home_folder(), home)
+        self.assertEqual(self.world.identity.runtime_folder(), runtime)
+
     def test_the_process_number_is_a_positive_whole_number_and_the_same_each_time(self):
         number = self.world.identity.process_number()
         self.assertIsInstance(number, int)

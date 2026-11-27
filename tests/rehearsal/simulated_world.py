@@ -71,6 +71,8 @@ class SimulatedWorld:
         self.t = 0.0  # seconds on the simulated clock, which does not move
         self.host = host
         self.pid = 4242  # what the simulated process is numbered
+        self.account_home = "/home/sim-user"  # the account's home folder; None for no home
+        self.runtime = "/run/user/1000"  # the user's runtime folder, whatever the variables say
         self.variables = dict(environment or {})
         self.folders = set()
         self.dangling = set()  # names that lead nowhere
@@ -131,6 +133,8 @@ class SimulatedWorld:
                 host_name=self._host_name,
                 new_id=self._new_id,
                 process_number=self._process_number,
+                home_folder=self._home_folder,
+                runtime_folder=self._runtime_folder,
             ),
             git=GitOperations(
                 look_at_place=self._look_at_place,
@@ -721,6 +725,14 @@ class SimulatedWorld:
     def _process_number(self):
         self._enter("identity.process_number")
         return self.pid
+
+    def _home_folder(self):
+        self._enter("identity.home_folder")
+        return self.account_home
+
+    def _runtime_folder(self):
+        self._enter("identity.runtime_folder")
+        return self.runtime
 
     def _new_id(self):
         self._enter("identity.new_id")

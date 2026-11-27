@@ -52,6 +52,8 @@ CALLS = {
     "identity.host_name": (),
     "identity.new_id": (),
     "identity.process_number": (),
+    "identity.home_folder": (),
+    "identity.runtime_folder": (),
     "git.look_at_place": ("/place", {}),
     "git.git_folders": ("/place", {}),
     "git.freeze": (

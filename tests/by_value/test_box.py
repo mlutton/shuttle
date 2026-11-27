@@ -22,6 +22,7 @@ REACH: boundary.Reach = {
     "references": ["/refs/runbook"],
     "visible": ["/opt/tool"],
     "git_folders": [],
+    "place_writable": True,
     "resolver": None,
     "records": "/records",
 }

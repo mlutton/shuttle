@@ -256,6 +256,7 @@ class TheExecutorsWorkingDirectory(unittest.TestCase):
             "references": [],
             "visible": [],
             "git_folders": [],
+            "place_writable": True,
             "resolver": None,
             "records": "/rec",
         }

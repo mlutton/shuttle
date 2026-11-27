@@ -123,6 +123,7 @@ class Reach(TypedDict):
     references: Sequence[str]
     visible: Sequence[str]
     git_folders: Sequence[str]
+    place_writable: bool
     resolver: str | None
     records: str
 
@@ -133,6 +134,13 @@ class Reach(TypedDict):
 # argument list serves each layout. (A link bound by name would lead nowhere inside the box.)
 _SYSTEM_FOLDERS = ("/usr", "/etc")
 _SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib64")
+
+
+def place_is_writable(changes_to_place: bool | None) -> bool:
+    """Whether the box leaves the place writable: it does unless the document said, for any
+    driver, that the executor may not change it. A document that says nothing leaves it writable
+    (the drivers that need the setting refuse a document without it)."""
+    return changes_to_place is not False
 
 
 def _depth(path: str) -> int:
