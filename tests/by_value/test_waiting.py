@@ -248,8 +248,8 @@ class AGatesAnswerFromHowItsScopeEnded(unittest.TestCase):
             self.assertIn(variable, script.split("unset")[1].split(";")[0])
         self.assertEqual(argv[argv.index("-c") + 2 :], ["sh", "7", "check", "--fast"])
 
-    def test_a_gate_scope_is_named_from_the_request_and_its_place(self):
-        self.assertEqual(boundary.gate_scope_name("r-1", 2), "shuttle-gate-r-1-2")
+    def test_a_gate_scope_is_named_from_the_request_the_run_and_its_place(self):
+        self.assertEqual(boundary.gate_scope_name("r-1", "abc", 2), "shuttle-gate-r-1-abc-2")
 
 
 class TheWaitAndStopStepsGiveTheseFacts(unittest.TestCase):

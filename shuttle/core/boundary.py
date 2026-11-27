@@ -60,9 +60,22 @@ def limit_microseconds(seconds: float) -> int:
     return max(1, round(seconds * 1_000_000))
 
 
-def scope_name(request_id: str) -> str:
-    """The scope's name, from the request id (used once, and made of characters a unit name holds)."""
-    return SCOPE_PREFIX + request_id
+def scope_name(request_id: str, run_part: str) -> str:
+    """The executor's scope name: the request id, so a person listing units can match it to its
+    request, then the run's own part, so no other run asks systemd for the same name. The part is
+    the id of the run's request record (read back with `run_part_of`); the two together must fit
+    the 255 characters systemd allows a unit name."""
+    return f"{SCOPE_PREFIX}{request_id}-{run_part}"
+
+
+def run_part_of(request_record: Mapping[str, object]) -> str:
+    """The run's own part of its scope names, from its request record: the id in the record's
+    header. A later command that finds a run's scopes reads it here and builds the names with
+    `scope_name`, `gate_scope_name` and `freeze_scope_name`."""
+    header = request_record["header"]
+    if not isinstance(header, Mapping) or not isinstance(header.get("record_id"), str):
+        raise ValueError("the request record has no record id")
+    return str(header["record_id"])
 
 
 def unit_of(name: str) -> str:
@@ -221,14 +234,14 @@ GATE_STARTED = "started"
 GATE_SCRIPT = f'echo {GATE_STARTED} >&"$1"; shift; unset {" ".join(BUS_VARIABLES)}; exec "$@"'
 
 
-def gate_scope_name(request_id: str, index: int) -> str:
-    """A gate's scope name: the request id and the gate's place in the list."""
-    return f"{GATE_SCOPE_PREFIX}{request_id}-{index}"
+def gate_scope_name(request_id: str, run_part: str, index: int) -> str:
+    """A gate's scope name: the request id, the run's own part and the gate's place in the list."""
+    return f"{GATE_SCOPE_PREFIX}{request_id}-{run_part}-{index}"
 
 
-def freeze_scope_name(request_id: str) -> str:
-    """The scope the closing freeze runs in: the request id makes it the run's own."""
-    return FREEZE_SCOPE_PREFIX + request_id
+def freeze_scope_name(request_id: str, run_part: str) -> str:
+    """The scope the closing freeze runs in: the request id and the run's own part."""
+    return f"{FREEZE_SCOPE_PREFIX}{request_id}-{run_part}"
 
 
 def scoped_argv(name: str, limit_seconds: float, argv: Sequence[str]) -> list[str]:

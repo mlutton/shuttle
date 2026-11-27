@@ -13,7 +13,7 @@ import sys
 import tempfile
 import unittest
 
-from shuttle.core import fixed
+from shuttle.core import boundary, fixed
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 flat = importlib.import_module("rehearsal.receipts").flat
@@ -364,8 +364,15 @@ class CommandSeam(unittest.TestCase):
         return doc, ready
 
     def scope_is_gone(self, request_id="req-1"):
+        with open(os.path.join(self.records, f"{request_id}.request.json")) as f:
+            part = boundary.run_part_of(json.load(f))
         done = subprocess.run(
-            ["systemctl", "--user", "is-active", f"shuttle-run-{request_id}.scope"],
+            [
+                "systemctl",
+                "--user",
+                "is-active",
+                boundary.unit_of(boundary.scope_name(request_id, part)),
+            ],
             capture_output=True,
             text=True,
         )

@@ -13,6 +13,8 @@ import sys
 import tempfile
 import unittest
 
+from shuttle.core import boundary
+
 import rehearsal.real_place as real_place
 import rehearsal.the_boundary as the_boundary
 
@@ -38,6 +40,7 @@ class RealRun(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = os.path.realpath(tmp.name)
         self.records = os.path.join(self.root, "records")
+        self.records_folders = [self.records]  # every records folder a run of this test uses
         self.place = os.path.join(self.root, "place")
         os.mkdir(self.records)
         real_place.make_checkout(self.place)
@@ -89,16 +92,17 @@ class RealRun(unittest.TestCase):
         assert why, "a raised limit needs its reason"
         self.limits[which] = size
 
-    def start(self, doc, path_first=None, variables=None):
+    def start(self, doc, path_first=None, variables=None, form="run", root=None):
         """The real command, started; the caller waits for it with `communicate`. With
         `path_first`, that folder comes first on the command's PATH; `variables` are added to its
-        environment. The command and what it starts run under `self.limits` (DEFAULT_LIMITS unless the
-        test raised one)."""
-        path = os.path.join(self.root, f"{doc['request_id']}.input.json")
+        environment; `form` is the command's name (`run` unless given) and `root` the folder the
+        input document is written in (`self.root` unless given). The command and what it starts
+        run under `self.limits` (DEFAULT_LIMITS unless the test raised one)."""
+        path = os.path.join(root or self.root, f"{doc['request_id']}.input.json")
         with open(path, "w") as f:
             json.dump(doc, f)
         proc = subprocess.Popen(
-            [sys.executable, "-m", "shuttle", "run", path],
+            [sys.executable, "-m", "shuttle", form, path],
             cwd=REPO,
             env={**self.environment(path_first), **(variables or {})},
             stdout=subprocess.PIPE,
@@ -121,12 +125,9 @@ class RealRun(unittest.TestCase):
         if proc.poll() is None:
             proc.kill()
             proc.communicate()
-        for name in (
-            f"shuttle-run-{request_id}",
-            f"shuttle-gate-{request_id}-0",
-            f"shuttle-freeze-{request_id}",
-        ):
-            subprocess.run(["systemctl", "--user", "stop", f"{name}.scope"], capture_output=True)
+        for unit in self.units_left():  # only the units this test's own runs made
+            subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True)
+            subprocess.run(["systemctl", "--user", "reset-failed", unit], capture_output=True)
 
     def run_to_the_end(self, doc, path_first=None, variables=None):
         """Run the command to its end: (exit code, standard output lines, standard error)."""
@@ -134,26 +135,56 @@ class RealRun(unittest.TestCase):
         stdout, stderr = proc.communicate(timeout=120)
         return proc.returncode, stdout.splitlines(), stderr
 
-    def outcome(self, request_id="r-1"):
-        with open(os.path.join(self.records, f"{request_id}.outcome.json")) as f:
+    def outcome(self, request_id="r-1", records=None):
+        with open(os.path.join(records or self.records, f"{request_id}.outcome.json")) as f:
             return json.load(f)
 
+    def run_part(self, request_id="r-1", records=None):
+        """The run's own part of its scope names, read from its request record."""
+        path = os.path.join(records or self.records, f"{request_id}.request.json")
+        with open(path) as f:
+            return boundary.run_part_of(json.load(f))
+
+    def run_parts(self):
+        """The part of every run whose request record is in a records folder of this test."""
+        parts = []
+        for records in self.records_folders:
+            try:
+                names = sorted(os.listdir(records))
+            except FileNotFoundError:
+                continue  # the test's folder is already gone, and its records with it
+            for name in names:
+                if name.endswith(".request.json"):
+                    parts.append(self.run_part(name[: -len(".request.json")], records))
+        return parts
+
     def units_left(self):
-        """The Shuttle units the user's systemd still has loaded, failed ones too."""
+        """The loaded units (failed ones too) of the runs this test's records hold. Units of
+        other tests, other suites and other users of the machine are not looked at."""
         done = subprocess.run(
-            ["systemctl", "--user", "list-units", "--all", "--no-legend", "shuttle-*"],
+            ["systemctl", "--user", "list-units", "--all", "--plain", "--no-legend", "shuttle-*"],
             capture_output=True,
             text=True,
         )
-        return done.stdout.split()
+        parts = self.run_parts()
+        names = [line.split()[0] for line in done.stdout.splitlines() if line.split()]
+        return [name for name in names if any(part in name for part in parts)]
 
-    def scope_state(self, request_id="r-1"):
+    def scope_state(self, request_id="r-1", records=None):
+        """The state of the executor's scope of the run of `request_id` in this test's records."""
+        name = boundary.scope_name(request_id, self.run_part(request_id, records))
         done = subprocess.run(
-            ["systemctl", "--user", "is-active", f"shuttle-run-{request_id}.scope"],
+            ["systemctl", "--user", "is-active", boundary.unit_of(name)],
             capture_output=True,
             text=True,
         )
         return done.stdout.strip()
+
+    def marker(self, label):
+        """A string for a child process to carry in its command line so the test can count it:
+        the label and the name of this test's own temporary folder, so another suite's test of
+        the same kind (counting machine-wide in `processes_with`) never sees it."""
+        return f"{label}-{os.path.basename(self.root)}"
 
     def processes_with(self, marker):
         """How many processes on this machine carry `marker` in their command line."""

@@ -300,6 +300,7 @@ class RunState(TypedDict, total=False):
     started_at: str
     ended_at: str
     clock_start: float
+    run_part: str
     boundary_name: str
     boundary_process: Any
     run_area: str  # the run's own folder, once made

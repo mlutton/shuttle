@@ -120,9 +120,10 @@ def _note_on_standard_error(state: RunState) -> Callable[[str], None]:
 
 def step_claim_request_id(state: RunState) -> None:
     facts, source, world = state["facts"], header_source_of(state), state["world"]
-    header = decisions.build_header(
-        "request", source, world.identity.new_id(), world.clock.timestamp()
-    )
+    # The request record's id is the run's own part of every scope name it makes: the record
+    # holds it, so a later command that reads the record can name the run's scopes.
+    state["run_part"] = world.identity.new_id()
+    header = decisions.build_header("request", source, state["run_part"], world.clock.timestamp())
     try:
         records.claim_request_record(
             state["world"],
@@ -178,7 +179,9 @@ def driver_check(world: Operations, raw: Mapping[str, Any]) -> tuple[str | None,
 
 def step_run_gates(state: RunState) -> None:
     request_id = header_source_of(state)["request_id"]
-    refusal, result = gates.run_gates(state["world"], request_id, state["raw"].get("gates", []))
+    refusal, result = gates.run_gates(
+        state["world"], request_id, state["run_part"], state["raw"].get("gates", [])
+    )
     state["stand_ins"]["gates"] = result
     state["facts"]["gates"] = "ok"
     if refusal:

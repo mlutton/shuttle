@@ -241,7 +241,9 @@ class TheClosingFreeze(unittest.TestCase):
         world = a_world(scenes.document(limit=7))
         scenes.run_in(world)
         (command, _), _ = world.calls("git.freeze")[0]
-        self.assertIn(f"--unit={boundary.freeze_scope_name('inj-1')}", command)
+        self.assertIn(
+            f"--unit={boundary.freeze_scope_name('inj-1', scenes.run_part(world))}", command
+        )
         self.assertIn("RuntimeMaxSec=7000000us", command)
 
     def test_the_freeze_has_the_limit_the_document_gives_it_and_the_runs_when_it_gives_none(self):
@@ -260,7 +262,7 @@ class TheClosingFreeze(unittest.TestCase):
     def test_the_freeze_scope_is_stopped_by_name_and_seen_empty_after_it(self):
         world = a_world()
         scenes.run_in(world)
-        unit = boundary.unit_of(boundary.freeze_scope_name("inj-1"))
+        unit = boundary.unit_of(boundary.freeze_scope_name("inj-1", scenes.run_part(world)))
         order = [
             (op, args[0]) for op, args, _ in world.log if op in ("git.freeze", "boundary.stop")
         ]
@@ -315,7 +317,10 @@ class TheClosingFreeze(unittest.TestCase):
         self.assertEqual(ending_of(world), (EF, "closing_freeze_failed", "closing_freeze"))
         text = flat(scenes.outcome(world)["receipt"])["ending"]["reason_text"]
         self.assertIn("limit", text)
-        self.assertNotIn(boundary.unit_of(boundary.freeze_scope_name("inj-1")), world.units)
+        self.assertNotIn(
+            boundary.unit_of(boundary.freeze_scope_name("inj-1", scenes.run_part(world))),
+            world.units,
+        )
 
     def test_a_freeze_whose_command_cannot_be_started_is_a_failed_freeze(self):
         world = a_world()

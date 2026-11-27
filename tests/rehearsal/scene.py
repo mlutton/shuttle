@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 
+from shuttle.core import boundary
 from shuttle.shell import run
 
 from rehearsal.simulated_world import SimulatedWorld
@@ -58,6 +59,11 @@ def run_in(world, steps=None):
     else:
         code = run.run_steps(steps, DOCUMENT, out, err, world.operations)
     return code, out.getvalue().splitlines(), err.getvalue()
+
+
+def run_part(world, request_id=REQUEST_ID):
+    """The run's own part of its scope names, read back from its request record."""
+    return boundary.run_part_of(json.loads(world.text_of(f"{RECORDS}/{request_id}.request.json")))
 
 
 def outcome(world, request_id=REQUEST_ID):

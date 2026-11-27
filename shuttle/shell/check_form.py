@@ -72,7 +72,7 @@ def _every_check(state: RunState) -> list[Found | None]:
     if reason:
         found.append({"reason": reason, "step": "executor_driver_check", "problem": text or ""})
     gate_refusal, _ = gates.run_gates(
-        world, run.header_source_of(state)["request_id"], raw.get("gates", [])
+        world, run.header_source_of(state)["request_id"], state["run_part"], raw.get("gates", [])
     )
     return [*found, gate_refusal]
 
@@ -134,6 +134,7 @@ def check(document_path: str, out: TextIO, err: TextIO, world: Operations) -> in
     }
     run.read_and_validate_document(state)
     run.print_request_id(state)
+    state["run_part"] = world.identity.new_id()  # no record holds it: the check's own scopes only
     try:
         conclusion = _conclude(state)
     except Exception as error:  # fail closed: say what was not done

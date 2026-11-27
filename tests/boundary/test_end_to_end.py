@@ -61,7 +61,7 @@ INSTRUCTION = "Do the work.\nSecond line with 'quotes', $HOME and `ticks`.\n"
 class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
     def test_a_script_that_hangs_ends_as_time_limit_and_nothing_it_started_is_left(self):
         up = self.pipe("up")
-        marker = "shuttle-e2e-child-marker"
+        marker = self.marker("shuttle-e2e-child-marker")
         script = self.script("hangs.py", HANGS_WITH_A_CHILD)
         asked = os.path.join(self.root, "asked")
         runbook = self.script("runbook.txt", REFERENCE_TEXT)

@@ -55,7 +55,7 @@ def step(state: RunState) -> None:
     source = state["facts"]["header_source"]
     if source is None:
         raise RuntimeError("no header source: the document was not read")
-    name = boundary.scope_name(source["request_id"])
+    name = boundary.scope_name(source["request_id"], state["run_part"])
     # The records (and the files kept beside them) and every reference are read-only to the executor.
     protected = [
         world.boundary.resolve(path)
