@@ -500,7 +500,11 @@ class ContractCases:
     def freeze(self, where, opening, request_id="contract-1"):
         harness = self.harness
         command = place.freeze_argv(
-            boundary.freeze_scope_name(request_id, "a" * 32), 60, where, opening, request_id
+            boundary.freeze_scope_name(request_id, self.world.identity.new_id()),
+            60,
+            where,
+            opening,
+            request_id,
         )
         return self.world.git.freeze(command, harness.freeze_environment())
 
