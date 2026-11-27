@@ -161,11 +161,24 @@ class TheCommandKilledHard(real_run.RealRun):
             return [int(n) for n in f.read().split()]
 
     def populated(self, cgroup):
+        """Whether the scope's folder still says it holds a process. A process that has ended
+        still counts until whoever started it has collected it, so this blocks on the folder's
+        own event file (it signals each change) until nothing is left, never on a sleep."""
         try:
-            with open(os.path.join(cgroup, "cgroup.events")) as f:
-                return "populated 1" in f.read()
+            f = open(os.path.join(cgroup, "cgroup.events"))
         except FileNotFoundError:
             return False  # the scope's folder is gone: nothing is in it
+        with f:
+            watch = select.poll()
+            watch.register(f, select.POLLPRI)
+            while True:
+                try:
+                    f.seek(0)
+                    if "populated 1" not in f.read():
+                        return False
+                except OSError:
+                    return False  # the scope's folder went while it was watched
+                watch.poll()
 
     def test_leaves_the_boundary_empty(self):
         up = self.pipe("up")
