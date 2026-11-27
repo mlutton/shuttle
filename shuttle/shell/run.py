@@ -171,11 +171,13 @@ def step_run_input_checks_and_executor_driver_check(state: RunState) -> None:
 def driver_check(world: Operations, raw: Mapping[str, Any]) -> tuple[str | None, str | None]:
     """The executor driver's check, and the check of the environment variables the document names."""
     names = raw.get("environment", [])
+    driver_facts, program = the_driver.gather(world, raw)
     return decisions.executor_driver_check(
         raw["executor"],
         names,
         launch_executor.caller_environment(world, names),
-        the_driver.facts(world, raw),
+        driver_facts,
+        program,
     )
 
 

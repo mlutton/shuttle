@@ -7,10 +7,9 @@ box binds what the checks looked at.
 
 from collections.abc import Sequence
 
-from shuttle.core import boundary, decisions, fixed, notice, refusals, run_area
-from shuttle.core import place as git_place
+from shuttle.core import boundary, decisions, fixed, notice, run_area
 from shuttle.core.shapes import Operations, RunState
-from shuttle.shell import kinds, statement_schema, the_driver
+from shuttle.shell import kinds, statement_schema, the_driver, the_reach
 
 
 def caller_environment(world: Operations, names: Sequence[str]) -> dict[str, str]:
@@ -21,15 +20,6 @@ def caller_environment(world: Operations, names: Sequence[str]) -> dict[str, str
         if value is not None:
             found[name] = value
     return found
-
-
-def resolver_file(world: Operations) -> str | None:
-    """The file `/etc/resolv.conf` leads to, when it leads to one that is there (the box shows
-    what the core decides to; this is only the fact)."""
-    target = world.boundary.resolve("/etc/resolv.conf")
-    if world.files.exists(target) and not world.files.is_folder(target):
-        return target
-    return None
 
 
 def put_instruction(state: RunState) -> str:
@@ -71,20 +61,16 @@ def step(state: RunState) -> None:
     name = boundary.scope_name(source["request_id"], state["run_part"])
     resolve = world.boundary.resolve
     _, changes = decisions.standard_settings(raw)
-    place = resolve(raw["place"])
+    seen = the_reach.shown(world, raw)
+    if seen is None:
+        raise RuntimeError("no place: the document was not checked")
     area = resolve(state["run_area"])
     reach: boundary.Reach = {
-        "place": place,
+        **seen,
         "area": area,
         "home": run_area.home_path(area),
         "tmp": run_area.tmp_path(area),
-        "references": [resolve(r["path"]) for r in raw.get("references", [])],
-        "visible": [resolve(path) for path in refusals.visible_paths(raw.get("reach"))],
-        "git_folders": world.git.git_folders(
-            place, git_place.git_environment(world.environment.read_variable("PATH"))
-        ),
         "place_writable": boundary.place_is_writable(changes),
-        "resolver": resolver_file(world),
         "records": resolve(source["records_location"]),
     }
     report = world.processes.open_report()

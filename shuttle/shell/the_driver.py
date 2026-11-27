@@ -8,10 +8,11 @@ whether the login's name is there, and whether each source the driver's setup ne
 from collections.abc import Iterator, Mapping
 from typing import Any
 
-from shuttle.core import decisions, run_area
+from shuttle.core import boundary, decisions, run_area
 from shuttle.core.drivers import table
 from shuttle.core.drivers.interface import Driver
 from shuttle.core.shapes import DriverFacts, LaunchContext, Line, Operations, SavedOutput
+from shuttle.shell import the_reach
 
 
 def of(raw: Mapping[str, Any]) -> Driver:
@@ -29,21 +30,25 @@ def caller_variables(world: Operations, driver: Driver) -> dict[str, str]:
     return found
 
 
-def find_program(world: Operations, raw: Mapping[str, Any]) -> str | None:
-    """Where the caller's machine finds the program the driver needs, or None."""
-    return world.processes.find_program(of(raw).program(raw["executor"]["settings"]))
-
-
-def facts(world: Operations, raw: Mapping[str, Any]) -> DriverFacts:
+def gather(world: Operations, raw: Mapping[str, Any]) -> tuple[DriverFacts, boundary.ProgramFacts]:
+    """What the driver's check reads, and what the decision on whether the box shows its program
+    reads: where the caller's machine finds the program the driver asks for and the file that
+    leads to (looked at only when it is found), with the paths the box would show."""
     driver = of(raw)
     login = driver.login_path(caller_variables(world, driver))
     network, changes = decisions.standard_settings(raw)
-    return {
-        "tool_found": find_program(world, raw) is not None,
+    found = world.processes.find_program(driver.program(raw["executor"]["settings"]))
+    driver_facts: DriverFacts = {
+        "tool_found": found is not None,
         "login_found": login is not None and world.files.exists(login),
         "network": network,
         "changes_allowed": changes,
     }
+    program: boundary.ProgramFacts = {"found_at": found, "resolves_to": None, "shown": None}
+    if found is not None:
+        program["resolves_to"] = world.boundary.resolve(found)
+        program["shown"] = the_reach.shown(world, raw)
+    return driver_facts, program
 
 
 def launch_context(world: Operations, raw: Mapping[str, Any], run_area: str) -> LaunchContext:

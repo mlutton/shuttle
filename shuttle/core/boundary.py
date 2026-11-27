@@ -101,7 +101,30 @@ def for_the_scope_tool(argv: Sequence[str]) -> list[str]:
     return [part.replace("$", "$$") for part in argv]
 
 
-class Reach(TypedDict):
+class Shown(TypedDict):
+    """The paths of the machine the box shows besides the system folders, each already resolved
+    (absolute, no link, no `..`): what the shell found of one document's reach that exists before
+    the run does. `resolver` is as in `Reach`."""
+
+    place: str
+    references: Sequence[str]
+    visible: Sequence[str]
+    git_folders: Sequence[str]
+    resolver: str | None
+
+
+class ProgramFacts(TypedDict):
+    """What the shell found of the program a run needs, for `hidden_program`. `found_at` is where
+    the caller's machine finds it (the absolute path of the name, a link not followed) and
+    `resolves_to` the file that path leads to; both None when it is not found. `shown` is None
+    when the document names no place to build it from; that document is refused before a launch."""
+
+    found_at: str | None
+    resolves_to: str | None
+    shown: Shown | None
+
+
+class Reach(Shown):
     """The paths of one run's reach, each already resolved (absolute, no link, no `..`).
 
     The box makes the system folders and `/etc` read-only; `visible`, `references` and
@@ -116,15 +139,10 @@ class Reach(TypedDict):
     to, when there is one (see `_resolver_bind`).
     """
 
-    place: str
     area: str
     home: str
     tmp: str
-    references: Sequence[str]
-    visible: Sequence[str]
-    git_folders: Sequence[str]
     place_writable: bool
-    resolver: str | None
     records: str
 
 
@@ -180,14 +198,77 @@ def _writable(reach: Reach) -> list[str]:
 _BOX_OWN = ("/usr", "/etc", "/tmp", "/proc", "/dev")
 
 
+def _resolver_target(resolver: str | None) -> str | None:
+    """The file the box binds for name lookup, or None when it binds none."""
+    if resolver is None or any(_inside(resolver, own) for own in _BOX_OWN):
+        return None
+    return resolver
+
+
+def shown_paths(shown: Shown) -> list[str]:
+    """Every path of the machine's own that the box shows the executor, as a folder or a file: the
+    system folders, the resolver's file, the place, the references, the visible folders and the
+    git folders. Not the run area, which is made empty for the run and so holds no program that
+    was found before it, and not the executor's own `/tmp`, `/dev` and `/proc`, which are not the
+    machine's. A path is shown when it is one of these or inside one; this is the answer
+    `box_arguments` gives in bind arguments (a test holds the two together)."""
+    target = _resolver_target(shown["resolver"])
+    return [
+        *_SYSTEM_FOLDERS,
+        *_SYSTEM_LINKS,
+        *([target] if target else []),
+        shown["place"],
+        *shown["references"],
+        *shown["visible"],
+        *shown["git_folders"],
+    ]
+
+
+def _folder_of(path: str) -> str:
+    return path.rsplit("/", 1)[0] or "/"
+
+
+def hidden_program(program: ProgramFacts) -> tuple[str, str] | None:
+    """(reason code, one line) when the box would not show the program the caller's machine
+    found, else None; a program not found is not this check's to refuse.
+
+    The box shows the file only when it shows both the path the machine found it at and the file
+    that path leads to: a link in a hidden folder is not there, and a link in a shown folder that
+    leads into a hidden one leads nowhere. The first path that is not shown names its folder (for
+    a link, the folder of the file it leads to). Only that file is looked at, never an interpreter
+    a script names or a library a program loads.
+    """
+    found, leads_to, shown = program["found_at"], program["resolves_to"], program["shown"]
+    if found is None or leads_to is None or shown is None:
+        return None
+    showing = shown_paths(shown)
+
+    def is_shown(path: str) -> bool:
+        return any(_inside(path, holder) for holder in showing)
+
+    if not is_shown(found):
+        folder = _folder_of(found)
+        where = f"the program {found!r} is in the folder {folder!r}"
+    elif not is_shown(leads_to):
+        folder = _folder_of(leads_to)
+        where = f"the program {found!r} is a link to {leads_to!r}, in the folder {folder!r}"
+    else:
+        return None
+    return (
+        "program_not_visible",
+        f"{where}, which the box does not show to the executor; list {folder!r} under "
+        "reach.visible to make it visible",
+    )
+
+
 def _resolver_bind(reach: Reach) -> list[str]:
     """The bind that makes name lookup work where `/etc/resolv.conf` is a link to a file outside
     `/etc`: the link would lead nowhere in the box, and a bind cannot be made onto a link, so the
     file it leads to is bound at its own path, as the link names it. Nothing is bound where the
     file is a plain one in `/etc`, is under `/usr` (shown already) or is under `/tmp` (which the
     executor's own would cover), or where there is no file. The rest of `/run` stays hidden."""
-    target = reach["resolver"]
-    if target is None or any(_inside(target, own) for own in _BOX_OWN):
+    target = _resolver_target(reach["resolver"])
+    if target is None:
         return []
     return ["--ro-bind", target, target]
 
