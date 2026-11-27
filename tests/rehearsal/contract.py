@@ -531,10 +531,12 @@ class ContractCases:
         return ended(self.world, process)
 
     def test_a_program_that_can_be_found_is_found_and_one_that_cannot_is_not(self):
-        self.assertTrue(self.world.processes.find_program(self.harness.argv("exits_at_once")[0]))
-        self.assertFalse(self.world.processes.find_program(self.harness.argv("not_a_program")[0]))
+        found = self.world.processes.find_program(self.harness.argv("exits_at_once")[0])
+        self.assertIsInstance(found, str)
+        self.assertTrue(found.startswith("/"))  # absolute, the link (if any) not followed
+        self.assertIsNone(self.world.processes.find_program(self.harness.argv("not_a_program")[0]))
         for odd in ("a\0b", "a" * 5000, "no/such/dir/" * 500, ""):  # none of these may raise
-            self.assertFalse(self.world.processes.find_program(odd))
+            self.assertIsNone(self.world.processes.find_program(odd))
 
     def test_a_program_that_exits_by_itself_ends_with_its_exit_status_and_keeps_it(self):
         for kind, status in (("exits_at_once", 0), ("exits_with_three", 3)):

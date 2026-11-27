@@ -487,7 +487,9 @@ class SimulatedWorld:
 
     def _find_program(self, command):
         self._enter("processes.find_program", command)
-        return command in self.programs
+        if command not in self.programs:
+            return None
+        return command if command.startswith("/") else f"/usr/bin/{command}"
 
     def _open_report(self):
         self._enter("processes.open_report")
