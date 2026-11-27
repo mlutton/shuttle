@@ -7,6 +7,7 @@ a check during a run's gates) is in tests/boundary/test_scope_names.py.
 """
 
 import importlib
+import inspect
 import io
 import json
 import os
@@ -14,7 +15,7 @@ import re
 import sys
 import unittest
 
-from shuttle.core import boundary, fixed
+from shuttle.core import boundary, fixed, place
 from shuttle.shell import check_form
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,6 +54,25 @@ class TheNamesAreMadeOfTheRequestAndTheRunsPart(unittest.TestCase):
         self.assertEqual(boundary.scope_name("r-1", "p"), "shuttle-run-r-1-p")
         self.assertEqual(boundary.gate_scope_name("r-1", "p", 2), "shuttle-gate-r-1-p-2")
         self.assertEqual(boundary.freeze_scope_name("r-1", "p"), "shuttle-freeze-r-1-p")
+
+    def test_every_function_that_names_a_scope_takes_the_part_and_puts_it_in_the_name(self):
+        """Enumerated, not listed: a new name function that leaves the part out fails here, so
+        a scope leaked under a name without a part cannot go unseen by the real tests, which
+        look only at units that carry a part."""
+        found = [
+            function
+            for module in (boundary, place)
+            for name, function in inspect.getmembers(module, inspect.isfunction)
+            if name.endswith("scope_name") and function.__module__ == module.__name__
+        ]
+        self.assertGreaterEqual(len(found), 3)  # the executor's, the gate's and the freeze's
+        for function in found:
+            with self.subTest(function=function.__name__):
+                parameters = inspect.signature(function).parameters
+                self.assertIn("run_part", parameters)
+                arguments = {name: 7 if name == "index" else "x-" + name for name in parameters}
+                arguments["run_part"] = A_PART
+                self.assertIn(A_PART, function(**arguments))
 
     def test_every_request_id_the_code_accepts_makes_a_valid_unit_name_within_the_length(self):
         longest = fixed.ID_CHARACTERS * 2

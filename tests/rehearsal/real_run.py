@@ -169,6 +169,12 @@ class RealRun(unittest.TestCase):
         )
         return done.stdout.strip()
 
+    def marker(self, label):
+        """A string for a child process to carry in its command line so the test can count it:
+        the label and the name of this test's own temporary folder, so another suite's test of
+        the same kind (counting machine-wide in `processes_with`) never sees it."""
+        return f"{label}-{os.path.basename(self.root)}"
+
     def processes_with(self, marker):
         """How many processes on this machine carry `marker` in their command line."""
         found = 0

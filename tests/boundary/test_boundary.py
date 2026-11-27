@@ -129,7 +129,7 @@ class AScriptThatKillsItself(real_run.RealRun):
 
 class AChildThatOutlivesItsScript(real_run.RealRun):
     def test_is_stopped_and_the_boundary_is_seen_empty(self):
-        marker = "shuttle-boundary-outliving-child"
+        marker = self.marker("shuttle-boundary-outliving-child")
         script = self.script("leaves.py", LEAVES_A_CHILD)
         code, lines, err = self.run_to_the_end(self.document(script, [marker]))
         self.assertEqual((code, err), (0, ""))
