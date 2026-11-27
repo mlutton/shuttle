@@ -25,8 +25,8 @@ from shuttle.core.shapes import SetupAction, SetupPlan, SetupRequest, SetupStep
 AREA_PREFIX = "shuttle-run-area-"
 # Where the instruction is put for the executor's standard input; no request may name it.
 INSTRUCTION_NAME = "shuttle-instruction.txt"
-# Where the executor writes its statement: the one name Shuttle fixes inside the run area, so the
-# document's own statement location is never shown to the executor. No request may name it.
+# Where the executor writes its statement, in place of the document's own statement location. No
+# request may name it.
 STATEMENT_NAME = "shuttle-statement.json"
 _KEPT_NAMES = (INSTRUCTION_NAME, STATEMENT_NAME)
 

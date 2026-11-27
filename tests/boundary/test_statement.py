@@ -34,7 +34,7 @@ with open(sys.argv[1], "rb") as source, open(inner, "wb") as target:
 """
 )
 
-# argv 1 is the document's statement location, which a script has no way to know: it writes there
+# argv 1 is the document's statement location, which it is not told: it writes there
 # and not at its own path, as a script that guessed would.
 WRITES_AT_THE_DOCUMENTS_LOCATION = (
     FINDS_ITS_PATH
@@ -254,7 +254,7 @@ class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
 
 # argv 1 is the file holding the statement, argv 2 the records folder, argv 3 a folder with a
 # folder `inner` in it, argv 4 the row's line, argv 5 the request id. It leaves its statement where the notice says, then
-# learns the document's location from the request record (the one route there is today) and
+# learns the document's location from the request record and
 # changes the folders above it.
 SWAPS_THE_FOLDERS_ABOVE_THE_LOCATION = (
     FINDS_ITS_PATH

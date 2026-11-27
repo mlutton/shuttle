@@ -5,8 +5,7 @@ A row is a dict:
 - leaves: a line of Python the executor script runs to leave it. It sees `os`, `location` (the
   statement's path in the run area) and `given` (a file that holds a secret line, which is not a statement).
 
-The rows are for the inner path, in the run area (what the notice names as the statement's path);
-`location` below is that path. Every row must end the run, write the outcome record, copy nothing
+Every row must end the run, write the outcome record, copy nothing
 beside the records and read `wrong_shape`. Opening a pipe nobody writes waits for ever, and `/dev/zero` never ends, so a
 test that runs these has to fail by assertion, not hang. The test is
 tests/boundary/test_statement.py.
