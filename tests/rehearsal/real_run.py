@@ -142,8 +142,8 @@ class RealRun(unittest.TestCase):
             subprocess.run(["systemctl", "--user", "reset-failed", unit], capture_output=True)
 
     def run_a_stand_in_tool(self, doc, script, variables=None, path_first=None):
-        """Run the command on `doc` with `script` standing in for the executor driver's tool: the
-        only way a test runs a driver's tool, and the guard against starting a real one.
+        """Run the command on `doc` with `script` standing in for the executor driver's tool. It is
+        the way to do that, because it checks where the program resolves before anything starts.
 
         The script (a Python program's text) is written into this test's own folder under the
         program name the driver asks for (`program(settings)` of the driver the document names),

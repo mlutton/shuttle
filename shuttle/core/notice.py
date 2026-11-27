@@ -3,8 +3,9 @@
 One fixed, versioned text. Its statement part (where and how to write the statement) is there only
 for a kind that expects a statement; its references part (where each reference is found, and that
 a reference wins over a file of the same name in the place) only when the document has references;
-its line that the executor cannot commit in the place always. The words are fixed (a tool that gives its statement as its final message is told that instead of a path); only the facts
-(the location, the references, the fields of the schema) are filled in. The place is not named: the
+its line that the executor cannot commit in the place always. The words are fixed; only the facts
+(the location, the references, the fields of the schema) are filled in. A tool that gives its
+statement as its final message is told that instead of being given a path. The place is not named: the
 notice says "the place" and nothing depends on where it is.
 """
 

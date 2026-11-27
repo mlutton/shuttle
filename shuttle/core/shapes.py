@@ -132,7 +132,8 @@ class SavedOutput(TypedDict):
 
 class Observed(TypedDict):
     group: "ExecutorDriverGroup"
-    reply_given: bool  # the tool gave a final message that holds something
+    # The tool left a final message file with at least one line, blank ones included.
+    reply_given: bool
 
 
 # How a driver's tool hands over its statement: it writes a file at the statement location, or its
