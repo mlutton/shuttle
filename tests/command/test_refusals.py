@@ -6,8 +6,10 @@ by one input, and the real files show what was and was not written.
 
 import hashlib
 import importlib
+import itertools
 import json
 import os
+import pwd
 import subprocess
 import sys
 import tempfile
@@ -196,18 +198,31 @@ class Refusals(RealCommand):
                 self.assertFalse(os.path.exists(self.witness))
 
     def test_the_box_s_own_folders_the_runtime_folder_and_the_home_folder_are_refused_by_both(self):
-        home = os.path.join(self.root, "a-home")
-        runtime = os.path.join(self.root, "a-runtime")
-        os.makedirs(os.path.join(home, "tools"))
-        os.mkdir(runtime)
-        env = {**os.environ, "HOME": home, "XDG_RUNTIME_DIR": runtime}
+        """The account's real folders, whatever the caller's environment names."""
+        home = pwd.getpwuid(os.getuid()).pw_dir
+        runtime = f"/run/user/{os.getuid()}"
+        if not (os.path.isdir(home) and os.path.isdir(runtime)):
+            self.skipTest("this account has no home folder or runtime folder to list")
+        if os.path.realpath(self.records).startswith(os.path.realpath(home) + os.sep):
+            self.skipTest(
+                "the test's records are under the home folder, which would be named first"
+            )
+        misnamed = os.path.join(self.root, "a-misnamed-folder")
+        os.mkdir(misnamed)
+        environments = (
+            ("naming other folders", {**os.environ, "HOME": misnamed, "XDG_RUNTIME_DIR": misnamed}),
+            (
+                "unset",
+                {k: v for k, v in os.environ.items() if k not in ("HOME", "XDG_RUNTIME_DIR")},
+            ),
+        )
         cases = (
             ("visible_overlaps_the_box", "/proc"),
             ("visible_overlaps_the_runtime_folder", runtime),
             ("visible_overlaps_the_home_folder", home),
         )
-        for reason, path in cases:
-            with self.subTest(reason):
+        for (label, env), (reason, path) in itertools.product(environments, cases):
+            with self.subTest(label, reason=reason):
                 for name in os.listdir(self.records):
                     os.unlink(os.path.join(self.records, name))
                 doc = self.document(reach={"visible": [path]})
@@ -218,12 +233,6 @@ class Refusals(RealCommand):
                     self.ending(self.outcome()), ("could_not_start", reason, "input_check")
                 )
                 self.assertFalse(os.path.exists(self.witness))
-        for name in os.listdir(self.records):
-            os.unlink(os.path.join(self.records, name))
-        doc = self.document()
-        doc["reach"]["visible"].append(os.path.join(home, "tools"))  # inside the home: accepted
-        checked, check_lines = self.command("check", doc, env=env)
-        self.assertEqual(check_lines[-2], "check: no refusal found")
 
     def test_a_reach_listing_folders_that_are_there_is_accepted_by_the_check_and_the_run(self):
         doc = self.document()

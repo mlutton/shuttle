@@ -300,7 +300,7 @@ class TheCheckForm(unittest.TestCase):
 
     def with_folders(self, doc, home="/home/me"):
         world = scenes.scene(doc)
-        world.variables.update({"XDG_RUNTIME_DIR": "/run/user/1000", "HOME": home})
+        world.account_home, world.runtime = home, "/run/user/1000"
         for folder in (
             "/run",
             "/run/user",
@@ -326,6 +326,31 @@ class TheCheckForm(unittest.TestCase):
                 world = self.with_folders(scenes.document(reach={"visible": [path]}))
                 _, lines, _ = self.check(world)
                 self.assertEqual(lines[-2], f"check: refused: {reason}")
+
+    def test_the_runtime_and_home_refusals_hold_whatever_the_callers_environment_says(self):
+        misnamed = (
+            ("unset", {}),
+            ("naming other folders", {"HOME": "/elsewhere", "XDG_RUNTIME_DIR": "/elsewhere"}),
+            ("empty", {"HOME": "", "XDG_RUNTIME_DIR": ""}),
+        )
+        for label, variables in misnamed:
+            for reason, path in (
+                ("visible_overlaps_the_runtime_folder", "/run/user/1000"),
+                ("visible_overlaps_the_home_folder", "/home/me"),
+            ):
+                with self.subTest(label, reason=reason):
+                    world = self.with_folders(scenes.document(reach={"visible": [path]}))
+                    world.variables.clear()
+                    world.variables.update(variables)
+                    world.make_folder("/elsewhere")
+                    _, lines, _ = self.check(world)
+                    self.assertEqual(lines[-2], f"check: refused: {reason}")
+
+    def test_an_account_with_no_home_folder_refuses_nothing_for_it(self):
+        world = self.with_folders(scenes.document(reach={"visible": ["/home/me"]}))
+        world.account_home = None
+        _, lines, _ = self.check(world)
+        self.assertEqual(lines[-2], "check: no refusal found")
 
     def test_a_folder_inside_the_home_folder_is_accepted(self):
         world = self.with_folders(scenes.document(reach={"visible": ["/home/me/tools"]}))

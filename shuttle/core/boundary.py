@@ -104,15 +104,16 @@ def for_the_scope_tool(argv: Sequence[str]) -> list[str]:
 class Reach(TypedDict):
     """The paths of one run's reach, each already resolved (absolute, no link, no `..`).
 
-    The box makes the system folders and `/etc` read-only; `visible` and `references` are
-    read-only, `place`, `area` and `git_folders` writable. `home` and `tmp`
-    are folders inside `area`: `tmp` is the executor's `/tmp` and `home` its `HOME`. `records` is
+    The box makes the system folders and `/etc` read-only; `visible`, `references` and
+    `git_folders` are read-only, `area` is writable, and so is `place` unless `place_writable` is
+    False. `home` and `tmp` are folders inside `area`: `tmp` is the executor's `/tmp` and `home` its `HOME`. `records` is
     hidden whatever else is bound.
 
     `git_folders` are the place's own git folder and the one it shares with the checkout it was
     made from, as the shell found them: for a linked working copy (the usual place) they are
-    outside the place, and git cannot run without them. Nothing else of the repository the place
-    was made from is shown. `resolver` is the file `/etc/resolv.conf` leads
+    outside the place, and git cannot run without them. They are read-only at their real paths, so
+    the executor can read the history but not change the repository's configuration, hooks or
+    history. Nothing else of the repository the place was made from is shown. `resolver` is the file `/etc/resolv.conf` leads
     to, when there is one (see `_resolver_bind`).
     """
 
@@ -155,12 +156,13 @@ def _reach_binds(reach: Reach) -> list[str]:
     inside the place, and the place can be under the machine's temporary folder, which was bound
     over before any of them. Ordered by the depth of the destination, and for equal depth with the
     read-only ones first so a path that is both visible and the place stays writable (a listing
-    never makes anything read-only or writable that was not).
+    never makes anything read-only or writable that was not). A git folder inside the place comes
+    after it for its depth, so it is read-only inside a writable place.
     """
-    wanted = [
-        (path, 0, ["--ro-bind", path, path])
-        for path in dict.fromkeys([*reach["visible"], *reach["references"]])
-    ]
+    read_only = [*reach["visible"], *reach["references"], *reach["git_folders"]]
+    if not reach["place_writable"]:
+        read_only.append(reach["place"])
+    wanted = [(path, 0, ["--ro-bind", path, path]) for path in dict.fromkeys(read_only)]
     wanted += [(path, 1, ["--bind", path, path]) for path in _writable(reach)]
     wanted.sort(key=lambda item: (_depth(item[0]), item[1]))
     return [part for _, _, parts in wanted for part in parts]
@@ -171,13 +173,7 @@ def _inside(path: str, folder: str) -> bool:
 
 
 def _writable(reach: Reach) -> list[str]:
-    held = [reach["area"], reach["place"]]
-    every = list(dict.fromkeys(reach["git_folders"]))
-    for folder in every:
-        others = [other for other in (*held, *every) if other != folder]
-        if not any(_inside(folder, other) for other in others):
-            held.append(folder)
-    return held
+    return [reach["area"], *([reach["place"]] if reach["place_writable"] else [])]
 
 
 # The paths the box's own binds are made at: a file the shell found under one of these is already

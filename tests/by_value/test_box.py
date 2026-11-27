@@ -98,17 +98,55 @@ class TheBinds(unittest.TestCase):
                     self.assertLess(got.index(("--ro-bind", "/etc", "/etc")), got.index(wanted))
                 self.assertEqual([d for _, _, d in got].count(target), 1 if bound else 0)
 
-    def test_the_git_folders_are_writable_and_a_git_folder_inside_the_place_is_not_bound_again(
+    def test_a_worktrees_git_folders_are_read_only_at_their_real_paths_outside_the_place(self):
+        linked = ["/main/.git/worktrees/place", "/main/.git"]
+        got = binds(boundary.box_arguments({**REACH, "git_folders": linked}))
+        for folder in linked:
+            self.assertEqual([k for k, _, d in got if d == folder], ["--ro-bind"], folder)
+        self.assertFalse([d for _, _, d in got if d == "/main"])  # nothing else of it
+        self.assertEqual(  # the place itself stays writable
+            [k for k, _, d in got if d == "/work/place"], ["--bind"]
+        )
+
+    def test_a_plain_checkouts_git_folder_inside_the_place_is_read_only_over_the_writable_place(
         self,
     ):
-        linked = ["/main/.git", "/main/.git/worktrees/place"]
-        got = binds(boundary.box_arguments({**REACH, "git_folders": linked}))
-        self.assertIn(("--bind", "/main/.git", "/main/.git"), got)
-        self.assertNotIn("/main/.git/worktrees/place", [d for _, _, d in got])  # it is inside
-        self.assertFalse([d for _, _, d in got if d == "/main"])  # nothing else of it
-        plain = ["/work/place/.git"]
-        got = binds(boundary.box_arguments({**REACH, "git_folders": plain}))
-        self.assertNotIn("/work/place/.git", [d for _, _, d in got])
+        argv = boundary.box_arguments({**REACH, "git_folders": ["/work/place/.git"]})
+        got = binds(argv)
+        self.assertEqual(
+            [(k, d) for k, _, d in got if d.startswith("/work/place")],
+            [("--bind", "/work/place"), ("--ro-bind", "/work/place/.git")],
+        )
+
+    def test_no_git_folder_is_ever_bound_writable(self):
+        for place_writable in (True, False):
+            for folders in (["/work/place/.git"], ["/main/.git", "/main/.git/worktrees/p"]):
+                with self.subTest(place_writable=place_writable, folders=folders):
+                    reach = {**REACH, "git_folders": folders, "place_writable": place_writable}
+                    got = binds(boundary.box_arguments(reach))
+                    self.assertEqual(
+                        [k for k, _, d in got if d in folders],
+                        ["--ro-bind"] * len(folders),
+                    )
+
+    def test_a_place_that_may_not_be_changed_is_read_only_and_the_run_area_stays_writable(self):
+        got = binds(boundary.box_arguments({**REACH, "place_writable": False}))
+        self.assertEqual([k for k, _, d in got if d == "/work/place"], ["--ro-bind"])
+        self.assertEqual(
+            [(s, d) for kind, s, d in got if kind == "--bind"],
+            [("/scratch/area/tmp", "/tmp"), ("/scratch/area", "/scratch/area")],
+        )
+
+    def test_a_place_that_may_not_be_changed_and_is_listed_as_visible_is_bound_once(self):
+        reach = {**REACH, "place_writable": False, "visible": ["/work/place"]}
+        got = binds(boundary.box_arguments(reach))
+        self.assertEqual([k for k, _, d in got if d == "/work/place"], ["--ro-bind"])
+
+    def test_a_run_area_inside_a_read_only_place_stays_writable_after_it(self):
+        reach = {**REACH, "place_writable": False, "area": "/work/place/area"}
+        got = binds(boundary.box_arguments(reach))
+        order = [(k, d) for k, _, d in got if d.startswith("/work/place")]
+        self.assertEqual(order, [("--ro-bind", "/work/place"), ("--bind", "/work/place/area")])
 
     def test_a_git_folder_comes_after_the_tmp_bind_when_it_is_under_the_real_tmp(self):
         order = destinations(
@@ -149,14 +187,32 @@ class WhatTheShellGathersForTheBox(unittest.TestCase):
         argv = self.argv_of_a_run()
         self.assertEqual([d for d in destinations(argv) if d.startswith("/run")], [])
 
-    def test_a_linked_places_git_folders_are_bound_writable_and_nothing_else_of_its_origin(self):
+    def test_a_linked_places_git_folders_are_bound_read_only_and_nothing_else_of_its_origin(self):
         argv = self.argv_of_a_run(git_folders=["/main/.git", "/main/.git/worktrees/place"])
-        self.assertIn(("--bind", "/main/.git", "/main/.git"), binds(argv))
+        self.assertIn(("--ro-bind", "/main/.git", "/main/.git"), binds(argv))
+        self.assertIn(
+            ("--ro-bind", "/main/.git/worktrees/place", "/main/.git/worktrees/place"), binds(argv)
+        )
         self.assertFalse([d for d in destinations(argv) if d == "/main"])
 
-    def test_a_plain_places_git_folder_is_inside_the_place_and_adds_no_bind(self):
+    def test_a_plain_places_git_folder_inside_the_place_is_bound_read_only(self):
         argv = self.argv_of_a_run()
-        self.assertNotIn(f"{scenes.PLACE}/.git", destinations(argv))
+        folder = f"{scenes.PLACE}/.git"
+        self.assertIn(("--ro-bind", folder, folder), binds(argv))
+        self.assertIn(("--bind", scenes.PLACE, scenes.PLACE), binds(argv))
+
+    def test_the_place_is_writable_with_the_setting_allowed_or_absent_and_read_only_with_not(self):
+        for label, setting, kind in (
+            ("absent", {}, "--bind"),
+            ("allowed", {"changes_to_place": "allowed"}, "--bind"),
+            ("not", {"changes_to_place": "not"}, "--ro-bind"),
+        ):
+            with self.subTest(label):
+                world = scenes.scene(scenes.document(**setting))
+                code, _, err = scenes.run_in(world)
+                self.assertEqual((code, err), (0, ""))
+                got = binds(world.started[0][0])
+                self.assertEqual([k for k, _, d in got if d == scenes.PLACE], [kind], label)
 
 
 class TheOrderTheBindsMustHave(unittest.TestCase):

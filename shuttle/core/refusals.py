@@ -268,8 +268,9 @@ def check_reach(
     """The refusal for a reach, or None. A reach lists folders to make visible (readable, never
     writable); the first listed path with a problem is the one named. `looked` holds each listed
     path that was looked at, `records` is the resolved records folder and `runtime` the resolved
-    runtime folder of the user and `home` the resolved home folder of the caller (None when the
-    caller has none). A folder inside either is accepted."""
+    runtime folder of the user and `home` the resolved home folder of the user's account (None
+    when the account has none), both as the system gives them, never as the caller's environment
+    names them. A folder inside either is accepted."""
     if reach is None:
         return None
     problem = _reach_shape_problem(reach)

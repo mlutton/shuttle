@@ -37,11 +37,11 @@ def saved(name):
         return f.read()
 
 
-def document(**extra):
+def document(changes_to_place="allowed", **extra):
     return scenes.document(
         executor={"name": PROGRAM, "settings": {"model": "example-model", "effort": "low"}},
         network="off",
-        changes_to_place="allowed",
+        changes_to_place=changes_to_place,
         kind="judge",
         instruction=INSTRUCTION,
         statement_location=LOCATION,
@@ -144,7 +144,7 @@ class NothingOutsideTheTableNamesADriver(unittest.TestCase):
         self.assertEqual(found, [])
 
 
-class TheCommandDriverRefusesWhatItCannotEnforce(unittest.TestCase):
+class TheCommandDriverRefusesWhatTheBoxDoesNotEnforce(unittest.TestCase):
     def verdict(self, **standard):
         world = scenes.scene(scenes.document(**standard))
         out, err = io.StringIO(), io.StringIO()
@@ -152,20 +152,22 @@ class TheCommandDriverRefusesWhatItCannotEnforce(unittest.TestCase):
         scenes.run_in(world)
         return out.getvalue(), flat(scenes.outcome(world)["receipt"])["ending"], world
 
-    def test_a_restriction_is_refused_by_the_check_and_the_run_with_the_same_reason(self):
-        for label, standard in (
-            ("network off", {"network": "off"}),
-            ("changes not allowed", {"changes_to_place": "not"}),
-        ):
-            with self.subTest(label):
-                checked, ending, world = self.verdict(**standard)
-                self.assertIn("unknown_setting", checked)
-                self.assertIn("cannot enforce", checked)
-                self.assertEqual(
-                    (ending["ending"], ending["reason"], ending["failed_step"]),
-                    ("could_not_start", "unknown_setting", "executor_driver_check"),
-                )
-                self.assertEqual(world.started, [])  # nothing was launched
+    def test_network_off_is_refused_by_the_check_and_the_run_with_the_same_reason(self):
+        checked, ending, world = self.verdict(network="off")
+        self.assertIn("unknown_setting", checked)
+        self.assertIn("cannot enforce network off", checked)
+        self.assertEqual(
+            (ending["ending"], ending["reason"], ending["failed_step"]),
+            ("could_not_start", "unknown_setting", "executor_driver_check"),
+        )
+        self.assertEqual(world.started, [])  # nothing was launched
+
+    def test_changes_to_the_place_not_allowed_is_accepted_by_the_check_and_the_run(self):
+        checked, ending, world = self.verdict(changes_to_place="not")
+        self.assertNotIn("executor_driver_check", checked)
+        self.assertIn("check: no refusal found", checked)
+        self.assertEqual(ending["ending"], "ended_by_itself")
+        self.assertEqual(len(world.started), 1)  # the box, not the driver, holds the place
 
     def test_no_restriction_asked_for_changes_nothing(self):
         for label, standard in (
@@ -181,6 +183,30 @@ class TheCommandDriverRefusesWhatItCannotEnforce(unittest.TestCase):
 
 
 class ARunNamingTheCodexDriver(unittest.TestCase):
+    def test_the_box_makes_the_place_read_only_when_changes_are_not_allowed_and_codex_keeps_its_own(
+        self,
+    ):
+        for setting, sandbox, kind in (
+            ("not", "read-only", "--ro-bind"),
+            ("allowed", "workspace-write", "--bind"),
+        ):
+            with self.subTest(setting):
+                world = world_for(
+                    "events-finished.jsonl",
+                    "last-message-statement.json",
+                    document(changes_to_place=setting),
+                )
+                self.run_it(world)
+                argv, _ = world.started[-1]
+                at = argv.index("-s")
+                self.assertEqual(argv[at + 1], sandbox)
+                place = [
+                    argv[i : i + 3]
+                    for i, p in enumerate(argv)
+                    if p in (kind, "--bind", "--ro-bind")
+                ]
+                self.assertEqual([p[0] for p in place if p[2] == scenes.PLACE], [kind])
+
     def run_it(self, world):
         code, lines, err = scenes.run_in(world)
         self.assertEqual((code, err), (0, ""))
