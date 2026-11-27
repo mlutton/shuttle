@@ -14,7 +14,7 @@ import sys
 import types
 import unittest
 
-from shuttle.core import run_area
+from shuttle.core import decisions, run_area
 from shuttle.core.drivers import command, table
 from shuttle.shell import check_form
 
@@ -93,6 +93,21 @@ def sources_outside_the_drivers():
             yield from (os.path.join(where, n) for n in names if n.endswith(".py"))
 
 
+class WhetherTheReplyBecomesTheStatement(unittest.TestCase):
+    def test_only_a_reply_driver_that_gave_one_and_a_free_location_has_it_copied(self):
+        for arrives, location, taken, given, expected in (
+            ("reply", "/out/s", False, True, True),
+            ("reply", "/out/s", True, True, False),  # the executor already left one
+            ("reply", "/out/s", False, False, False),  # no final message
+            ("reply", None, False, True, False),  # the kind expects no statement
+            ("file", "/out/s", False, True, False),  # the tool writes its own file
+        ):
+            with self.subTest(arrives=arrives, location=location, taken=taken, given=given):
+                self.assertEqual(
+                    decisions.copy_reply_to_statement(arrives, location, taken, given), expected
+                )
+
+
 class NothingOutsideTheTableNamesADriver(unittest.TestCase):
     def test_no_module_outside_the_drivers_folder_imports_one_by_name_or_holds_its_name(self):
         found = []
@@ -156,6 +171,20 @@ class ARunNamingTheCodexDriver(unittest.TestCase):
         self.assertFalse(any(INSTRUCTION in part for part in argv))
         self.assertIn(PROGRAM, argv)
         self.assertIn(INSTRUCTION, world.children[-1].input.decode())
+
+    def test_the_notice_asks_a_reply_driver_for_its_final_message_and_a_command_for_a_file(self):
+        world = world_for("events-finished.jsonl", "last-message-statement.json")
+        self.run_it(world)
+        replied = world.children[-1].input.decode()
+        self.assertIn("as your final message", replied)
+        self.assertNotIn(LOCATION, replied)
+        other = scenes.scene(scenes.document(kind="judge", statement_location=LOCATION))
+        other.make_folder("/out")
+        scenes.run_in(other)
+        filed = other.children[-1].input.decode()
+        self.assertIn(
+            f"Write your statement as one JSON file at this exact path: {LOCATION}", filed
+        )
 
     def test_a_statement_it_gives_as_its_last_message_is_kept_like_any_other(self):
         receipt = self.run_it(world_for("events-finished.jsonl", "last-message-statement.json"))

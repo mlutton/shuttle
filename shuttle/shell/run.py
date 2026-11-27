@@ -201,10 +201,16 @@ def step_observe(state: RunState) -> None:
     state["executor_driver_observations"] = observed["group"]
     location = raw.get("statement_location")
     reply = driver.output_files(area or "").get("last_message")
-    wanted = observed["reply_given"] and location is not None and reply and area
-    if wanted and not world.files.exists(location or ""):
+    taken = location is not None and world.files.exists(location)
+    if (
+        reply
+        and area
+        and decisions.copy_reply_to_statement(
+            driver.STATEMENT, location, taken, observed["reply_given"]
+        )
+    ):
         with contextlib.suppress(OSError):  # nothing left there is a statement not given
-            world.files.copy(reply or "", location or "")
+            world.files.copy(reply, location or "")
 
 
 def step_deliver(state: RunState) -> None:  # stand-in

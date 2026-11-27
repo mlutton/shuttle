@@ -32,6 +32,7 @@ def put_instruction(state: RunState) -> str:
         raw.get("statement_location"),
         statement_schema.read_schema(world),
         raw.get("references", []),
+        the_driver.of(raw).STATEMENT,
     )
     name = decisions.join_path(state["run_area"], run_area.INSTRUCTION_NAME)
     world.files.write_new(name, text)

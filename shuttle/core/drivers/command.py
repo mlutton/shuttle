@@ -19,10 +19,12 @@ from shuttle.core.shapes import (
     SavedOutput,
     Settings,
     SetupRequest,
+    StatementArrival,
 )
 
 NAME = "command"
 VERSION = "1"
+STATEMENT: StatementArrival = "file"
 READS: tuple[str, ...] = ()
 
 _SETTINGS = ("command", "arguments")

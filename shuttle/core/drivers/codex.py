@@ -34,10 +34,12 @@ from shuttle.core.shapes import (
     SavedOutput,
     Settings,
     SetupRequest,
+    StatementArrival,
 )
 
 NAME = "codex"
 VERSION = "1"
+STATEMENT: StatementArrival = "reply"
 READS: tuple[str, ...] = ("CODEX_HOME", "HOME")
 
 PROGRAM = "codex"

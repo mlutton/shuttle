@@ -135,6 +135,9 @@ class Observed(TypedDict):
     reply_given: bool  # the tool gave a final message that holds something
 
 
+# How a driver's tool hands over its statement: it writes a file at the statement location, or its
+# final message is the statement.
+StatementArrival = Literal["file", "reply"]
 SetupAction = Literal["copy", "share", "leave_out", "write", "writable", "variable"]
 SetupStepKind = Literal["folder", "copy", "share", "write", "writable"]
 

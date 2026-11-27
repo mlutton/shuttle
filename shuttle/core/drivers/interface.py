@@ -18,6 +18,7 @@ from shuttle.core.shapes import (
     SavedOutput,
     Settings,
     SetupRequest,
+    StatementArrival,
 )
 
 
@@ -27,6 +28,7 @@ class Driver(Protocol):
     # The caller's variables the driver looks at (its tool's home, say); the shell reads exactly
     # these and hands them to `login_path` and `setup_requests`.
     READS: tuple[str, ...]
+    STATEMENT: StatementArrival
 
     def settings_refusal(self, settings: Settings) -> tuple[str, str] | None:
         """(reason code, one line) when the settings are not this driver's, else None."""

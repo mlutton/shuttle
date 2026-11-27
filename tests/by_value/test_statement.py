@@ -209,6 +209,30 @@ class TheNotice(unittest.TestCase):
         self.assertIn("A reference wins over a file of the same name in the place.", got)
         self.assertNotIn("A reference wins", self.given("x", True))
 
+    def test_the_notice_for_a_statement_written_as_a_file_is_the_words_it_always_had(self):
+        got = self.given("do it", True)
+        self.assertIn("Write your statement as one JSON file at this exact path: /out/s.json", got)
+        self.assertIn(
+            "Execution keeps the file exactly as you wrote it and never changes or completes it.",
+            got,
+        )
+        self.assertEqual(got, notice.with_notice("do it", True, "/out/s.json", SCHEMA, [], "file"))
+
+    def test_the_notice_for_a_statement_given_as_the_final_message_says_so_and_names_no_path(self):
+        got = notice.with_notice("do it", True, "/out/s.json", SCHEMA, [], "reply")
+        self.assertIn("as your final message", got)
+        self.assertIn("nothing else in the message", got)
+        self.assertNotIn("/out/s.json", got)
+        self.assertNotIn("one JSON file", got)
+        for field in SCHEMA["fields"]:
+            self.assertIn(f"- {field['name']}:", got)
+        self.assertIn("cannot commit in the place", got)
+
+    def test_a_kind_that_expects_no_statement_gets_the_same_notice_whichever_way_one_arrives(self):
+        self.assertEqual(
+            notice.with_notice("x", False, None, SCHEMA, [], "reply"), self.given("x", False, None)
+        )
+
     def test_the_notice_is_the_same_text_every_time(self):
         self.assertEqual(self.given("x", True), self.given("x", True))
 
