@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, TypedDict
 
 from shuttle.core import fixed
-from shuttle.core.shapes import Conclusion
+from shuttle.core.shapes import Conclusion, VisibleLook
 
 _INPUT = "input_check"
 _GATES = "gates"
@@ -150,11 +150,136 @@ def check_statement_location(
     return None
 
 
-def check_reach(reach: object) -> Found | None:
-    """Reach is reserved: any content is refused."""
-    if reach is None or (isinstance(reach, (dict, list)) and not reach):
+_REACH_MEMBERS = ("visible",)
+
+
+def _reach_shape_problem(reach: object) -> Found | None:
+    """The refusal for a reach that is not an object holding only a list of paths, or None."""
+    if not isinstance(reach, dict):
+        return _found(
+            "reach_not_valid",
+            _INPUT,
+            'reach is not an object; give {"visible": [<absolute paths of folders>]} or leave '
+            "it out",
+        )
+    unknown = sorted(str(name) for name in reach if name not in _REACH_MEMBERS)
+    if unknown:
+        return _found(
+            "unknown_field",
+            _INPUT,
+            f"reach has {', '.join(map(repr, unknown))}, which it does not take; its only member "
+            "is visible, a list of absolute paths of folders to make readable",
+        )
+    paths = reach.get("visible", [])
+    if not isinstance(paths, list) or not all(isinstance(p, str) and p for p in paths):
+        return _found(
+            "reach_not_valid",
+            _INPUT,
+            "reach.visible is not a list of paths; give the absolute path of each folder to make "
+            "readable, as text",
+        )
+    return None
+
+
+def visible_paths(reach: object) -> list[str]:
+    """The paths a reach lists as visible, in the order given; none for a reach left out or one
+    that is not a list of paths in an object."""
+    if reach is None or _reach_shape_problem(reach) is not None:
+        return []
+    return list(reach.get("visible", [])) if isinstance(reach, dict) else []
+
+
+# The folders the box makes its own for the executor: a folder listed as visible that is one of
+# these, or holds one, would cover it (`/tmp` is the executor's own, `/proc` and `/dev` are the
+# box's), so it is refused.
+BOX_OWN_FOLDERS = ("/tmp", "/proc", "/dev")
+
+
+def _visible_problem(
+    path: str,
+    look: VisibleLook | None,
+    records: str | None,
+    runtime: str | None,
+    home: str | None,
+) -> Found | None:
+    if not path.startswith("/") or "\0" in path:
+        return _found(
+            "visible_not_absolute",
+            _INPUT,
+            f"reach.visible {path!r} is not an absolute path; write it from the root, "
+            "starting with '/'",
+        )
+    if look is None or not look["exists"]:
+        return _found(
+            "visible_missing",
+            _INPUT,
+            f"reach.visible {path!r} does not exist; give a folder that is there, or take it out",
+        )
+    if not look["folder"]:
+        return _found(
+            "visible_not_a_folder",
+            _INPUT,
+            f"reach.visible {path!r} is not a folder; list the folder that holds it, or take it "
+            "out",
+        )
+    if records is not None and (
+        inside_folder(records, look["resolved"]) or inside_folder(look["resolved"], records)
+    ):
+        return _found(
+            "visible_overlaps_the_records",
+            _INPUT,
+            f"reach.visible {path!r} is, holds or is inside the records folder, which stays "
+            "hidden whatever is listed; list a folder that does not touch it",
+        )
+    for own in BOX_OWN_FOLDERS:
+        if inside_folder(own, look["resolved"]):
+            return _found(
+                "visible_overlaps_the_box",
+                _INPUT,
+                f"reach.visible {path!r} is or holds {own!r}, which the box makes its own for the "
+                "executor and a listed folder would cover; list a folder under it, or take it out",
+            )
+    if runtime is not None and inside_folder(runtime, look["resolved"]):
+        return _found(
+            "visible_overlaps_the_runtime_folder",
+            _INPUT,
+            f"reach.visible {path!r} is or holds the user's runtime folder {runtime!r}, where the "
+            "user's systemd and D-Bus sockets are, and they stay hidden; list a folder that does "
+            "not hold it, or take it out",
+        )
+    if home is not None and inside_folder(home, look["resolved"]):
+        return _found(
+            "visible_overlaps_the_home_folder",
+            _INPUT,
+            f"reach.visible {path!r} is or holds your home folder {home!r}, which would show "
+            "all of it (keys, credentials, other checkouts); list the specific folders the tool "
+            "needs instead, or take it out",
+        )
+    return None
+
+
+def check_reach(
+    reach: object,
+    looked: Mapping[str, VisibleLook],
+    records: str | None,
+    runtime: str | None = None,
+    home: str | None = None,
+) -> Found | None:
+    """The refusal for a reach, or None. A reach lists folders to make visible (readable, never
+    writable); the first listed path with a problem is the one named. `looked` holds each listed
+    path that was looked at, `records` is the resolved records folder and `runtime` the resolved
+    runtime folder of the user and `home` the resolved home folder of the caller (None when the
+    caller has none). A folder inside either is accepted."""
+    if reach is None:
         return None
-    return _found("reach_not_available", _INPUT, "reach is reserved; leave it out or empty")
+    problem = _reach_shape_problem(reach)
+    if problem is not None:
+        return problem
+    for path in visible_paths(reach):
+        found = _visible_problem(path, looked.get(path), records, runtime, home)
+        if found is not None:
+            return found
+    return None
 
 
 _SECRET_PREFIXES = ("sk-", "ghp_", "gho_", "ghs_", "github_pat_", "xox", "AKIA", "Bearer ")

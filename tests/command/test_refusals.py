@@ -15,6 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 real_place = importlib.import_module("rehearsal.real_place")
+real_run = importlib.import_module("rehearsal.real_run")
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,12 +39,16 @@ class RealCommand(unittest.TestCase):
         os.mkdir(self.records)
         self.place = os.path.join(self.root, "place")
         real_place.make_checkout(self.place)
-        self.witness = os.path.join(self.root, "witness.txt")
-        self.script = self.write("script.py", WRITES_WITNESS)
+        # The executor writes its witness in the place and reads its script from a folder listed
+        # as visible (see tests/rehearsal/real_run.py).
+        self.witness = os.path.join(self.place, "witness.txt")
+        self.support = os.path.join(self.root, "support")
+        os.mkdir(self.support)
+        self.script = self.write("script.py", WRITES_WITNESS, self.support)
         self.gate_script = self.write("gate.py", GATE_ANSWERS)
 
-    def write(self, name, text):
-        path = os.path.join(self.root, name)
+    def write(self, name, text, folder=None):
+        path = os.path.join(folder or self.root, name)
         with open(path, "w") as f:
             f.write(text)
         return path
@@ -58,9 +63,13 @@ class RealCommand(unittest.TestCase):
             "round": 1,
             "kind": "plain",
             "time_limit_seconds": 30,
+            "reach": {"visible": [self.support, *real_run.INTERPRETER_FOLDERS]},
             "executor": {
                 "name": "command",
-                "settings": {"command": sys.executable, "arguments": [self.script, self.witness]},
+                "settings": {
+                    "command": real_run.INTERPRETER,
+                    "arguments": [self.script, self.witness],
+                },
             },
         }
         doc.update(extra)
@@ -74,7 +83,7 @@ class RealCommand(unittest.TestCase):
             "limit_seconds": 20,
         }
 
-    def command(self, form, doc, name="input.json"):
+    def command(self, form, doc, name="input.json", env=None):
         path = os.path.join(self.root, name)
         with open(path, "w") as f:
             json.dump(doc, f)
@@ -84,6 +93,7 @@ class RealCommand(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=60,
+            env=env,
         )
         return done, done.stdout.splitlines()
 
@@ -129,7 +139,15 @@ class Refusals(RealCommand):
                 "unknown_field",  # a kind that expects no statement, given a location
                 self.document(statement_location=os.path.join(self.root, "free")),
             ),
-            ("reach_not_available", self.document(reach=["x"])),
+            ("reach_not_valid", self.document(reach=["x"])),
+            ("visible_not_absolute", self.document(reach={"visible": ["x"]})),
+            (
+                "visible_missing",
+                self.document(reach={"visible": [os.path.join(self.root, "absent")]}),
+            ),
+            ("visible_not_a_folder", self.document(reach={"visible": [runbook]})),
+            ("visible_overlaps_the_records", self.document(reach={"visible": [self.records]})),
+            ("visible_overlaps_the_records", self.document(reach={"visible": [self.root]})),
             (
                 "no_time_limit",
                 {k: v for k, v in self.document().items() if k != "time_limit_seconds"},
@@ -146,6 +164,74 @@ class Refusals(RealCommand):
                     self.ending(self.outcome()), ("could_not_start", reason, "input_check")
                 )
                 self.assertFalse(os.path.exists(self.witness))
+
+    def reach_cases(self):
+        runbook = self.write("runbook.md", "contents")
+        return (
+            ("reach_not_valid", {"reach": ["x"]}),
+            ("unknown_field", {"reach": {"read": [self.support]}}),
+            ("visible_not_absolute", {"reach": {"visible": ["x"]}}),
+            ("visible_missing", {"reach": {"visible": [os.path.join(self.root, "absent")]}}),
+            ("visible_not_a_folder", {"reach": {"visible": [runbook]}}),
+            ("visible_overlaps_the_records", {"reach": {"visible": [self.records]}}),
+            ("visible_overlaps_the_records", {"reach": {"visible": [self.root]}}),
+        )
+
+    def test_the_check_form_refuses_a_reach_as_a_run_does_with_the_same_reason_and_line(self):
+        for reason, extra in self.reach_cases():
+            with self.subTest(reason, **{k: str(v) for k, v in extra.items()}):
+                for name in os.listdir(self.records):
+                    os.unlink(os.path.join(self.records, name))
+                checked, check_lines = self.command("check", self.document(**extra))
+                self.assertEqual(checked.returncode, 0, checked.stderr)
+                self.assertEqual(check_lines[-2], f"check: refused: {reason}")
+                self.assertEqual(os.listdir(self.records), [])  # the check wrote nothing
+                ran, _ = self.command("run", self.document(**extra))
+                line = self.outcome()["receipt"]["ending"]["reason_text"]["value"]
+                self.assertEqual(
+                    self.ending(self.outcome()), ("could_not_start", reason, "input_check")
+                )
+                printed = json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"]
+                self.assertEqual(printed, line)  # the check prints the record a run would write
+                self.assertFalse(os.path.exists(self.witness))
+
+    def test_the_box_s_own_folders_the_runtime_folder_and_the_home_folder_are_refused_by_both(self):
+        home = os.path.join(self.root, "a-home")
+        runtime = os.path.join(self.root, "a-runtime")
+        os.makedirs(os.path.join(home, "tools"))
+        os.mkdir(runtime)
+        env = {**os.environ, "HOME": home, "XDG_RUNTIME_DIR": runtime}
+        cases = (
+            ("visible_overlaps_the_box", "/proc"),
+            ("visible_overlaps_the_runtime_folder", runtime),
+            ("visible_overlaps_the_home_folder", home),
+        )
+        for reason, path in cases:
+            with self.subTest(reason):
+                for name in os.listdir(self.records):
+                    os.unlink(os.path.join(self.records, name))
+                doc = self.document(reach={"visible": [path]})
+                checked, check_lines = self.command("check", doc, env=env)
+                self.assertEqual(check_lines[-2], f"check: refused: {reason}")
+                self.command("run", doc, env=env)
+                self.assertEqual(
+                    self.ending(self.outcome()), ("could_not_start", reason, "input_check")
+                )
+                self.assertFalse(os.path.exists(self.witness))
+        for name in os.listdir(self.records):
+            os.unlink(os.path.join(self.records, name))
+        doc = self.document()
+        doc["reach"]["visible"].append(os.path.join(home, "tools"))  # inside the home: accepted
+        checked, check_lines = self.command("check", doc, env=env)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+
+    def test_a_reach_listing_folders_that_are_there_is_accepted_by_the_check_and_the_run(self):
+        doc = self.document()
+        doc["reach"]["visible"].append(self.root + "/support")
+        checked, check_lines = self.command("check", doc)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+        done, lines = self.command("run", doc)
+        self.assertEqual(lines[-1], "ended_by_itself")
 
     def test_a_matching_instruction_hash_and_reference_run(self):
         runbook = self.write("runbook.md", "contents")

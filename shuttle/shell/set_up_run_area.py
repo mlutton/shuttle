@@ -2,8 +2,8 @@
 
 The folder is made new, empty and private. The driver's requests (shuttle.core.run_area) are
 turned into a plan by the core and carried out here, in order, through the world's operations:
-every path the plan names is inside the area, except the sources it copies from or links to, which
-are only read (a share is a link, never opened). The folder is remembered in the state as soon as
+every path the plan names is inside the area, except the sources it copies from, which are only
+read. The folder is remembered in the state as soon as
 it exists, so the tear-down finds it however this step ends. A refused plan or a failed action
 fails the step with one line saying which.
 """
@@ -22,17 +22,31 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
         case "folder":
             files.make_folders(step["target"])
         case "copy":
-            if step.get("optional") and not files.exists(step["source"]):
+            # a link is followed only where the request said so (a login kept elsewhere and linked
+            # to); the file it leads to is what is copied
+            source = (
+                world.boundary.resolve(step["source"]) if step.get("follow") else step["source"]
+            )
+            if step.get("optional") and not files.exists(source):
                 return  # the request said a missing source is no error
-            files.copy_path(step["source"], step["target"], step["leave_out"])
-        case "share":
-            files.share_by_link(step["source"], step["target"])
+            files.copy_path(source, step["target"], step["leave_out"])
         case "write":
             files.write_new(step["target"], step["text"])
         case "writable":
             files.make_writable(step["target"])
         case never:
             assert_never(never)  # the type checker refuses a kind of step with no case here
+
+
+def _for(step: SetupStep) -> str:
+    """What a failed copy names: the file it was to copy and what to do about it. The name is the
+    caller's own path, shown as a quoted literal."""
+    if step["do"] != "copy":
+        return ""
+    return (
+        f" on {step['source']!r}; give a regular file the run may read at that path "
+        "(a pipe, a device or a socket cannot be copied), or take it out of the tool's setup"
+    )
 
 
 def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
@@ -50,8 +64,8 @@ def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
             _carry_out(world, step)
         except OSError as error:
             state["problems"]["setup"] = (
-                f"setup step {number} ({step['do']}) failed ({type(error).__name__}); "
-                "nothing was launched"
+                f"setup step {number} ({step['do']}) failed ({type(error).__name__})"
+                f"{_for(step)}; nothing was launched"
             )
             return {"ok": False}
     state["setup_variables"] = plan["variables"]

@@ -1,6 +1,6 @@
 """Step 8, wait for the end: until the executor exits or a signal is seen.
 
-The wait keeps no deadline: the boundary owns the time limit and ends the executor when it runs
+The wait keeps no deadline: the scope owns the time limit and ends the executor when it runs
 out, so the wait sees an exit. Why it ended is read in the next step.
 """
 

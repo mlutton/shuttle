@@ -70,7 +70,10 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         asked = os.path.join(self.root, "asked")
         runbook = self.script("runbook.txt", REFERENCE_TEXT)
         statement = os.path.join(self.root, "statement.json")
-        given, seen = os.path.join(self.root, "given"), os.path.join(self.root, "seen")
+        # What the script reports it writes in the place, the place, which outlives it; the test
+        # reads it there once the run is over.
+        linked = os.path.join(self.root, "linked-place")
+        given, seen = os.path.join(linked, "given"), os.path.join(linked, "seen")
         temporary = os.path.join(self.root, "temporary")
         os.mkdir(temporary)
         doc = self.document(script, [up, marker, STATEMENT_TEXT, given, temporary, seen], limit=1)
@@ -80,7 +83,7 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         # the place is a linked working copy of the caller's repository, as it is in use
         callers = os.path.join(self.root, "callers-repo")
         real_place.make_checkout(callers)
-        doc["place"] = os.path.join(self.root, "linked-place")
+        doc["place"] = linked
         head = real_place.make_linked_checkout(callers, doc["place"])
         doc["references"] = [  # an input check that passes
             {
@@ -125,14 +128,16 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
             ("time_limit", "time_limit", "none"),
         )
         self.assertIs(ending["everything_stopped"], True)
-        saw = receipt["execution"]  # the script wrote nothing in the place
-        self.assertEqual((saw["fingerprint_before"], saw["fingerprint_after"]), (head, head))
-        self.assertIs(saw["changed_nothing"], True)
+        saw = receipt["execution"]  # the script's reports in the place, nothing else
+        self.assertEqual(saw["fingerprint_before"], head)
+        self.assertEqual(
+            (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (2, 0, 0)
+        )
         self.assertEqual(self.processes_with(marker), 0)  # the child the script started is gone
         self.assertNotEqual(self.scope_state(), "active")
         self.assertTrue(os.path.exists(asked))  # the gate was asked, said yes, and the run went on
         self.assertEqual(self.units_left(), [])  # no scope of the run, a gate or the freeze is left
-        with open(seen) as f:  # one run area while it ran, holding the instruction's file
+        with open(seen) as f:  # one run area while it ran, holding what a run area starts with
             during = ast.literal_eval(f.read())
         with open(given) as f:  # the instruction, then the notice, on its standard input
             text = f.read()
@@ -145,7 +150,8 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertEqual(len(during), 1)
         ((name, held),) = during.items()
         self.assertTrue(name.startswith("shuttle-run-area-"))
-        self.assertEqual(held, ["shuttle-instruction.txt"])
+        # the instruction's file, and the executor's own home and `/tmp`, made empty
+        self.assertEqual(held, ["home", "shuttle-instruction.txt", "tmp"])
         self.assertEqual(os.listdir(temporary), [])  # removed whole at the end
         self.assertEqual(receipt["execution"]["teardown_failure"], "none")
         kept = os.path.join(self.records, "r-1.statement.kept")

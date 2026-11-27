@@ -84,4 +84,9 @@ def missing_setup_source(world: Operations, raw: Mapping[str, Any]) -> str | Non
     opened. The run's set-up fails on exactly such a path."""
     driver = of(raw)
     requests = driver.setup_requests(raw["executor"]["settings"], caller_variables(world, driver))
-    return next((s for s in run_area.required_sources(requests) if not world.files.exists(s)), None)
+    followed = run_area.followed_sources(requests)
+
+    def there(source: str) -> bool:
+        return world.files.exists(world.boundary.resolve(source) if source in followed else source)
+
+    return next((s for s in run_area.required_sources(requests) if not there(s)), None)

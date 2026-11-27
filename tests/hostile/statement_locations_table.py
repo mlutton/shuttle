@@ -3,7 +3,8 @@
 A row is a dict:
 - label: what is left there.
 - leaves: a line of Python the executor script runs to leave it. It sees `os`, `location` (the
-  statement's path in the run area) and `given` (a file that holds a secret line, which is not a statement).
+  statement's path in the run area, a folder the executor can write) and `given` (a file that holds
+  a secret line, which is not a statement, in a folder it can read and not write).
 
 Every row must end the run, write the outcome record, copy nothing
 beside the records and read `wrong_shape`. Opening a pipe nobody writes waits for ever, and `/dev/zero` never ends, so a
@@ -18,7 +19,7 @@ LOCATIONS = (
     {"label": "a link to /dev/zero", "leaves": "os.symlink('/dev/zero', location)"},
     {
         "label": "a link to a named pipe",
-        "leaves": "os.mkfifo(given + '.pipe'); os.symlink(given + '.pipe', location)",
+        "leaves": "os.mkfifo(location + '.pipe'); os.symlink(location + '.pipe', location)",
     },
     {"label": "a named pipe", "leaves": "os.mkfifo(location)"},
     {"label": "a folder", "leaves": "os.mkdir(location)"},

@@ -8,10 +8,14 @@ What an action means is one block (a subclass of `_Action`: its fields' shape ch
 steps it becomes), found by name in `ACTIONS`. The rules that hold between requests are in
 `plan`, which calls the blocks.
 
+The area also holds the executor's own home and temporary folders (`home` and `tmp`, made first,
+empty): the box binds `tmp` as the executor's `/tmp` and points `HOME` at `home`, so a driver puts
+what its tool needs from the caller (a login, a settings file) under `home` by copy, and all of it
+goes when the area does. Nothing is shared by link: the box hides the caller's own folders, so a
+link to one would lead nowhere inside it, and a copy cannot write back to the original.
+
 Why the refusals are what they are: a name is plain and relative so nothing a request names can
-be outside the area; a source is only handed on, never split or quoted; a shared path is linked,
-never copied or read, so a name under it is refused, since a write there would land in the
-original.
+be outside the area; a source is only handed on, never split or quoted.
 """
 
 import re
@@ -29,6 +33,10 @@ INSTRUCTION_NAME = "shuttle-instruction.txt"
 # request may name it.
 STATEMENT_NAME = "shuttle-statement.json"
 _KEPT_NAMES = (INSTRUCTION_NAME, STATEMENT_NAME)
+# The executor's home and its temporary folder, made in every area before any request is carried
+# out. They are made here, never by a request, so the box can bind them whatever a driver asks.
+HOME_NAME = "home"
+TMP_NAME = "tmp"
 
 _PART = r"(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+"
 _NAME = re.compile(f"{_PART}(?:/{_PART})*")
@@ -52,6 +60,16 @@ def _under(name: str, folder: str) -> bool:
 
 def _inside(area: str, name: str) -> str:
     return area + "/" + name
+
+
+def home_path(area: str) -> str:
+    """The executor's home, inside the run area."""
+    return _inside(area, HOME_NAME)
+
+
+def tmp_path(area: str) -> str:
+    """The folder that is the executor's `/tmp`, inside the run area."""
+    return _inside(area, TMP_NAME)
 
 
 def statement_path(area: str) -> str:
@@ -82,9 +100,9 @@ def _name_problem(index: int, request: SetupRequest, field: str = "name") -> str
 class _Action:
     """What one setup action is: how its request is checked, and what it becomes.
 
-    `role` picks the rule between requests the flow applies to it: a path made is made once and
-    never under a shared one; a path edited was made by an earlier request; a variable is passed
-    once; a name left out applies to every copy that holds it.
+    `role` picks the rule between requests the flow applies to it: a path made is made once; a
+    path edited was made by an earlier request; a variable is passed once; a name left out applies
+    to every copy that holds it.
     """
 
     role: Literal["makes", "edits", "passes", "leaves_out"]
@@ -112,7 +130,7 @@ def _folder_above(name: str, area: str) -> list[SetupStep]:
 
 
 class _Sourced(_Action):
-    """What a copy and a share have in common: a name made from an absolute source."""
+    """A copy: a name made from an absolute source."""
 
     role = "makes"
 
@@ -126,10 +144,18 @@ class _Sourced(_Action):
 
 class _Copy(_Sourced):
     def shape_problem(self, index: int, request: SetupRequest) -> str | None:
-        return super().shape_problem(index, request) or (
-            None
-            if isinstance(request.get("optional", False), bool)
-            else f"setup request {index + 1} (copy): optional is not true or false"
+        return (
+            super().shape_problem(index, request)
+            or (
+                None
+                if isinstance(request.get("optional", False), bool)
+                else f"setup request {index + 1} (copy): optional is not true or false"
+            )
+            or (
+                None
+                if isinstance(request.get("follow", False), bool)
+                else f"setup request {index + 1} (copy): follow is not true or false"
+            )
         )
 
     def steps(self, request: SetupRequest, area: str, leave_out: Sequence[str]) -> list[SetupStep]:
@@ -142,22 +168,12 @@ class _Copy(_Sourced):
         }
         if request.get("optional"):
             copy["optional"] = True
+        if request.get("follow"):
+            copy["follow"] = True
         return [*_folder_above(name, area), copy]
 
     def required_source(self, request: SetupRequest) -> str | None:
         return None if request.get("optional") else request["source"]
-
-
-class _Share(_Sourced):
-    def required_source(self, request: SetupRequest) -> str | None:
-        return request["source"]
-
-    def steps(self, request: SetupRequest, area: str, leave_out: Sequence[str]) -> list[SetupStep]:
-        name = request["name"]
-        return [
-            *_folder_above(name, area),
-            {"do": "share", "source": request["source"], "target": _inside(area, name)},
-        ]
 
 
 class _LeaveOut(_Action):
@@ -223,7 +239,6 @@ class _Variable(_Action):
 # for a name in `SetupAction` with no entry here.
 ACTIONS: dict[SetupAction, _Action] = {
     "copy": _Copy(),
-    "share": _Share(),
     "leave_out": _LeaveOut(),
     "write": _Write(),
     "writable": _Writable(),
@@ -240,29 +255,21 @@ def _shape_problem(index: int, request: object) -> str | None:
 
 
 def _taken_problem(index: int, request: SetupRequest, made: dict[str, str]) -> str | None:
-    """Why the name of a copy, share or write cannot be made now, or None."""
-    name = request["name"]
-    if name in made:
-        return f"setup request {index + 1}: {name!r} is made twice"
-    for earlier, how in made.items():
-        if how == "share" and _under(name, earlier):
-            return (
-                f"setup request {index + 1}: {name!r} is under {earlier!r}, which is shared in "
-                "place; anything made there would land in the original"
-            )
+    """Why the name of a copy or write cannot be made now, or None."""
+    if request["name"] in made:
+        return f"setup request {index + 1}: {request['name']!r} is made twice"
     return None
 
 
 def _writable_problem(index: int, request: SetupRequest, made: dict[str, str]) -> str | None:
     name = request["name"]
-    for earlier, how in made.items():
-        if how == "share" and (name == earlier or _under(name, earlier)):
-            return (
-                f"setup request {index + 1}: {name!r} is shared in place and is not made writable"
-            )
-    if name in made or any(_under(name, e) for e, how in made.items() if how == "copy"):
+    if name in made or any(_under(name, e) for e, how in made.items() if how in _HOLDS_BELOW):
         return None
     return f"setup request {index + 1}: {name!r} was not made by an earlier request"
+
+
+# What a made name holds below it: a copied folder, and the folders the area starts with.
+_HOLDS_BELOW = ("copy", "folder")
 
 
 def _left_out_of(target: str, leave_out: Sequence[str]) -> list[str]:
@@ -279,7 +286,7 @@ def _leave_out_problem(leave_out: Sequence[str], copies: Sequence[str]) -> str |
 def _is_made(name: str, made: dict[str, str]) -> bool:
     """Whether some request makes this name, or a path through it."""
     return any(
-        name == n or _under(n, name) or (how == "copy" and _under(name, n))
+        name == n or _under(n, name) or (how in _HOLDS_BELOW and _under(name, n))
         for n, how in made.items()
     )
 
@@ -330,9 +337,12 @@ def plan(area: str, requests: Sequence[SetupRequest]) -> SetupPlan:
         if problem:
             return _refused(problem)
     leave_out = [r["name"] for r in requests if ACTIONS[r["action"]].role == "leaves_out"]
-    steps: list[SetupStep] = []
+    steps: list[SetupStep] = [
+        {"do": "folder", "target": home_path(area)},
+        {"do": "folder", "target": tmp_path(area)},
+    ]
     variables: dict[str, str] = {}
-    made: dict[str, str] = {}
+    made: dict[str, str] = {HOME_NAME: "folder", TMP_NAME: "folder"}
     for index, request in enumerate(requests):
         problem = _one(index, request, area, leave_out, made, steps, variables)
         if problem:
@@ -349,8 +359,15 @@ def refusal(requests: Sequence[SetupRequest]) -> str | None:
     return plan("/area", requests)["problem"]
 
 
+def followed_sources(requests: Sequence[SetupRequest]) -> list[str]:
+    """The sources of copies that follow a link: the shell resolves each before it looks at it
+    or copies it, so a file kept elsewhere and linked to (a dotfile manager's) is copied as it
+    would be without the link."""
+    return [r["source"] for r in requests if r.get("action") == "copy" and r.get("follow")]
+
+
 def required_sources(requests: Sequence[SetupRequest]) -> list[str]:
-    """The paths outside the area that the set-up of these requests fails without (a copy's source
-    and a share's, unless the copy is optional), so a check can look for them before a run."""
+    """The paths outside the area that the set-up of these requests fails without (a copy's source,
+    unless the copy is optional), so a check can look for them before a run."""
     held = [ACTIONS[r["action"]].required_source(r) for r in requests if r["action"] in ACTIONS]
     return [source for source in held if source is not None]

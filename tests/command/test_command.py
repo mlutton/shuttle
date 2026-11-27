@@ -19,15 +19,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 flat = importlib.import_module("rehearsal.receipts").flat
 the_boundary = importlib.import_module("rehearsal.the_boundary")
 real_place = importlib.import_module("rehearsal.real_place")
+real_run = importlib.import_module("rehearsal.real_run")
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ENDS_BY_ITSELF = """
-import os, sys
-witness, request_record, code = sys.argv[1], sys.argv[2], int(sys.argv[3])
+import sys
+witness, code = sys.argv[1], int(sys.argv[2])
 with open(witness, "w") as f:
-    f.write("request record existed at start: %s" % os.path.exists(request_record))
+    f.write("ran")
 sys.exit(code)
+"""
+
+# Says it is up (argv 1, a pipe), then waits to be let go (argv 2, a pipe), then ends.
+WAITS_TO_BE_LET_GO = """
+import sys
+open(sys.argv[1], "w").write("up")
+open(sys.argv[2]).read()
 """
 
 
@@ -41,10 +49,14 @@ class CommandSeam(unittest.TestCase):
         os.mkdir(self.records)
         self.place = os.path.join(self.root, "place")
         real_place.make_checkout(self.place)
-        self.script = os.path.join(self.root, "script.py")
+        # What the executor may read (its script, the pipes it says it is up through) is listed as
+        # visible; what it writes is in the place, the one folder it can write that outlives it.
+        self.support = os.path.join(self.root, "support")
+        os.mkdir(self.support)
+        self.script = os.path.join(self.support, "script.py")
         with open(self.script, "w") as f:
             f.write(ENDS_BY_ITSELF)
-        self.witness = os.path.join(self.root, "witness.txt")
+        self.witness = os.path.join(self.place, "witness.txt")
 
     def document(self, request_id="req-1", exit_code=0, **extra):
         doc = {
@@ -56,16 +68,12 @@ class CommandSeam(unittest.TestCase):
             "round": 1,
             "kind": "plain",
             "time_limit_seconds": 30,
+            "reach": {"visible": [self.support, *real_run.INTERPRETER_FOLDERS]},
             "executor": {
                 "name": "command",
                 "settings": {
-                    "command": sys.executable,
-                    "arguments": [
-                        self.script,
-                        self.witness,
-                        os.path.join(self.records, f"{request_id}.request.json"),
-                        str(exit_code),
-                    ],
+                    "command": real_run.INTERPRETER,
+                    "arguments": [self.script, self.witness, str(exit_code)],
                 },
             },
         }
@@ -109,14 +117,28 @@ class CommandSeam(unittest.TestCase):
         self.assertEqual(done.stderr, "")
 
     def test_the_request_record_exists_before_the_script_starts(self):
-        done, _ = self.run_command(self.document())
-        self.assertEqual(done.returncode, 0, done.stderr)
-        with open(self.witness) as f:
-            self.assertEqual(f.read(), "request record existed at start: True")
+        # The script cannot see the records, so it waits, through two pipes, while the test
+        # looks: the record is there while the script has started and not ended.
+        ready, go = (os.path.join(self.support, n) for n in ("ready", "go"))
+        os.mkfifo(ready)
+        os.mkfifo(go)
+        with open(self.script, "w") as f:
+            f.write(WAITS_TO_BE_LET_GO)
+        doc = self.document()
+        doc["executor"]["settings"]["arguments"] = [self.script, ready, go]
+        proc = self.spawn(doc)
+        with open(ready) as f:
+            f.read()
+        self.assertTrue(os.path.exists(os.path.join(self.records, "req-1.request.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.records, "req-1.outcome.json")))
+        with open(go, "w") as f:
+            f.write("go")
+        _, stderr = proc.communicate(timeout=60)
+        self.assertEqual((proc.returncode, stderr), (0, ""))
         request = self.read("req-1.request.json")
         self.assertEqual(request["header"]["record_type"], "request")
         self.assertEqual(request["header"]["request_id"], "req-1")
-        self.assertEqual(json.loads(request["input"]), self.document())
+        self.assertEqual(json.loads(request["input"]), doc)
         self.assertEqual(request["header"]["thread"], "thread-1")
         self.assertEqual(request["header"]["round"], 1)
         self.assertEqual(request["header"]["kind"], "plain")
@@ -355,7 +377,7 @@ class CommandSeam(unittest.TestCase):
     def sleeping_document(self, **extra):
         """A script that says it is running (through a pipe, which the test reads: no polling)
         and then sleeps."""
-        ready = os.path.join(self.root, "ready")
+        ready = os.path.join(self.support, "ready")
         os.mkfifo(ready)
         with open(self.script, "w") as f:
             f.write("import sys, time\nopen(sys.argv[1], 'w').write('up')\ntime.sleep(60)\n")
@@ -487,7 +509,7 @@ class CommandSeam(unittest.TestCase):
 
     def environment_script(self):
         with open(self.script, "w") as f:
-            f.write("import json, os, sys\njson.dump(sorted(os.environ), open(sys.argv[1], 'w'))\n")
+            f.write("import json, os, sys\njson.dump(dict(os.environ), open(sys.argv[1], 'w'))\n")
 
     def test_the_executor_gets_path_and_the_named_variables_and_no_values_are_recorded(self):
         self.environment_script()
@@ -503,7 +525,9 @@ class CommandSeam(unittest.TestCase):
         self.assertIn("PATH", seen)
         self.assertIn("SHUTTLE_TEST_NAMED", seen)
         self.assertNotIn("SHUTTLE_TEST_OTHER", seen)
-        self.assertNotIn("HOME", seen)
+        # HOME is the box's: the executor's own home in its run area, never the caller's
+        self.assertNotEqual(seen["HOME"], os.environ.get("HOME"))
+        self.assertTrue(seen["HOME"].endswith("/home"), seen["HOME"])
         for name in os.listdir(self.records):
             with open(os.path.join(self.records, name)) as f:
                 text = f.read()
@@ -554,11 +578,11 @@ class CommandSeam(unittest.TestCase):
         # The script cannot change the records (the boundary protects them), so the test does it
         # while the script waits: the script says it is running, the test makes the records
         # folder read-only, and the script is let go.
-        ready, go = (os.path.join(self.root, n) for n in ("ready", "go"))
+        ready, go = (os.path.join(self.support, n) for n in ("ready", "go"))
         os.mkfifo(ready)
         os.mkfifo(go)
         with open(self.script, "w") as f:
-            f.write("import sys\nopen(sys.argv[1], 'w').write('up')\nopen(sys.argv[2]).read()\n")
+            f.write(WAITS_TO_BE_LET_GO)
         doc = self.document()
         doc["executor"]["settings"]["arguments"] = [self.script, ready, go]
         proc = self.spawn(doc)

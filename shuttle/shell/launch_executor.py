@@ -1,12 +1,14 @@
-"""Step 7, launch the executor: start it in the boundary, with the limit and the records protected.
+"""Step 7, launch the executor: start it in the boundary, with the limit and its reach.
 
 The boundary is a systemd user scope around bubblewrap (shuttle.core.boundary). The scope owns the
-time limit; nothing here times the executor.
+time limit; nothing here times the executor. The reach is built here from resolved paths, so the
+box binds what the checks looked at.
 """
 
 from collections.abc import Sequence
 
-from shuttle.core import boundary, decisions, fixed, notice, run_area
+from shuttle.core import boundary, decisions, fixed, notice, refusals, run_area
+from shuttle.core import place as git_place
 from shuttle.core.shapes import Operations, RunState
 from shuttle.shell import kinds, statement_schema, the_driver
 
@@ -19,6 +21,15 @@ def caller_environment(world: Operations, names: Sequence[str]) -> dict[str, str
         if value is not None:
             found[name] = value
     return found
+
+
+def resolver_file(world: Operations) -> str | None:
+    """The file `/etc/resolv.conf` leads to, when it leads to one that is there (the box shows
+    what the core decides to; this is only the fact)."""
+    target = world.boundary.resolve("/etc/resolv.conf")
+    if world.files.exists(target) and not world.files.is_folder(target):
+        return target
+    return None
 
 
 def put_instruction(state: RunState) -> str:
@@ -58,20 +69,25 @@ def step(state: RunState) -> None:
     if source is None:
         raise RuntimeError("no header source: the document was not read")
     name = boundary.scope_name(source["request_id"], state["run_part"])
-    # The records (and the files kept beside them) and every reference are read-only to the executor.
-    protected = [
-        world.boundary.resolve(path)
-        for path in [source["records_location"], *(r["path"] for r in raw.get("references", []))]
-    ]
+    resolve = world.boundary.resolve
+    place = resolve(raw["place"])
+    area = resolve(state["run_area"])
+    reach: boundary.Reach = {
+        "place": place,
+        "area": area,
+        "home": run_area.home_path(area),
+        "tmp": run_area.tmp_path(area),
+        "references": [resolve(r["path"]) for r in raw.get("references", [])],
+        "visible": [resolve(path) for path in refusals.visible_paths(raw.get("reach"))],
+        "git_folders": world.git.git_folders(
+            place, git_place.git_environment(world.environment.read_variable("PATH"))
+        ),
+        "resolver": resolver_file(world),
+        "records": resolve(source["records_location"]),
+    }
     report = world.processes.open_report()
     argv = boundary.launch_argv(
-        name,
-        float(raw["time_limit_seconds"]),
-        spec["argv"],
-        names,
-        protected,
-        report,
-        world.boundary.resolve(raw["place"]),
+        name, float(raw["time_limit_seconds"]), spec["argv"], names, reach, report
     )
     state["started_at"] = world.clock.timestamp()
     state["clock_start"] = world.clock.now()

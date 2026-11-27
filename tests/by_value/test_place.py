@@ -246,24 +246,31 @@ class TheFreezeCommand(unittest.TestCase):
 
 
 class TheExecutorsWorkingDirectory(unittest.TestCase):
-    def test_the_executor_starts_in_the_place_when_one_is_given_and_nowhere_in_particular_otherwise(
-        self,
-    ):
-        with_place = boundary.launch_argv("n", 1, ["tool"], [], [], 3, "/p")
-        without = boundary.launch_argv("n", 1, ["tool"], [], [], 3)
-        inside = [part.replace("$$", "$") for part in with_place]
+    @staticmethod
+    def argv_for(where):
+        reach: boundary.Reach = {
+            "place": where,
+            "area": "/area",
+            "home": "/area/home",
+            "tmp": "/area/tmp",
+            "references": [],
+            "visible": [],
+            "git_folders": [],
+            "resolver": None,
+            "records": "/rec",
+        }
+        return [p.replace("$$", "$") for p in boundary.launch_argv("n", 1, ["t"], [], reach, 3)]
+
+    def test_the_executor_starts_in_the_place_before_its_own_command(self):
+        inside = self.argv_for("/p")
         at = inside.index("--chdir")
         self.assertEqual(inside[at : at + 2], ["--chdir", "/p"])
-        self.assertLess(at, inside.index("--", at))  # before the executor's own command
-        self.assertNotIn("--chdir", without)
+        self.assertLess(at, inside.index("--", at))
 
     def test_a_place_with_awkward_characters_is_one_argument_unchanged(self):
         for where in ("/a b", "/$HOME", "/-x", "/a\nb", "/50%h"):
             with self.subTest(where):
-                argv = [
-                    p.replace("$$", "$")
-                    for p in boundary.launch_argv("n", 1, ["t"], [], [], 3, where)
-                ]
+                argv = self.argv_for(where)
                 self.assertEqual(argv[argv.index("--chdir") + 1], where)
 
 

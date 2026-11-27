@@ -46,7 +46,8 @@ class TheDocumentCarriesTheCheckedParts(unittest.TestCase):
         ("no gates", {"gates": []}),
         ("a statement location", {"statement_location": "/out/statement.json"}),
         ("an empty reach", {"reach": {}}),
-        ("reach, which the checks refuse by its content", {"reach": {"read": ["/etc"]}}),
+        ("reach listing a folder, which the checks look at", {"reach": {"visible": ["/etc"]}}),
+        ("reach of another shape, which the checks refuse", {"reach": {"read": ["/etc"]}}),
     )
 
     def test_each_part_is_accepted_by_the_shape_check(self):

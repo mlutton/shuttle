@@ -3,7 +3,7 @@
 The git work is one command run to its end in a scope of its own with its limit on the scope,
 the way a gate is run (shuttle.shell.gates): nothing here times it. Afterwards the scope is
 stopped by name and seen empty, and why it ended is read from it. The step runs only when the
-executor's boundary was seen empty, so nothing is writing the place. A freeze that does not give
+executor's scope was seen empty, so nothing is writing the place. A freeze that does not give
 a whole answer is a failed closing freeze: no closing fingerprint, the opening one stands.
 """
 

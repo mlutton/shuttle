@@ -228,18 +228,127 @@ class CheckStatementLocation(RefusalCase):
                 self.assertIn("expects no statement", got["problem"])
 
 
-class CheckReach(RefusalCase):
-    def test_absent_and_empty_reach_are_accepted(self):
-        for reach in (None, {}, []):
-            with self.subTest(reach):
-                self.assertIsNone(refusals.check_reach(reach))
+def look(path, exists=True, folder=True, resolved=None):
+    return {path: {"exists": exists, "folder": folder, "resolved": resolved or path}}
 
-    def test_any_content_is_reach_not_available(self):
-        for reach in ({"read": ["/etc"]}, ["x"], "all", 1, True, 0, ""):
+
+class CheckReach(RefusalCase):
+    def test_a_reach_left_out_or_empty_or_listing_nothing_is_accepted(self):
+        for reach in (None, {}, {"visible": []}):
             with self.subTest(reach):
-                self.assertRefusal(
-                    refusals.check_reach(reach), "reach_not_available", "input_check"
+                self.assertIsNone(refusals.check_reach(reach, {}, "/rec"))
+
+    def test_folders_that_are_there_and_away_from_the_records_are_accepted(self):
+        reach = {"visible": ["/opt/tool", "/srv/data"]}
+        looked = {**look("/opt/tool"), **look("/srv/data")}
+        self.assertIsNone(refusals.check_reach(reach, looked, "/rec"))
+
+    def test_a_reach_that_is_not_an_object_of_a_list_of_texts_is_reach_not_valid(self):
+        for reach in (["x"], "all", 1, True, 0, "", {"visible": "/opt"}, {"visible": [1]}):
+            with self.subTest(reach):
+                got = refusals.check_reach(reach, {}, "/rec")
+                self.assertRefusal(got, "reach_not_valid", "input_check")
+        self.assertRefusal(
+            refusals.check_reach({"visible": [""]}, {}, "/rec"), "reach_not_valid", "input_check"
+        )
+
+    def test_a_member_other_than_visible_is_an_unknown_field_and_is_named(self):
+        got = refusals.check_reach({"read": ["/etc"], "visible": []}, {}, "/rec")
+        self.assertRefusal(got, "unknown_field", "input_check")
+        self.assertIn("'read'", got["problem"])
+
+    def test_a_path_that_is_not_absolute_is_refused_and_named(self):
+        for path in ("opt/tool", "./tool", "~/tool", "../x"):
+            with self.subTest(path):
+                got = refusals.check_reach({"visible": [path]}, {}, "/rec")
+                self.assertRefusal(got, "visible_not_absolute", "input_check")
+                self.assertIn(repr(path), got["problem"])
+
+    def test_a_path_that_is_not_there_is_refused_and_named(self):
+        got = refusals.check_reach(
+            {"visible": ["/opt/tool"]}, look("/opt/tool", exists=False, folder=False), "/rec"
+        )
+        self.assertRefusal(got, "visible_missing", "input_check")
+        self.assertIn("'/opt/tool'", got["problem"])
+
+    def test_a_path_that_is_not_a_folder_is_refused(self):
+        got = refusals.check_reach(
+            {"visible": ["/opt/tool"]}, look("/opt/tool", folder=False), "/rec"
+        )
+        self.assertRefusal(got, "visible_not_a_folder", "input_check")
+
+    def test_the_records_folder_a_folder_that_holds_it_and_one_inside_it_are_refused(self):
+        for path, resolved in (
+            ("/rec", "/rec"),
+            ("/", "/"),
+            ("/rec/old", "/rec/old"),
+            ("/l", "/rec"),
+        ):
+            with self.subTest(path):
+                got = refusals.check_reach(
+                    {"visible": [path]}, look(path, resolved=resolved), "/rec"
                 )
+                self.assertRefusal(got, "visible_overlaps_the_records", "input_check")
+
+    def test_the_boxs_own_folders_and_what_holds_them_are_refused_and_what_is_under_them_is_not(
+        self,
+    ):
+        for path in ("/tmp", "/proc", "/dev"):
+            with self.subTest(path):
+                got = refusals.check_reach({"visible": [path]}, look(path), "/rec")
+                self.assertRefusal(got, "visible_overlaps_the_box", "input_check")
+                self.assertIn("list a folder under it", got["problem"])
+        for path in ("/tmp/tool", "/dev/shm", "/proc/sys", "/opt"):
+            with self.subTest(path):
+                self.assertIsNone(refusals.check_reach({"visible": [path]}, look(path), "/rec"))
+
+    def test_the_users_runtime_folder_the_folders_above_it_and_the_box_s_are_refused(self):
+        runtime = "/run/user/1000"
+        for path in (runtime, "/run/user", "/run"):
+            with self.subTest(path):
+                got = refusals.check_reach({"visible": [path]}, look(path), "/rec", runtime)
+                self.assertTrue(got, path)
+                self.assertEqual(got["reason"], "visible_overlaps_the_runtime_folder")
+                self.assertIn(runtime, got["problem"])
+        # without a runtime folder (the caller has none) `/run` is only a folder
+        self.assertIsNone(refusals.check_reach({"visible": ["/run"]}, look("/run"), "/rec", None))
+        self.assertIsNone(
+            refusals.check_reach(
+                {"visible": ["/run/systemd"]}, look("/run/systemd"), "/rec", runtime
+            )
+        )
+
+    def test_the_home_folder_and_what_holds_it_are_refused_and_a_folder_inside_it_is_not(self):
+        home = "/home/someone"
+        for path in (home, "/home"):
+            got = refusals.check_reach({"visible": [path]}, look(path), "/rec", None, home)
+            self.assertRefusal(got, "visible_overlaps_the_home_folder", "input_check")
+            self.assertIn("list the specific folders the tool needs instead", got["problem"])
+        inside = f"{home}/.local/share/tool"
+        self.assertIsNone(
+            refusals.check_reach({"visible": [inside]}, look(inside), "/rec", None, home)
+        )
+        self.assertIsNone(
+            refusals.check_reach(
+                {"visible": ["/home/other"]}, look("/home/other"), "/rec", None, home
+            )
+        )
+
+    def test_a_folder_beside_the_records_whose_name_starts_the_same_is_accepted(self):
+        self.assertIsNone(refusals.check_reach({"visible": ["/rec2"]}, look("/rec2"), "/rec"))
+
+    def test_the_first_listed_path_with_a_problem_is_the_one_named(self):
+        looked = {**look("/a", exists=False, folder=False), **look("/b", folder=False)}
+        got = refusals.check_reach(
+            {"visible": ["/ok", "/b", "/a"]}, {**looked, **look("/ok")}, "/r"
+        )
+        self.assertRefusal(got, "visible_not_a_folder", "input_check")
+
+    def test_the_visible_paths_are_those_listed_and_none_for_a_reach_that_is_refused(self):
+        self.assertEqual(refusals.visible_paths({"visible": ["/a", "/b"]}), ["/a", "/b"])
+        for reach in (None, {}, ["/a"], {"visible": "/a"}, {"other": 1}):
+            with self.subTest(reach):
+                self.assertEqual(refusals.visible_paths(reach), [])
 
 
 class LooksLikeCredential(unittest.TestCase):

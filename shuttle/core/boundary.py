@@ -1,14 +1,22 @@
-"""The boundary: decisions about the box the executor (and each gate) runs in, as pure functions.
+"""The boundary: decisions about the scope and the box the executor runs in, and about the scopes
+a gate and the closing freeze run in (they have no box), as pure functions.
 
-The box is a systemd user scope around bubblewrap. The scope owns the time limit (its maximum
-runtime) and the grace between asking and killing (its stop timeout); it ends everything inside
-when either runs out, and the reason it ended can be read afterwards from its properties. Nothing
-here touches the world: the shell reads the properties and acts on these answers.
+The scope is a systemd user scope. It owns the time limit (its maximum runtime) and the grace
+between asking and killing (its stop timeout); it ends everything inside when either runs out,
+and the reason it ended can be read afterwards from its properties. The box is bubblewrap, started
+inside the scope: it applies the executor's reach, which is hidden unless declared. Only what the
+box binds in is there; the system folders and `/etc` are read-only, the place and the run area are
+writable, and the rest of the machine (the caller's home folder, other checkouts, the user's
+runtime folder with its systemd and D-Bus sockets, the real `/tmp`, the records) is not. The
+reach limits what a lost or confused agent can do by mistake; it is not a security sandbox.
+Nothing here touches the world: the shell reads the properties and gathers the paths, and acts on
+these answers.
 """
 
 import json
 import math
 from collections.abc import Mapping, Sequence
+from typing import TypedDict
 
 from shuttle.core import refusals
 
@@ -32,7 +40,7 @@ PROPERTIES = ("LoadState", "ActiveState", "Result")
 # unless the caller named them.
 BUS_VARIABLES = ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
 
-# Why the boundary ended.
+# Why the scope ended.
 TIMED_OUT = "timed_out"
 ENDED = "ended"
 CANNOT_TELL = "cannot_tell"
@@ -93,23 +101,155 @@ def for_the_scope_tool(argv: Sequence[str]) -> list[str]:
     return [part.replace("$", "$$") for part in argv]
 
 
+class Reach(TypedDict):
+    """The paths of one run's reach, each already resolved (absolute, no link, no `..`).
+
+    The box makes the system folders and `/etc` read-only; `visible` and `references` are
+    read-only, `place`, `area` and `git_folders` writable. `home` and `tmp`
+    are folders inside `area`: `tmp` is the executor's `/tmp` and `home` its `HOME`. `records` is
+    hidden whatever else is bound.
+
+    `git_folders` are the place's own git folder and the one it shares with the checkout it was
+    made from, as the shell found them: for a linked working copy (the usual place) they are
+    outside the place, and git cannot run without them. Nothing else of the repository the place
+    was made from is shown. `resolver` is the file `/etc/resolv.conf` leads
+    to, when there is one (see `_resolver_bind`).
+    """
+
+    place: str
+    area: str
+    home: str
+    tmp: str
+    references: Sequence[str]
+    visible: Sequence[str]
+    git_folders: Sequence[str]
+    resolver: str | None
+    records: str
+
+
+# Where the system keeps its programs, libraries and configuration. `/usr` and `/etc` are
+# bound as they are. The four others are links into `/usr` on most machines and folders of their
+# own on some, and a "try" bind follows a link and is skipped where the name is not there, so one
+# argument list serves each layout. (A link bound by name would lead nowhere inside the box.)
+_SYSTEM_FOLDERS = ("/usr", "/etc")
+_SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib64")
+
+
+def _depth(path: str) -> int:
+    return path.count("/") if path != "/" else 0
+
+
+def _reach_binds(reach: Reach) -> list[str]:
+    """What binds the reach's own paths, in the order they must be given.
+
+    A bind covers whatever an earlier one put at or below its destination, so a path must come
+    after every path above it: a folder listed as visible can hold the place, a reference can be
+    inside the place, and the place can be under the machine's temporary folder, which was bound
+    over before any of them. Ordered by the depth of the destination, and for equal depth with the
+    read-only ones first so a path that is both visible and the place stays writable (a listing
+    never makes anything read-only or writable that was not).
+    """
+    wanted = [
+        (path, 0, ["--ro-bind", path, path])
+        for path in dict.fromkeys([*reach["visible"], *reach["references"]])
+    ]
+    wanted += [(path, 1, ["--bind", path, path]) for path in _writable(reach)]
+    wanted.sort(key=lambda item: (_depth(item[0]), item[1]))
+    return [part for _, _, parts in wanted for part in parts]
+
+
+def _inside(path: str, folder: str) -> bool:
+    return refusals.inside_folder(path, folder)
+
+
+def _writable(reach: Reach) -> list[str]:
+    held = [reach["area"], reach["place"]]
+    every = list(dict.fromkeys(reach["git_folders"]))
+    for folder in every:
+        others = [other for other in (*held, *every) if other != folder]
+        if not any(_inside(folder, other) for other in others):
+            held.append(folder)
+    return held
+
+
+# The paths the box's own binds are made at: a file the shell found under one of these is already
+# shown or replaced by those binds, so it is not bound again.
+_BOX_OWN = ("/usr", "/etc", "/tmp", "/proc", "/dev")
+
+
+def _resolver_bind(reach: Reach) -> list[str]:
+    """The bind that makes name lookup work where `/etc/resolv.conf` is a link to a file outside
+    `/etc`: the link would lead nowhere in the box, and a bind cannot be made onto a link, so the
+    file it leads to is bound at its own path, as the link names it. Nothing is bound where the
+    file is a plain one in `/etc`, is under `/usr` (shown already) or is under `/tmp` (which the
+    executor's own would cover), or where there is no file. The rest of `/run` stays hidden."""
+    target = reach["resolver"]
+    if target is None or any(_inside(target, own) for own in _BOX_OWN):
+        return []
+    return ["--ro-bind", target, target]
+
+
+def _hidden_records(reach: Reach) -> list[str]:
+    """The cover for the records folder when it sits inside a path the box binds in from the host
+    where hiding by not binding it is not enough: an
+    empty temporary filesystem over it. Elsewhere it is simply not bound."""
+    holders = [
+        *_SYSTEM_FOLDERS,
+        reach["place"],
+        reach["area"],
+        *reach["git_folders"],
+        *reach["references"],
+        *reach["visible"],
+    ]
+    inside = any(refusals.inside_folder(reach["records"], holder) for holder in holders)
+    return ["--tmpfs", reach["records"]] if inside else []
+
+
+def box_arguments(reach: Reach) -> list[str]:
+    """The bubblewrap arguments that give the executor its reach (the box), up to but not
+    including its working directory and command."""
+    return [
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        *[part for link in _SYSTEM_LINKS for part in ("--ro-bind-try", link, link)],
+        "--ro-bind",
+        "/etc",
+        "/etc",
+        *_resolver_bind(reach),
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        # The executor's own `/tmp`, bound before every path that may be under the real `/tmp`
+        # (the place, the run area, a reference, a visible folder in a test, often): a later
+        # bind over `/tmp` would hide each of them.
+        "--bind",
+        reach["tmp"],
+        "/tmp",
+        *_reach_binds(reach),
+        *_hidden_records(reach),
+        "--setenv",
+        "HOME",
+        reach["home"],
+    ]
+
+
 def launch_argv(
     name: str,
     limit_seconds: float,
     argv: Sequence[str],
     environment_names: Sequence[str],
-    protected_paths: Sequence[str],
+    reach: Reach,
     report_fd: int,
-    working_directory: str | None = None,
 ) -> list[str]:
     """The command that starts `argv` in the boundary.
 
     A scope with the limit and the grace, around bubblewrap with its own process space that dies
-    with its parent, the whole filesystem bound in and each protected path bound read-only over
-    it. The variables the shell needed to reach systemd are taken out of the executor's
-    environment unless the caller named them. Bubblewrap's status report goes to the descriptor
-    `report_fd`, which says whether the executor was ever started (see `executor_started`).
-    The executor starts in `working_directory` when one is given.
+    with its parent and the reach `box_arguments` gives it. The variables the shell needed to
+    reach systemd are taken out of the executor's environment unless the caller named them.
+    Bubblewrap's status report goes to the descriptor `report_fd`, which says whether the
+    executor was ever started (see `executor_started`). The executor starts in the place.
     """
     left_out = [v for v in BUS_VARIABLES if v not in environment_names]
     return [
@@ -130,16 +270,10 @@ def launch_argv(
                 "--die-with-parent",
                 "--json-status-fd",
                 str(report_fd),
-                "--bind",
-                "/",
-                "/",
-                *[part for path in protected_paths for part in ("--ro-bind", path, path)],
-                "--dev",
-                "/dev",
-                "--proc",
-                "/proc",
+                *box_arguments(reach),
                 *[part for variable in left_out for part in ("--unsetenv", variable)],
-                *(["--chdir", working_directory] if working_directory is not None else []),
+                "--chdir",
+                reach["place"],
                 "--",
                 *argv,
             ]
@@ -148,7 +282,7 @@ def launch_argv(
 
 
 def why_ended(properties: Mapping[str, str] | None) -> str:
-    """Why the boundary ended, from its properties after it was stopped: "timed_out", "ended" or
+    """Why the scope ended, from its properties after it was stopped: "timed_out", "ended" or
     "cannot_tell". None means the properties could not be read.
 
     Only the scope's own timer reads as "timed_out". A scope that is still running, or that
@@ -164,22 +298,22 @@ def why_ended(properties: Mapping[str, str] | None) -> str:
     return CANNOT_TELL
 
 
-def is_empty(properties: Mapping[str, str] | None) -> bool:
-    """Whether the boundary is seen empty: its scope is gone or failed. Unreadable is not empty."""
+def scope_is_empty(properties: Mapping[str, str] | None) -> bool:
+    """Whether the scope is seen empty: it is gone or failed. Unreadable is not empty."""
     return properties is not None and properties.get("ActiveState") in _SETTLED
 
 
-def cause_of_end(wait: str | None, boundary_end: str) -> str:
-    """The cause that ended the wait, refined by why the boundary ended.
+def cause_of_end(wait: str | None, scope_end: str) -> str:
+    """The cause that ended the wait, refined by why the scope ended.
 
     The wait ends when the executor exits, or a signal or a stop record is seen. When it ended
-    by the executor going away, the boundary says whether that was the limit.
+    by the executor going away, the scope says whether that was the limit.
     """
     if wait != "exited":
         return wait or CANNOT_TELL
-    if boundary_end == TIMED_OUT:
+    if scope_end == TIMED_OUT:
         return "time_limit"
-    if boundary_end == ENDED:
+    if scope_end == ENDED:
         return "exited"
     return CANNOT_TELL
 
@@ -203,12 +337,12 @@ def executor_started(report: str) -> bool:
 
 
 def launch_failed(cause: str, report: str) -> bool:
-    """Whether the boundary never started the executor: the box was seen to end by itself and
+    """Whether the boundary never started the executor: the scope was seen to end by itself and
     bubblewrap never reported the executor running.
 
     That reads the same whether a tool was missing, `systemd-run` could not make the scope or
     `bwrap` could not make the box. A time limit, a signal, or a cause that cannot be told is
-    not read as a failed launch: the timer may end the box before it reports, and a failed
+    not read as a failed launch: the timer may end the scope before it reports, and a failed
     launch is never a guess.
     """
     return cause == "exited" and not executor_started(report)
@@ -224,7 +358,7 @@ def wait_cause(child_exited: bool, signal_name: str | None) -> str | None:
     return None
 
 
-# A gate is not boxed in bubblewrap: it runs in a scope of its own, with its limit on the scope,
+# A gate has no box: it runs in a scope of its own, with its limit on the scope,
 # started through this one line of shell. The line says on the report descriptor that the gate's
 # command is about to start (the scope's own tool exits with status 1 when it cannot make the
 # scope, which a gate would read as its "no"), takes the variables that reached the user's systemd

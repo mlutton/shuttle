@@ -72,6 +72,10 @@ def exists(path: str) -> bool:
     return os.path.lexists(path)
 
 
+def is_folder(path: str) -> bool:
+    return os.path.isdir(path)
+
+
 def write_new(path: str, text: str) -> None:
     with open(path, "x", encoding="utf-8") as f:
         f.write(text)
@@ -163,11 +167,6 @@ def copy_path(existing: str, new: str, left_out: Sequence[str]) -> None:
         raise
 
 
-def share_by_link(existing: str, new: str) -> None:
-    os.stat(existing)  # looks, never opens: FileNotFoundError when it is not there
-    os.symlink(existing, new)
-
-
 def _add_owner_write(path: str, mode: int) -> None:
     os.chmod(path, mode | stat.S_IWUSR | (stat.S_IXUSR if stat.S_ISDIR(mode) else 0))
 
@@ -201,6 +200,7 @@ FILES = FileOperations(
     read=read,
     read_lines=read_lines,
     exists=exists,
+    is_folder=is_folder,
     write_new=write_new,
     link=link,
     copy=copy,
@@ -210,7 +210,6 @@ FILES = FileOperations(
     make_temporary_folder=make_temporary_folder,
     make_folders=make_folders,
     copy_path=copy_path,
-    share_by_link=share_by_link,
     make_writable=make_writable,
     remove_tree=remove_tree,
 )

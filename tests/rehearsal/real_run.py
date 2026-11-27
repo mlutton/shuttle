@@ -36,6 +36,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # What the boundary needs on a PATH besides a stand-in's folder: the system's own two folders.
 SYSTEM_PATH = ("/usr/bin", "/bin")
 
+# The interpreter a script runs under inside the box, and the folder that holds it and its
+# libraries. The suite's own interpreter is a link from a virtual environment (or a copy of one
+# under the hosted runner's tool cache), which the box hides, so a run names the real file and
+# lists its installation as visible (the way a caller does for a tool installed in a hidden
+# folder). On a machine where it is under /usr this lists a folder the box already shows.
+INTERPRETER = os.path.realpath(sys.executable)
+INTERPRETER_FOLDERS = (os.path.realpath(sys.base_prefix),)
+
 
 def tool_driver_names():
     """The names of the drivers whose tool is a program of its own, not the plain command."""
@@ -45,26 +53,35 @@ def tool_driver_names():
 class RealRun(unittest.TestCase):
     """The set-up shared by the tests that run a real script in the real boundary."""
 
+    # The folder the test's own folders are made in; None is the machine's temporary folder. A
+    # test of where the box's paths may live sets it to another.
+    ROOT_PARENT: str | None = None
+
     def setUp(self):
         the_boundary.require(self)
         self.limits = dict(DEFAULT_LIMITS)
-        tmp = tempfile.TemporaryDirectory()
+        tmp = tempfile.TemporaryDirectory(dir=self.ROOT_PARENT)
         self.addCleanup(tmp.cleanup)
         self.root = os.path.realpath(tmp.name)
         self.records = os.path.join(self.root, "records")
         self.records_folders = [self.records]  # every records folder a run of this test uses
         self.place = os.path.join(self.root, "place")
+        # What the executor may read but not write, listed as visible in every document: its
+        # scripts, the pipes it says it is up through (a named pipe can be written to where a file
+        # cannot) and the stand-in tool. The test's root is not: it holds the records.
+        self.support = os.path.join(self.root, "support")
         os.mkdir(self.records)
+        os.mkdir(self.support)
         real_place.make_checkout(self.place)
 
     def script(self, name, text):
-        path = os.path.join(self.root, name)
+        path = os.path.join(self.support, name)
         with open(path, "w") as f:
             f.write(text)
         return path
 
     def pipe(self, name):
-        path = os.path.join(self.root, name)
+        path = os.path.join(self.support, name)
         os.mkfifo(path)
         return path
 
@@ -78,9 +95,10 @@ class RealRun(unittest.TestCase):
             "round": 1,
             "kind": "plain",
             "time_limit_seconds": limit,
+            "reach": {"visible": [self.support, *INTERPRETER_FOLDERS]},
             "executor": {
                 "name": "command",
-                "settings": {"command": sys.executable, "arguments": [script, *arguments]},
+                "settings": {"command": INTERPRETER, "arguments": [script, *arguments]},
             },
         }
 
@@ -154,17 +172,21 @@ class RealRun(unittest.TestCase):
         of the guard has use for. Returns what `run_to_the_end` does."""
         executor = doc["executor"]
         program = table.DRIVERS[executor["name"]].program(executor["settings"])
-        folder = os.path.join(self.root, "stand-in")
+        folder = os.path.join(self.support, "stand-in")
         os.makedirs(folder, exist_ok=True)
         written = os.path.join(folder, program)
         with open(written, "w") as f:
-            f.write(f"#!{sys.executable}\n{script}")
+            f.write(f"#!{INTERPRETER}\n{script}")
         os.chmod(written, os.stat(written).st_mode | stat.S_IXUSR)
         path = os.pathsep.join([*([path_first] if path_first else []), folder, *SYSTEM_PATH])
         found = shutil.which(program, path=path)
         inside = os.path.realpath(written).startswith(self.root + os.sep)
         if found is None or os.path.realpath(found) != os.path.realpath(written) or not inside:
             self.fail(f"the program {program!r} does not resolve to the stand-in written for it")
+        # The stand-in's folder is under the support folder, which every document made here lists
+        # as visible; a document of the test's own is given the same reach.
+        reach = doc.setdefault("reach", {})
+        reach["visible"] = [*reach.get("visible", []), self.support, *INTERPRETER_FOLDERS]
         return self.run_to_the_end(doc, variables={**(variables or {}), "PATH": path})
 
     def run_to_the_end(self, doc, path_first=None, variables=None):

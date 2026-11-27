@@ -28,10 +28,10 @@ CALLS = {
     "files.hash": ("/f",),
     "files.remove": ("/f",),
     "files.usable_folder": ("/f",),
+    "files.is_folder": ("/f",),
     "files.make_temporary_folder": ("area-",),
     "files.make_folders": ("/g/h",),
     "files.copy_path": ("/f", "/h", ["x"]),
-    "files.share_by_link": ("/f", "/h"),
     "files.make_writable": ("/f",),
     "files.remove_tree": ("/f",),
     "processes.find_program": ("tool",),
@@ -53,6 +53,7 @@ CALLS = {
     "identity.new_id": (),
     "identity.process_number": (),
     "git.look_at_place": ("/place", {}),
+    "git.git_folders": ("/place", {}),
     "git.freeze": (
         [
             "systemd-run",

@@ -453,27 +453,25 @@ class ContractCases:
                 self.assertRaisesExactly(NotARegularFile, self.world.files.copy_path, path, new, [])
                 self.assertFalse(self.world.files.exists(new))
 
-    def test_sharing_a_path_by_a_link_reads_the_original_and_writes_nothing_of_its_own(self):
-        original, folder = self.fresh("original"), self.harness.folder()
-        self.world.files.write_new(original, TEXT)
-        self.world.files.share_by_link(original, f"{folder}/shared")
-        self.assertTrue(self.harness.is_a_link(f"{folder}/shared"))
-        self.assertEqual(self.world.files.read(f"{folder}/shared"), TEXT.encode("utf-8"))
-        self.world.files.remove(f"{folder}/shared")
-        self.assertEqual(self.world.files.read(original), TEXT.encode("utf-8"))
-
-    def test_sharing_a_path_that_is_not_there_or_onto_a_name_that_is_there_raises(self):
-        folder, original = self.harness.folder(), self.fresh("original")
-        self.assertRaisesExactly(
-            FileNotFoundError, self.world.files.share_by_link, f"{folder}/absent", f"{folder}/new"
-        )
-        self.assertEqual(self.harness.everything_below(folder), [])
-        self.world.files.write_new(original, "one")
-        self.world.files.write_new(f"{folder}/there", "two")
-        self.assertRaisesExactly(
-            FileExistsError, self.world.files.share_by_link, original, f"{folder}/there"
-        )
-        self.assertEqual(self.world.files.read(f"{folder}/there"), b"two")
+    def test_a_folder_and_a_link_to_one_are_folders_and_nothing_else_is(self):
+        where = self.harness.folder()
+        folder, file, absent = f"{where}/folder", f"{where}/file", f"{where}/absent"
+        self.world.files.make_folders(folder)
+        self.world.files.write_new(file, TEXT)
+        links = {name: f"{where}/{name}" for name in ("to-folder", "to-file", "to-nothing")}
+        self.harness.make_a_link(links["to-folder"], folder)
+        self.harness.make_a_link(links["to-file"], file)
+        self.harness.make_a_link(links["to-nothing"], absent)
+        self.assertTrue(self.world.files.is_folder(folder))
+        self.assertTrue(self.world.files.is_folder(links["to-folder"]))
+        for label, name in (
+            ("absent", absent),
+            ("a file", file),
+            ("a link to a file", links["to-file"]),
+            ("a link to nothing", links["to-nothing"]),
+        ):
+            with self.subTest(label):
+                self.assertFalse(self.world.files.is_folder(name))
 
     def test_making_a_read_only_tree_writable_changes_what_is_below_and_never_follows_a_link(self):
         tree, outside = self.a_tree(), self.fresh("outside")
@@ -733,6 +731,12 @@ class ContractCases:
         where, head = self.harness.checkout({"a": "1\n"}, folder_name=AWKWARD_FOLDER)
         found = self.look(where)
         self.assertEqual((found["exists"], found["is_checkout"], found["head"]), (True, True, head))
+
+    def test_a_plain_checkouts_git_folder_is_its_own_and_one_that_is_not_a_checkout_has_none(self):
+        environment = place.git_environment(self.harness.environment()["PATH"])
+        where, _ = self.harness.checkout({"a": "1\n"}, folder_name=AWKWARD_FOLDER)
+        self.assertEqual(self.world.git.git_folders(where, environment), [f"{where}/.git"])
+        self.assertEqual(self.world.git.git_folders(self.harness.folder(), environment), [])
 
     def test_a_repository_inside_the_place_is_nested_and_is_not_entered(self):
         where, _ = self.harness.checkout({"a": "1\n"})

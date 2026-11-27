@@ -279,12 +279,12 @@ class TheReferences(unittest.TestCase):
         for name in names:
             path = f"/refs/{name}".replace("$", "$$")  # the scope tool turns each "$$" back
             self.assertIn((path, path), bound, name)
-        self.assertIn(("/records", "/records"), bound)  # the records stay protected too
+        self.assertNotIn("/records", world.started[0][0])  # the records are not in the box at all
 
-    def test_the_references_are_the_only_paths_added_to_the_read_only_ones(self):
+    def test_the_references_are_the_only_paths_added_to_the_read_only_system_ones(self):
         world = self.scene_with([REF], **{"/refs/runbook": "contents"})
         scenes.run_in(world)
         self.assertEqual(
             self.bound_read_only(world),
-            [("/records", "/records"), ("/refs/runbook", "/refs/runbook")],
+            [("/usr", "/usr"), ("/etc", "/etc"), ("/refs/runbook", "/refs/runbook")],
         )

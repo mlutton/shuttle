@@ -175,32 +175,34 @@ class TheSetupRequests(unittest.TestCase):
     def test_the_requests_are_ones_the_run_area_accepts(self):
         self.assertIsNone(run_area.refusal(self.requests()))
 
-    def test_the_tool_home_is_in_the_run_area_with_the_settings_copied_and_the_login_linked(self):
+    def test_the_tool_home_is_in_the_executors_home_with_the_settings_and_the_login_copied(self):
         got = run_area.plan(AREA, self.requests())
         self.assertEqual(
             got["variables"],
-            {
-                "CODEX_HOME": f"{AREA}/home",
-                "TMPDIR": f"{AREA}/tmp",
-                "XDG_CACHE_HOME": f"{AREA}/cache",
-            },
+            {"CODEX_HOME": f"{AREA}/home/.codex"},
         )
         steps = got["steps"]
         self.assertIn(
             {
                 "do": "copy",
                 "source": "/h/.codex/config.toml",
-                "target": f"{AREA}/home/config.toml",
+                "target": f"{AREA}/home/.codex/config.toml",
                 "leave_out": [],
                 "optional": True,  # the tool starts without a settings file
             },
             steps,
         )
         self.assertIn(
-            {"do": "share", "source": "/h/.codex/auth.json", "target": f"{AREA}/home/auth.json"},
+            {
+                "do": "copy",
+                "source": "/h/.codex/auth.json",
+                "target": f"{AREA}/home/.codex/auth.json",
+                "leave_out": [],  # not optional: a missing login fails the set-up
+                "follow": True,  # a login that is a link is copied as the file it leads to
+            },
             steps,
         )
-        self.assertFalse([s for s in steps if s["do"] == "copy" and "auth" in s["source"]])
+        self.assertFalse([s for s in steps if s["do"] not in ("folder", "copy", "write")])
 
     def test_every_path_it_makes_is_inside_the_run_area(self):
         for step in run_area.plan(AREA, self.requests())["steps"]:

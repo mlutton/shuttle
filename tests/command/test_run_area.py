@@ -81,13 +81,13 @@ class TheRealRunArea(unittest.TestCase):
                 os.chmod(os.path.join(folder, name), 0o755)
 
     REQUESTS = [
-        {"action": "copy", "name": "home", "source": None},
-        {"action": "leave_out", "name": "home/history"},
-        {"action": "leave_out", "name": "home/cache"},
-        {"action": "share", "name": "home/login", "source": None},
-        {"action": "write", "name": "home/generated.toml", "text": "made = true\n"},
-        {"action": "writable", "name": "home/config.toml"},
-        {"action": "variable", "variable": "TOOL_HOME", "in_run_area": "home"},
+        {"action": "copy", "name": "home/tool", "source": None},
+        {"action": "leave_out", "name": "home/tool/history"},
+        {"action": "leave_out", "name": "home/tool/cache"},
+        {"action": "copy", "name": "home/tool/login", "source": None},
+        {"action": "write", "name": "home/tool/generated.toml", "text": "made = true\n"},
+        {"action": "writable", "name": "home/tool/config.toml"},
+        {"action": "variable", "variable": "TOOL_HOME", "in_run_area": "home/tool"},
     ]
 
     def requests(self):
@@ -100,13 +100,21 @@ class TheRealRunArea(unittest.TestCase):
         self.assertEqual(set_up_run_area.set_up(self.state, self.requests()), {"ok": True})
         area = self.state["run_area"]
         self.assertTrue(area.startswith(os.path.join(self.root, "temporary", run_area.AREA_PREFIX)))
-        home = os.path.join(area, "home")
+        home = os.path.join(area, "home", "tool")
         self.assertEqual(self.state["setup_variables"], {"TOOL_HOME": home})
+        # the executor's own home and `/tmp` are there from the start, and only what was asked is in them
+        self.assertEqual(sorted(os.listdir(area)), ["home", "tmp"])
+        self.assertEqual(os.listdir(os.path.join(area, "tmp")), [])
         with open(os.path.join(home, "config.toml")) as f:
             self.assertEqual(f.read(), "settings")
         self.assertTrue(os.stat(os.path.join(home, "config.toml")).st_mode & stat.S_IWUSR)
         self.assertEqual(sorted(os.listdir(home)), ["config.toml", "generated.toml", "login"])
-        self.assertEqual(os.readlink(os.path.join(home, "login")), self.login)
+        login = os.path.join(home, "login")
+        self.assertFalse(os.path.islink(login))  # a copy: the area holds its own bytes
+        self.assertEqual(read(login), MARKER.encode())
+        with open(login, "w") as f:  # and writing it leaves the original as it was
+            f.write("replaced")
+        self.assertEqual(read(self.login), MARKER.encode())
         # the original is as it was, and the only change outside the area is the area itself
         outside = {k: v for k, v in everything(self.root).items() if not k.startswith("temporary/")}
         self.assertEqual(
@@ -118,12 +126,12 @@ class TheRealRunArea(unittest.TestCase):
         self,
     ):
         requests = [
-            {"action": "copy", "name": "home", "source": self.tool},
-            {"action": "share", "name": "login", "source": self.login},
+            {"action": "copy", "name": "tool", "source": self.tool},
+            {"action": "copy", "name": "login", "source": self.login},
         ]
         set_up_run_area.set_up(self.state, requests)
         area = self.state["run_area"]
-        os.chmod(os.path.join(area, "home", "history"), 0o555)  # a read-only folder in the copy
+        os.chmod(os.path.join(area, "tool", "history"), 0o555)  # a read-only folder in the copy
         self.assertEqual(tear_down.remove(self.state), {"failure": ""})
         self.assertFalse(os.path.lexists(area))
         self.assertEqual(os.listdir(os.path.join(self.root, "temporary")), [])
@@ -131,25 +139,28 @@ class TheRealRunArea(unittest.TestCase):
             self.assertEqual(f.read(), MARKER)
         self.assertTrue(os.path.exists(os.path.join(self.tool, "history", "log")))
 
-    def test_the_stand_in_login_is_in_no_file_but_its_own_and_nothing_printed(self):
+    def test_the_stand_in_login_is_in_no_file_but_its_own_and_its_copy_which_goes_with_the_area(
+        self,
+    ):
         set_up_run_area.set_up(self.state, self.requests())
+        during = [n for n, d in everything(self.root).items() if MARKER.encode() in d]
+        self.assertEqual(len(during), 2, during)  # the original and the copy in the area
         tear_down.remove(self.state)
         holding = [name for name, data in everything(self.root).items() if MARKER.encode() in data]
         self.assertEqual(holding, ["login-stand-in"])
         self.assertNotIn(MARKER, repr(self.state))
 
-    def test_a_write_below_a_shared_name_is_refused_and_the_original_is_untouched(self):
-        requests = [
-            {"action": "share", "name": "tool", "source": self.tool},
-            {"action": "write", "name": "tool/new", "text": "x"},
-        ]
-        self.assertEqual(set_up_run_area.set_up(self.state, requests), {"ok": False})
-        self.assertFalse(os.path.exists(os.path.join(self.tool, "new")))
+    def test_a_request_to_make_the_executors_home_or_tmp_is_refused_for_making_it_twice(self):
+        for name in ("home", "tmp"):
+            with self.subTest(name):
+                requests = [{"action": "copy", "name": name, "source": self.tool}]
+                self.assertEqual(set_up_run_area.set_up(self.state, requests), {"ok": False})
+                self.assertIn("made twice", self.state["problems"]["setup"])
 
     def test_a_source_that_is_not_there_fails_the_step_and_the_tear_down_still_clears_the_area(
         self,
     ):
-        requests = [{"action": "copy", "name": "home", "source": os.path.join(self.root, "absent")}]
+        requests = [{"action": "copy", "name": "tool", "source": os.path.join(self.root, "absent")}]
         self.assertEqual(set_up_run_area.set_up(self.state, requests), {"ok": False})
         self.assertIn("FileNotFoundError", self.state["problems"]["setup"])
         tear_down.remove(self.state)
