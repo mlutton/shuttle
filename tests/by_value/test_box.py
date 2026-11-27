@@ -53,9 +53,13 @@ class TheBinds(unittest.TestCase):
 
     def test_nothing_else_of_the_machine_is_bound_and_the_records_are_never_named(self):
         argv = boundary.box_arguments(REACH)
-        for hidden in ("/home", "/run", "/var", "/records", "/root", "/mnt"):
+        for hidden in ("/home", "/var", "/records", "/root", "/mnt"):
             self.assertFalse([d for d in destinations(argv) if d.startswith(hidden)], hidden)
         self.assertNotIn("/records", argv)
+        self.assertEqual(
+            [d for d in destinations(argv) if d.startswith("/run")],
+            ["/run/systemd/resolve/stub-resolv.conf"],
+        )
 
     def test_the_links_into_usr_are_bound_if_the_machine_has_them_so_one_list_serves_any_layout(
         self,
@@ -63,6 +67,12 @@ class TheBinds(unittest.TestCase):
         got = binds(boundary.box_arguments(REACH))
         for link in ("/bin", "/sbin", "/lib", "/lib64"):
             self.assertIn(("--ro-bind-try", link, link), got)
+
+    def test_the_resolver_settings_are_bound_where_the_usual_link_leads_after_etc(self):
+        got = binds(boundary.box_arguments(REACH))
+        wanted = ("--ro-bind-try", "/etc/resolv.conf", "/run/systemd/resolve/stub-resolv.conf")
+        self.assertIn(wanted, got)
+        self.assertLess(got.index(("--ro-bind", "/etc", "/etc")), got.index(wanted))
 
     def test_home_is_the_executors_own_and_the_working_directory_is_the_place(self):
         argv = boundary.launch_argv("n", 1, ["t"], [], REACH, 3)

@@ -125,6 +125,7 @@ class Reach(TypedDict):
 # argument list serves each layout. (A link bound by name would lead nowhere inside the box.)
 _SYSTEM_FOLDERS = ("/usr", "/etc")
 _SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib64")
+_RESOLVER_LINK_TARGET = "/run/systemd/resolve/stub-resolv.conf"
 
 
 def _depth(path: str) -> int:
@@ -176,6 +177,14 @@ def box_arguments(reach: Reach) -> list[str]:
         "--ro-bind",
         "/etc",
         "/etc",
+        # Name lookup: where the machine keeps its resolver settings in a link into `/run` (the
+        # usual setup with systemd-resolved), the link would lead nowhere inside the box, and a
+        # bind cannot be made onto a link. The file it leads to is bound at the place the link
+        # names instead (a snapshot taken at the start); with no such link this binds nothing
+        # that matters, and the rest of `/run` stays hidden.
+        "--ro-bind-try",
+        "/etc/resolv.conf",
+        _RESOLVER_LINK_TARGET,
         "--dev",
         "/dev",
         "--proc",

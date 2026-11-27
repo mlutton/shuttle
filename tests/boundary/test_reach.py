@@ -93,6 +93,7 @@ attempt("read the sentinel in the real tmp", lambda: read(targets["sentinel"]))
 attempt("connect to the user's bus", lambda: socket.socket(socket.AF_UNIX).connect(targets["bus"]))
 command_fails("systemctl --user", ["systemctl", "--user", "is-system-running"])
 command_fails("busctl --user", ["busctl", "--user", "list"])
+attempt("read the resolver settings", lambda: read("/etc/resolv.conf"))
 report["runtime variables"] = [
     n for n in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS") if n in os.environ
 ]
@@ -229,6 +230,9 @@ class TheReachOfTheExecutor(real_run.RealRun):
                 # nothing to hide where the machine has no such folder; then it is refused anyway
                 self.assertEqual(report["list " + what], "refused", path)
         self.assertEqual(report["connect to the user's bus"], "refused")
+        # name lookup keeps working where the machine's settings are a link into a hidden folder
+        if os.path.exists("/etc/resolv.conf"):
+            self.assertEqual(report["read the resolver settings"], "ok")
         self.assertEqual(report["runtime variables"], [])
         for name in ("systemctl --user", "busctl --user"):
             with self.subTest(name):
