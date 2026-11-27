@@ -42,8 +42,8 @@ exit 0
 
 
 def outer_limit_is_lower(which, kilobytes):
-    """Whether this process's own hard limit is below what the script sets (a limit counted in
-    kilobytes here), so the script would refuse to run."""
+    """Whether this process's own hard limit is below what the script sets, so the script
+    would refuse to run."""
     hard = resource.getrlimit(which)[1]
     return hard != resource.RLIM_INFINITY and hard < kilobytes * 1024
 

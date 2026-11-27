@@ -15,8 +15,8 @@ STAGES = ("tests", "real")
 
 def stage_folders(script: str) -> dict[str, list[str]]:
     """For each stage of `STAGES` the script calls, the folders its command discovers tests in,
-    in order, a folder named twice listed twice. Comments are not read; a line ending in a
-    backslash continues on the next."""
+    in order, a folder named twice listed twice. A line that starts with `#` is not read; a line
+    ending in a backslash continues on the next."""
     found: dict[str, list[str]] = {}
     for line in script.replace("\\\n", " ").splitlines():
         words = line.split()
