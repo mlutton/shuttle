@@ -164,6 +164,44 @@ class Refusals(RealCommand):
                 )
                 self.assertFalse(os.path.exists(self.witness))
 
+    def reach_cases(self):
+        runbook = self.write("runbook.md", "contents")
+        return (
+            ("reach_not_valid", {"reach": ["x"]}),
+            ("unknown_field", {"reach": {"read": [self.support]}}),
+            ("visible_not_absolute", {"reach": {"visible": ["x"]}}),
+            ("visible_missing", {"reach": {"visible": [os.path.join(self.root, "absent")]}}),
+            ("visible_not_a_folder", {"reach": {"visible": [runbook]}}),
+            ("visible_overlaps_the_records", {"reach": {"visible": [self.records]}}),
+            ("visible_overlaps_the_records", {"reach": {"visible": [self.root]}}),
+        )
+
+    def test_the_check_form_refuses_a_reach_as_a_run_does_with_the_same_reason_and_line(self):
+        for reason, extra in self.reach_cases():
+            with self.subTest(reason, **{k: str(v) for k, v in extra.items()}):
+                for name in os.listdir(self.records):
+                    os.unlink(os.path.join(self.records, name))
+                checked, check_lines = self.command("check", self.document(**extra))
+                self.assertEqual(checked.returncode, 0, checked.stderr)
+                self.assertEqual(check_lines[-2], f"check: refused: {reason}")
+                self.assertEqual(os.listdir(self.records), [])  # the check wrote nothing
+                ran, _ = self.command("run", self.document(**extra))
+                line = self.outcome()["receipt"]["ending"]["reason_text"]["value"]
+                self.assertEqual(
+                    self.ending(self.outcome()), ("could_not_start", reason, "input_check")
+                )
+                printed = json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"]
+                self.assertEqual(printed, line)  # the check prints the record a run would write
+                self.assertFalse(os.path.exists(self.witness))
+
+    def test_a_reach_listing_folders_that_are_there_is_accepted_by_the_check_and_the_run(self):
+        doc = self.document()
+        doc["reach"]["visible"].append(self.root + "/support")
+        checked, check_lines = self.command("check", doc)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+        done, lines = self.command("run", doc)
+        self.assertEqual(lines[-1], "ended_by_itself")
+
     def test_a_matching_instruction_hash_and_reference_run(self):
         runbook = self.write("runbook.md", "contents")
         doc = self.document(
