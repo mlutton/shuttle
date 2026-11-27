@@ -8,13 +8,16 @@ the executor cannot write) and the copy is what is hashed and judged, so the has
 are those of the file kept. Nothing here rewrites, completes or tidies the statement, and the
 claim is passed on as the word the statement holds. The kept copy is then copied to the document's
 statement location, where nothing is replaced: a name taken there since the start is left as it is
-and does not change what was kept or judged. Only the statement is kept so far; the
+and does not change what was kept or judged. It is written into the folder the location's parent
+resolved to when the run began, and only when the stop is confirmed and the parent still resolves
+there; otherwise nowhere (a parent the executor swapped for a link is not followed). Only the statement is kept so far; the
 session file and the list of changed files belong to later steps.
 
 A result key left out reads as "cannot tell" in the receipt; an empty text reads as "none".
 """
 
 import contextlib
+from collections.abc import Callable
 from typing import Any
 
 from shuttle.core import decisions, run_area, statement
@@ -47,10 +50,15 @@ def _judged(world: Operations, kept: str) -> StepResult:
 
 
 def keep_statement(
-    world: Operations, source: HeaderSource, inner: str, location: str | None
+    world: Operations,
+    source: HeaderSource,
+    inner: str,
+    location: str | None,
+    copy_to: Callable[[str], str | None],
 ) -> StepResult:
     """The step's result for the statement at `inner`, in the run area (`location` None: this run
-    has none, and nothing is looked at)."""
+    has none, and nothing is looked at). `copy_to` gives where the document's location may be
+    written, or None."""
     if location is None or not world.files.exists(inner):
         return {**NOTHING}
     kept = decisions.join_path(
@@ -66,8 +74,10 @@ def keep_statement(
         return {**NOTHING, "statement_state": statement.WRONG_SHAPE}
     except OSError:
         return {"session_file": ""}  # looked and could not keep it: the four fields cannot tell
-    with contextlib.suppress(OSError):  # the document's location is another's if taken; leave it
-        world.files.copy(kept, location)
+    target = copy_to(location)
+    if target is not None:
+        with contextlib.suppress(OSError):  # the location is another's if taken; leave it
+            world.files.copy(kept, target)
     return held
 
 
@@ -78,6 +88,14 @@ def step(state: RunState) -> None:
     area = state.get("run_area")
     location = state["raw"].get("statement_location")
     inner = run_area.statement_path(area) if area else ""
+    world, facts = state["world"], state["facts"]
+
+    def copy_to(wanted: str) -> str | None:
+        # The folder the location's parent was at the start, looked at again just before the write.
+        start = state.get("statement_parent")
+        now = world.boundary.resolve(statement.location_parent(wanted)) if start else None
+        return statement.location_copy_target(wanted, start, now, facts.get("stop") == "confirmed")
+
     state["stand_ins"]["kept_files"] = keep_statement(
-        state["world"], source, inner, location if area else None
+        world, source, inner, location if area else None, copy_to
     )

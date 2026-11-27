@@ -166,6 +166,35 @@ class TheSchemaIsData(unittest.TestCase):
             self.assertNotEqual(name, f"req-1.{kind}.json")
 
 
+class WhereTheStatementIsCopiedTo(unittest.TestCase):
+    def test_the_parent_of_a_location_is_the_text_before_its_last_slash(self):
+        for location, parent in (
+            ("/out/s.json", "/out"),
+            ("/s.json", "/"),
+            ("/a b/$x/-s", "/a b/$x"),
+            ("s.json", "."),
+        ):
+            with self.subTest(location):
+                self.assertEqual(statement.location_parent(location), parent)
+
+    def test_the_copy_goes_into_the_folder_the_parent_was_at_the_start_or_nowhere(self):
+        for label, start, now, stopped, expected in (
+            ("unchanged", "/real/out", "/real/out", True, "/real/out/s.json"),
+            ("parent now leads elsewhere", "/real/out", "/victim", True, None),
+            ("parent now gone", "/real/out", None, True, None),
+            ("no parent seen at the start", None, "/real/out", True, None),
+            ("the stop is not confirmed", "/real/out", "/real/out", False, None),
+            ("the root", "/", "/", True, "/s.json"),
+        ):
+            with self.subTest(label):
+                got = statement.location_copy_target("/out/s.json", start, now, stopped)
+                self.assertEqual(got, expected)
+
+    def test_the_name_is_the_locations_own_last_part_whole(self):
+        got = statement.location_copy_target("/out/a b$x\n-s", "/real", "/real", True)
+        self.assertEqual(got, "/real/a b$x\n-s")
+
+
 class TheNotice(unittest.TestCase):
     REFERENCES = [{"name": "runbook", "path": "/refs/run book$1.md"}]
 

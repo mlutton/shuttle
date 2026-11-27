@@ -114,8 +114,13 @@ def check_references(
     return None
 
 
+def inside_folder(path: str, folder: str) -> bool:
+    """Whether `path` is `folder` or below it; both are already resolved (no link, no `..`)."""
+    return path == folder or path.startswith(folder.rstrip("/") + "/")
+
+
 def check_statement_location(
-    expects_statement: bool, location: str | None, occupied: bool
+    expects_statement: bool, location: str | None, occupied: bool, in_records: bool
 ) -> Found | None:
     if not expects_statement:
         if location is None:
@@ -128,6 +133,13 @@ def check_statement_location(
     if location is None:
         return _found(
             "missing_setting", _INPUT, "this kind expects a statement: statement_location is needed"
+        )
+    if in_records:
+        return _found(
+            "statement_location_in_records",
+            _INPUT,
+            f"statement_location {location!r} is in the records folder, where Shuttle writes "
+            "only its own records; name a path outside the records folder",
         )
     if occupied:
         return _found(

@@ -111,10 +111,6 @@ class TheInstruction(unittest.TestCase):
                 self.assertEqual(ending["reason"], "instruction_hash_mismatch")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ARunWithNoStatementExpected(unittest.TestCase):
     def test_a_command_run_still_has_its_run_area_with_the_instruction_and_makes_no_statement(self):
         world = scenes.scene()
@@ -127,3 +123,7 @@ class ARunWithNoStatementExpected(unittest.TestCase):
         self.assertEqual(
             flat(scenes.outcome(world)["receipt"])["executor"]["statement_state"], "none"
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

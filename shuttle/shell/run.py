@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, TextIO
 
 from shuttle import __version__
-from shuttle.core import boundary, decisions, refusals, run_area
+from shuttle.core import boundary, decisions, refusals, run_area, statement
 from shuttle.core.shapes import (
     Conclusion,
     Decision,
@@ -159,6 +159,9 @@ def step_run_input_checks_and_executor_driver_check(state: RunState) -> None:
     if refusal:
         facts["input_check"] = refusal["reason"]
         state["problems"]["input_check"] = refusal["problem"]
+    location = state["raw"].get("statement_location")
+    if isinstance(location, str):
+        state["statement_parent"] = world.boundary.resolve(statement.location_parent(location))
     reason, text = driver_check(world, state["raw"])
     if reason:
         facts["executor_driver_check"] = reason

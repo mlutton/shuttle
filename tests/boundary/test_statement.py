@@ -98,7 +98,7 @@ def sha(data):
 
 class AStatementIsKeptAsWritten(real_run.RealRun):
     def run_leaving(self, data, request_id="r-1"):
-        """Run a kind that expects a statement; the script leaves `data` at the location."""
+        """Run a kind that expects a statement; the script leaves `data` at its path in the run area."""
         location = os.path.join(self.root, "statement-" + request_id)
         given = os.path.join(self.root, "given-" + request_id)
         with open(given, "wb") as f:
@@ -250,6 +250,99 @@ class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
                 )
                 self.assertFalse(os.path.lexists(doc["statement_location"]))
                 self.assertEqual([u for u in self.units_left() if request_id in u], [])
+
+
+# argv 1 is the file holding the statement, argv 2 the records folder, argv 3 a folder with a
+# folder `inner` in it, argv 4 the row's line, argv 5 the request id. It leaves its statement where the notice says, then
+# learns the document's location from the request record (the one route there is today) and
+# changes the folders above it.
+SWAPS_THE_FOLDERS_ABOVE_THE_LOCATION = (
+    FINDS_ITS_PATH
+    + """
+import json, os
+with open(sys.argv[1], "rb") as source, open(inner, "wb") as target:
+    target.write(source.read())
+with open(os.path.join(sys.argv[2], sys.argv[5] + ".request.json")) as f:
+    location = json.loads(json.load(f)["input"])["statement_location"]
+parent = os.path.dirname(location)
+grandparent = os.path.dirname(parent)
+victim = sys.argv[3]
+exec(sys.argv[4])
+"""
+)
+
+
+class AStatementIsNeverCopiedThroughAFolderTheExecutorSwapped(real_run.RealRun):
+    def test_every_swap_keeps_the_statement_and_writes_nothing_where_the_folders_now_lead(self):
+        for index, row in enumerate(locations_table.PARENTS):
+            with self.subTest(row["label"]):
+                request_id = f"swap-{index}"
+                base = os.path.join(self.root, f"swap-{index}")
+                location = os.path.join(base, "outer", "inner", "statement.json")
+                os.makedirs(os.path.dirname(location))
+                victim = os.path.join(base, "victim")
+                os.makedirs(os.path.join(victim, "inner"))
+                data = json.dumps(STATEMENT).encode()
+                given = os.path.join(base, "given")
+                with open(given, "wb") as f:
+                    f.write(data)
+                script = self.script(f"swaps-{index}.py", SWAPS_THE_FOLDERS_ABOVE_THE_LOCATION)
+                doc = self.document(
+                    script,
+                    [given, self.records, victim, row["swaps"], request_id],
+                    request_id=request_id,
+                )
+                self.expecting_a_statement(doc, location)
+                code, lines, err = self.run_to_the_end(doc)
+                self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
+                got = flat(self.outcome(request_id)["receipt"])["executor"]
+                self.assertEqual(got["statement_state"], "right_shape")
+                with open(os.path.join(self.records, request_id + ".statement.kept"), "rb") as f:
+                    self.assertEqual(f.read(), data)
+                written = [
+                    os.path.join(folder, name)
+                    for folder, _, names in os.walk(victim)
+                    for name in names
+                ]
+                self.assertEqual(written, [])
+                self.assertEqual(self.units_left(), [])
+
+
+class ALocationInTheRecordsFolderIsRefused(real_run.RealRun):
+    def test_no_spelling_of_a_path_in_the_records_folder_is_accepted_and_the_record_stands(self):
+        link = os.path.join(self.root, "records-link")
+        os.symlink(self.records, link)
+        cases = (
+            ("the outcome record's own name", os.path.join(self.records, "r-1.outcome.json")),
+            ("another name in the folder", os.path.join(self.records, "other.txt")),
+            ("a name in a folder not there yet", os.path.join(self.records, "sub", "s.json")),
+            ("through a link to the folder", os.path.join(link, "via-link.json")),
+            ("through ..", os.path.join(self.records, "..", "records", "via-dots.json")),
+            ("the folder itself", self.records),
+        )
+        for index, (label, location) in enumerate(cases):
+            with self.subTest(label):
+                request_id = f"rec-{index}"
+                script = self.script(f"never-{index}.py", LEAVES_NOTHING)
+                doc = self.expecting_a_statement(
+                    self.document(script, request_id=request_id), location
+                )
+                code, lines, err = self.run_to_the_end(doc)
+                self.assertEqual((code, err, lines[-1]), (0, "", "could_not_start"))
+                ending = flat(self.outcome(request_id)["receipt"])["ending"]
+                self.assertEqual(
+                    (ending["reason"], ending["failed_step"]),
+                    ("statement_location_in_records", "input_check"),
+                )
+                self.assertEqual(
+                    ending["reason_text"],
+                    f"statement_location {location!r} is in the records folder, where Shuttle "
+                    "writes only its own records; name a path outside the records folder",
+                )
+        self.assertEqual(
+            sorted(os.listdir(self.records)),
+            sorted(f"rec-{i}.{k}.json" for i in range(len(cases)) for k in ("outcome", "request")),
+        )
 
 
 class AReferenceCannotBeChangedByTheExecutor(real_run.RealRun):

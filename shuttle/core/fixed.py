@@ -57,6 +57,7 @@ REASONS_BY_ENDING = {
         "place_has_uncommitted_changes",
         "place_has_nested_repository",
         "statement_location_occupied",
+        "statement_location_in_records",
         "no_time_limit",
         "records_location_mismatch",
         "destination_branch_not_at_opening_commit",
