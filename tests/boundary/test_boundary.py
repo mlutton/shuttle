@@ -165,20 +165,23 @@ class TheCommandKilledHard(real_run.RealRun):
         still counts until whoever started it has collected it, so this blocks on the folder's
         own event file (it signals each change) until nothing is left, never on a sleep."""
         try:
-            f = open(os.path.join(cgroup, "cgroup.events"))
+            with open(os.path.join(cgroup, "cgroup.events")) as f:
+                return self.wait_until_empty(f)
         except FileNotFoundError:
             return False  # the scope's folder is gone: nothing is in it
-        with f:
-            watch = select.poll()
-            watch.register(f, select.POLLPRI)
-            while True:
-                try:
-                    f.seek(0)
-                    if "populated 1" not in f.read():
-                        return False
-                except OSError:
-                    return False  # the scope's folder went while it was watched
-                watch.poll()
+
+    @staticmethod
+    def wait_until_empty(events):
+        watch = select.poll()
+        watch.register(events, select.POLLPRI)
+        while True:
+            try:
+                events.seek(0)
+                if "populated 1" not in events.read():
+                    return False
+            except OSError:
+                return False  # the scope's folder went while it was watched
+            watch.poll()
 
     def test_leaves_the_boundary_empty(self):
         up = self.pipe("up")
