@@ -297,6 +297,34 @@ class TheCheckAndTheRunAgreeOnWhatTheSetupNeeds(unittest.TestCase):
             ("could_not_start", "setup_failed", "setup"),
         )
 
+    def test_a_login_that_is_a_link_to_a_file_is_copied_as_the_file_by_both(self):
+        world = world_for("events-finished.jsonl", "last-message-done.txt", login=False)
+        world.put_file("/elsewhere/login", "NOT-A-LOGIN-kept-elsewhere\n")
+        world.put_link(LOGIN, "/elsewhere/login")
+        checked, ending, _ = self.verdicts(world)
+        self.assertNotIn("setup_failed", checked)
+        self.assertEqual(ending["ending"], "ended_by_itself")
+        copied = [
+            args for args, _ in world.calls("files.copy_path") if args[1].endswith("auth.json")
+        ]
+        self.assertEqual([c[0] for c in copied], ["/elsewhere/login"])  # the file it leads to
+
+    def test_a_login_that_is_a_link_to_nothing_is_refused_by_both_with_a_line_that_names_it(self):
+        world = world_for("events-finished.jsonl", "last-message-done.txt", login=False)
+        world.put_link(LOGIN, "/elsewhere/absent")
+        checked, ending, _ = self.verdicts(world)
+        self.assertIn("setup_failed", checked)
+        self.assertEqual((ending["reason"], ending["failed_step"]), ("setup_failed", "setup"))
+
+    def test_a_copy_that_fails_names_its_source_and_what_to_do(self):
+        world = world_for("events-finished.jsonl", "last-message-done.txt")
+        world.will_raise("files.copy_path", PermissionError("detail"), nth=2)
+        checked, ending, _ = self.verdicts(world)
+        line = ending["reason_text"]
+        self.assertIn(repr(LOGIN), line)
+        self.assertIn("regular file", line)
+        self.assertNotIn("detail", line)
+
     def test_a_source_that_is_there_passes_both(self):
         self.a_command_driver_that_asks_for(
             [

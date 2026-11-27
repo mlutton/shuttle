@@ -290,6 +290,50 @@ class CheckReach(RefusalCase):
                 )
                 self.assertRefusal(got, "visible_overlaps_the_records", "input_check")
 
+    def test_the_boxs_own_folders_and_what_holds_them_are_refused_and_what_is_under_them_is_not(
+        self,
+    ):
+        for path in ("/tmp", "/proc", "/dev"):
+            with self.subTest(path):
+                got = refusals.check_reach({"visible": [path]}, look(path), "/rec")
+                self.assertRefusal(got, "visible_overlaps_the_box", "input_check")
+                self.assertIn("list a folder under it", got["problem"])
+        for path in ("/tmp/tool", "/dev/shm", "/proc/sys", "/opt"):
+            with self.subTest(path):
+                self.assertIsNone(refusals.check_reach({"visible": [path]}, look(path), "/rec"))
+
+    def test_the_users_runtime_folder_the_folders_above_it_and_the_box_s_are_refused(self):
+        runtime = "/run/user/1000"
+        for path in (runtime, "/run/user", "/run"):
+            with self.subTest(path):
+                got = refusals.check_reach({"visible": [path]}, look(path), "/rec", runtime)
+                self.assertTrue(got, path)
+                self.assertEqual(got["reason"], "visible_overlaps_the_runtime_folder")
+                self.assertIn(runtime, got["problem"])
+        # without a runtime folder (the caller has none) `/run` is only a folder
+        self.assertIsNone(refusals.check_reach({"visible": ["/run"]}, look("/run"), "/rec", None))
+        self.assertIsNone(
+            refusals.check_reach(
+                {"visible": ["/run/systemd"]}, look("/run/systemd"), "/rec", runtime
+            )
+        )
+
+    def test_the_home_folder_and_what_holds_it_are_refused_and_a_folder_inside_it_is_not(self):
+        home = "/home/someone"
+        for path in (home, "/home"):
+            got = refusals.check_reach({"visible": [path]}, look(path), "/rec", None, home)
+            self.assertRefusal(got, "visible_overlaps_the_home_folder", "input_check")
+            self.assertIn("list the specific folders the tool needs instead", got["problem"])
+        inside = f"{home}/.local/share/tool"
+        self.assertIsNone(
+            refusals.check_reach({"visible": [inside]}, look(inside), "/rec", None, home)
+        )
+        self.assertIsNone(
+            refusals.check_reach(
+                {"visible": ["/home/other"]}, look("/home/other"), "/rec", None, home
+            )
+        )
+
     def test_a_folder_beside_the_records_whose_name_starts_the_same_is_accepted(self):
         self.assertIsNone(refusals.check_reach({"visible": ["/rec2"]}, look("/rec2"), "/rec"))
 

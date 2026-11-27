@@ -79,6 +79,14 @@ def _look_at_visible(world: Operations, raw: Document) -> dict[str, VisibleLook]
     return found
 
 
+def _folder_named_by(world: Operations, variable: str) -> str | None:
+    """A folder the caller's environment names, resolved: the runtime folder (where the
+    variable the shell needs to reach the user's systemd points; the box hides it, with the
+    sockets in it) or the home folder."""
+    named = world.environment.read_variable(variable)
+    return world.boundary.resolve(named) if named else None
+
+
 def run_input_checks(world: Operations, raw: Document) -> list[Found | None]:
     references = raw.get("references", [])
     return [
@@ -91,6 +99,8 @@ def run_input_checks(world: Operations, raw: Document) -> list[Found | None]:
             raw.get("reach"),
             _look_at_visible(world, raw),
             world.boundary.resolve(raw["records_location"]),
+            _folder_named_by(world, "XDG_RUNTIME_DIR"),
+            _folder_named_by(world, "HOME"),
         ),
         place.check_place(raw.get("place"), the_place.look(world, raw)),
     ]

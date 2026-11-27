@@ -198,6 +198,7 @@ class TheSetupRequests(unittest.TestCase):
                 "source": "/h/.codex/auth.json",
                 "target": f"{AREA}/home/.codex/auth.json",
                 "leave_out": [],  # not optional: a missing login fails the set-up
+                "follow": True,  # a login that is a link is copied as the file it leads to
             },
             steps,
         )

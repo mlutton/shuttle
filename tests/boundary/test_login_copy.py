@@ -39,14 +39,38 @@ open(arguments[arguments.index("-o") + 1], "w").write("Done.")
 
 
 class AToolThatReplacesItsLogin(real_run.RealRun):
-    def test_the_replacement_works_and_the_original_is_unchanged_after_the_run(self):
+    def make_the_login(self, as_a_link=False):
+        """The caller's login (made-up text) where the driver says it is; kept elsewhere and
+        linked to when `as_a_link`. Returns the home, the login's name and the file with the text."""
         driver = real_run.tool_driver_names()[0]
         home = os.path.join(self.root, "callers-home")
         login = real_run.table.DRIVERS[driver].login_path({"HOME": home})
         os.makedirs(os.path.dirname(login))
-        with open(login, "w") as f:
+        kept = os.path.join(self.root, "kept-elsewhere") if as_a_link else login
+        with open(kept, "w") as f:
             f.write(ORIGINAL)
-        os.chmod(login, 0o600)
+        os.chmod(kept, 0o600)
+        if as_a_link:
+            os.symlink(kept, login)
+        return driver, home, login, kept
+
+    def test_a_login_that_is_a_link_is_copied_as_the_file_it_leads_to_and_both_are_unchanged(self):
+        driver, home, login, kept = self.make_the_login(as_a_link=True)
+        doc = self.document(self.script("unused.py", ""))
+        doc["executor"] = {"name": driver, "settings": {"model": "example-model"}}
+        doc["network"], doc["changes_to_place"] = "off", "allowed"
+        code, lines, err = self.run_a_stand_in_tool(doc, STAND_IN, {"HOME": home})
+        self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
+        with open(os.path.join(self.place, "seen.json")) as f:
+            seen = json.load(f)
+        self.assertEqual((seen["login at start"], seen["login after"]), (ORIGINAL, REFRESHED))
+        self.assertIs(seen["is a link"], False)
+        self.assertTrue(os.path.islink(login))  # the link is as it was
+        with open(kept) as f:
+            self.assertEqual(f.read(), ORIGINAL)
+
+    def test_the_replacement_works_and_the_original_is_unchanged_after_the_run(self):
+        driver, home, login, _ = self.make_the_login()
         doc = self.document(self.script("unused.py", ""))
         doc["executor"] = {"name": driver, "settings": {"model": "example-model"}}
         doc["network"], doc["changes_to_place"] = "off", "allowed"

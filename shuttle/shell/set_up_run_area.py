@@ -22,15 +22,31 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
         case "folder":
             files.make_folders(step["target"])
         case "copy":
-            if step.get("optional") and not files.exists(step["source"]):
+            # a link is followed only where the request said so (a login kept elsewhere and linked
+            # to); the file it leads to is what is copied, and it must be a regular file
+            source = (
+                world.boundary.resolve(step["source"]) if step.get("follow") else step["source"]
+            )
+            if step.get("optional") and not files.exists(source):
                 return  # the request said a missing source is no error
-            files.copy_path(step["source"], step["target"], step["leave_out"])
+            files.copy_path(source, step["target"], step["leave_out"])
         case "write":
             files.write_new(step["target"], step["text"])
         case "writable":
             files.make_writable(step["target"])
         case never:
             assert_never(never)  # the type checker refuses a kind of step with no case here
+
+
+def _for(step: SetupStep) -> str:
+    """What a failed copy names: the file it was to copy and what to do about it. The name is the
+    caller's own path, shown as a quoted literal."""
+    if step["do"] != "copy":
+        return ""
+    return (
+        f" on {step['source']!r}; give a regular file the run may read at that path "
+        "(a folder, a pipe or a device cannot be copied), or take it out of the tool's setup"
+    )
 
 
 def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
@@ -48,8 +64,8 @@ def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
             _carry_out(world, step)
         except OSError as error:
             state["problems"]["setup"] = (
-                f"setup step {number} ({step['do']}) failed ({type(error).__name__}); "
-                "nothing was launched"
+                f"setup step {number} ({step['do']}) failed ({type(error).__name__})"
+                f"{_for(step)}; nothing was launched"
             )
             return {"ok": False}
     state["setup_variables"] = plan["variables"]

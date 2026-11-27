@@ -158,6 +158,7 @@ class SetupRequest(TypedDict, total=False):
     value: str
     in_run_area: str
     optional: bool  # a copy only: left out, not an error, when its source is not there
+    follow: bool  # a copy only: the source may be a link, and the file it leads to is copied
 
 
 class SetupStep(TypedDict, total=False):
@@ -167,6 +168,7 @@ class SetupStep(TypedDict, total=False):
     source: str
     target: str
     leave_out: list[str]  # for a copy: names relative to the source
+    follow: bool  # for a copy: present (true) only when the request said so
     optional: bool  # for a copy: present (true) only when the request said so
     text: str
 
@@ -550,6 +552,9 @@ class GitOperations(NamedTuple):
     look_at_place: Callable[
         [str, Mapping[str, str]], PlaceFacts
     ]  # (place, environment); looks only, changes nothing there, not even the index; OSError when git cannot answer
+    git_folders: Callable[
+        [str, Mapping[str, str]], list[str]
+    ]  # (place, environment): the place's own git folder and the one it shares with the checkout it was made from (the same folder for a plain checkout), absolute with links resolved, without duplicates; none when git cannot say. Looks only
     freeze: Callable[
         [Sequence[str], Mapping[str, str]], FreezeAnswer
     ]  # (command, environment): run the freeze's command to its end; OSError when it cannot be started

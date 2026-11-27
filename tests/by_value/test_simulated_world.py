@@ -53,6 +53,7 @@ CALLS = {
     "identity.new_id": (),
     "identity.process_number": (),
     "git.look_at_place": ("/place", {}),
+    "git.git_folders": ("/place", {}),
     "git.freeze": (
         [
             "systemd-run",

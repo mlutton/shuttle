@@ -83,7 +83,7 @@ class RealCommand(unittest.TestCase):
             "limit_seconds": 20,
         }
 
-    def command(self, form, doc, name="input.json"):
+    def command(self, form, doc, name="input.json", env=None):
         path = os.path.join(self.root, name)
         with open(path, "w") as f:
             json.dump(doc, f)
@@ -93,6 +93,7 @@ class RealCommand(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=60,
+            env=env,
         )
         return done, done.stdout.splitlines()
 
@@ -193,6 +194,36 @@ class Refusals(RealCommand):
                 printed = json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"]
                 self.assertEqual(printed, line)  # the check prints the record a run would write
                 self.assertFalse(os.path.exists(self.witness))
+
+    def test_the_box_s_own_folders_the_runtime_folder_and_the_home_folder_are_refused_by_both(self):
+        home = os.path.join(self.root, "a-home")
+        runtime = os.path.join(self.root, "a-runtime")
+        os.makedirs(os.path.join(home, "tools"))
+        os.mkdir(runtime)
+        env = {**os.environ, "HOME": home, "XDG_RUNTIME_DIR": runtime}
+        cases = (
+            ("visible_overlaps_the_box", "/proc"),
+            ("visible_overlaps_the_runtime_folder", runtime),
+            ("visible_overlaps_the_home_folder", home),
+        )
+        for reason, path in cases:
+            with self.subTest(reason):
+                for name in os.listdir(self.records):
+                    os.unlink(os.path.join(self.records, name))
+                doc = self.document(reach={"visible": [path]})
+                checked, check_lines = self.command("check", doc, env=env)
+                self.assertEqual(check_lines[-2], f"check: refused: {reason}")
+                self.command("run", doc, env=env)
+                self.assertEqual(
+                    self.ending(self.outcome()), ("could_not_start", reason, "input_check")
+                )
+                self.assertFalse(os.path.exists(self.witness))
+        for name in os.listdir(self.records):
+            os.unlink(os.path.join(self.records, name))
+        doc = self.document()
+        doc["reach"]["visible"].append(os.path.join(home, "tools"))  # inside the home: accepted
+        checked, check_lines = self.command("check", doc, env=env)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
 
     def test_a_reach_listing_folders_that_are_there_is_accepted_by_the_check_and_the_run(self):
         doc = self.document()

@@ -732,6 +732,12 @@ class ContractCases:
         found = self.look(where)
         self.assertEqual((found["exists"], found["is_checkout"], found["head"]), (True, True, head))
 
+    def test_a_plain_checkouts_git_folder_is_its_own_and_one_that_is_not_a_checkout_has_none(self):
+        environment = place.git_environment(self.harness.environment()["PATH"])
+        where, _ = self.harness.checkout({"a": "1\n"}, folder_name=AWKWARD_FOLDER)
+        self.assertEqual(self.world.git.git_folders(where, environment), [f"{where}/.git"])
+        self.assertEqual(self.world.git.git_folders(self.harness.folder(), environment), [])
+
     def test_a_repository_inside_the_place_is_nested_and_is_not_entered(self):
         where, _ = self.harness.checkout({"a": "1\n"})
         self.harness.nested_repository(where, "deep/inner")

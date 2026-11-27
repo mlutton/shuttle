@@ -255,6 +255,8 @@ class TheExecutorsWorkingDirectory(unittest.TestCase):
             "tmp": "/area/tmp",
             "references": [],
             "visible": [],
+            "git_folders": [],
+            "resolver": None,
             "records": "/rec",
         }
         return [p.replace("$$", "$") for p in boundary.launch_argv("n", 1, ["t"], [], reach, 3)]

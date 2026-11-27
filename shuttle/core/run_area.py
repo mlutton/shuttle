@@ -144,10 +144,18 @@ class _Sourced(_Action):
 
 class _Copy(_Sourced):
     def shape_problem(self, index: int, request: SetupRequest) -> str | None:
-        return super().shape_problem(index, request) or (
-            None
-            if isinstance(request.get("optional", False), bool)
-            else f"setup request {index + 1} (copy): optional is not true or false"
+        return (
+            super().shape_problem(index, request)
+            or (
+                None
+                if isinstance(request.get("optional", False), bool)
+                else f"setup request {index + 1} (copy): optional is not true or false"
+            )
+            or (
+                None
+                if isinstance(request.get("follow", False), bool)
+                else f"setup request {index + 1} (copy): follow is not true or false"
+            )
         )
 
     def steps(self, request: SetupRequest, area: str, leave_out: Sequence[str]) -> list[SetupStep]:
@@ -160,6 +168,8 @@ class _Copy(_Sourced):
         }
         if request.get("optional"):
             copy["optional"] = True
+        if request.get("follow"):
+            copy["follow"] = True
         return [*_folder_above(name, area), copy]
 
     def required_source(self, request: SetupRequest) -> str | None:
@@ -347,6 +357,13 @@ def plan(area: str, requests: Sequence[SetupRequest]) -> SetupPlan:
 def refusal(requests: Sequence[SetupRequest]) -> str | None:
     """Why the requests are refused, or None: the plan's own answer, needing no run area yet."""
     return plan("/area", requests)["problem"]
+
+
+def followed_sources(requests: Sequence[SetupRequest]) -> list[str]:
+    """The sources of copies that follow a link: the shell resolves each before it looks at it
+    or copies it, so a file kept elsewhere and linked to (a dotfile manager's) is copied as it
+    would be without the link."""
+    return [r["source"] for r in requests if r.get("action") == "copy" and r.get("follow")]
 
 
 def required_sources(requests: Sequence[SetupRequest]) -> list[str]:

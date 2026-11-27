@@ -4,9 +4,15 @@ The box's behaviour is in tests/boundary/test_reach.py; this pins what a person 
 needs to rely on: what is bound read-only, what is writable, what is not there, and the order.
 """
 
+import importlib
+import os
+import sys
 import unittest
 
 from shuttle.core import boundary
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+scenes = importlib.import_module("rehearsal.scene")
 
 REACH: boundary.Reach = {
     "place": "/work/place",
@@ -15,6 +21,8 @@ REACH: boundary.Reach = {
     "tmp": "/scratch/area/tmp",
     "references": ["/refs/runbook"],
     "visible": ["/opt/tool"],
+    "git_folders": [],
+    "resolver": None,
     "records": "/records",
 }
 
@@ -56,10 +64,7 @@ class TheBinds(unittest.TestCase):
         for hidden in ("/home", "/var", "/records", "/root", "/mnt"):
             self.assertFalse([d for d in destinations(argv) if d.startswith(hidden)], hidden)
         self.assertNotIn("/records", argv)
-        self.assertEqual(
-            [d for d in destinations(argv) if d.startswith("/run")],
-            ["/run/systemd/resolve/stub-resolv.conf"],
-        )
+        self.assertEqual([d for d in destinations(argv) if d.startswith("/run")], [])
 
     def test_the_links_into_usr_are_bound_if_the_machine_has_them_so_one_list_serves_any_layout(
         self,
@@ -68,11 +73,49 @@ class TheBinds(unittest.TestCase):
         for link in ("/bin", "/sbin", "/lib", "/lib64"):
             self.assertIn(("--ro-bind-try", link, link), got)
 
-    def test_the_resolver_settings_are_bound_where_the_usual_link_leads_after_etc(self):
-        got = binds(boundary.box_arguments(REACH))
-        wanted = ("--ro-bind-try", "/etc/resolv.conf", "/run/systemd/resolve/stub-resolv.conf")
-        self.assertIn(wanted, got)
-        self.assertLess(got.index(("--ro-bind", "/etc", "/etc")), got.index(wanted))
+    # Where /etc/resolv.conf leads, as the shell found it, and whether the file is bound there. The
+    # layouts a machine can have: the link into systemd-resolved's stub file or its other file,
+    # NetworkManager's file, one under /usr, a plain file in /etc, no file, a file under /tmp.
+    RESOLVER_LAYOUTS = (
+        ("the stub file of systemd-resolved", "/run/systemd/resolve/stub-resolv.conf", True),
+        ("the other file of systemd-resolved", "/run/systemd/resolve/resolv.conf", True),
+        ("the file of NetworkManager", "/run/NetworkManager/resolv.conf", True),
+        ("a file kept under the machine's own variable data", "/var/lib/x/resolv.conf", True),
+        ("a file under /usr, shown already", "/usr/lib/x/resolv.conf", False),
+        ("a plain file in /etc", "/etc/resolv.conf", False),
+        ("a file under /tmp, which the executor's own would cover", "/tmp/r/resolv.conf", False),
+        ("no file, or a link that leads nowhere", None, False),
+    )
+
+    def test_the_file_the_resolver_settings_lead_to_is_bound_at_its_own_path_after_etc_if_at_all(
+        self,
+    ):
+        for label, target, bound in self.RESOLVER_LAYOUTS:
+            with self.subTest(label):
+                got = binds(boundary.box_arguments({**REACH, "resolver": target}))
+                wanted = ("--ro-bind", target, target)
+                self.assertEqual(wanted in got, bound)
+                if bound:
+                    self.assertLess(got.index(("--ro-bind", "/etc", "/etc")), got.index(wanted))
+                self.assertEqual([d for _, _, d in got].count(target), 1 if bound else 0)
+
+    def test_the_git_folders_are_writable_and_a_git_folder_inside_the_place_is_not_bound_again(
+        self,
+    ):
+        linked = ["/main/.git", "/main/.git/worktrees/place"]
+        got = binds(boundary.box_arguments({**REACH, "git_folders": linked}))
+        self.assertIn(("--bind", "/main/.git", "/main/.git"), got)
+        self.assertNotIn("/main/.git/worktrees/place", [d for _, _, d in got])  # it is inside
+        self.assertFalse([d for _, _, d in got if d == "/main"])  # nothing else of it
+        plain = ["/work/place/.git"]
+        got = binds(boundary.box_arguments({**REACH, "git_folders": plain}))
+        self.assertNotIn("/work/place/.git", [d for _, _, d in got])
+
+    def test_a_git_folder_comes_after_the_tmp_bind_when_it_is_under_the_real_tmp(self):
+        order = destinations(
+            boundary.box_arguments({**REACH, "git_folders": ["/tmp/main/.git"], "place": "/tmp/p"})
+        )
+        self.assertLess(order.index("/tmp"), order.index("/tmp/main/.git"))
 
     def test_home_is_the_executors_own_and_the_working_directory_is_the_place(self):
         argv = boundary.launch_argv("n", 1, ["t"], [], REACH, 3)
@@ -80,6 +123,41 @@ class TheBinds(unittest.TestCase):
         self.assertEqual(argv[at : at + 3], ["--setenv", "HOME", "/scratch/area/home"])
         at = argv.index("--chdir")
         self.assertEqual(argv[at : at + 2], ["--chdir", "/work/place"])
+
+
+class WhatTheShellGathersForTheBox(unittest.TestCase):
+    """A run hands the core the facts: where the resolver settings lead, and the place's git
+    folders; the core decides from them (the table above)."""
+
+    def argv_of_a_run(self, **prepare):
+        world = scenes.scene()
+        if "links" in prepare:
+            for name, leads_to in prepare["links"].items():
+                world.put_link(name, leads_to)
+                world.put_file(leads_to, "nameserver 127.0.0.53\n")
+        if "git_folders" in prepare:
+            world.places[scenes.PLACE]["git_folders"] = prepare["git_folders"]
+        code, _, err = scenes.run_in(world)
+        assert code == 0, err
+        return world.started[0][0]
+
+    def test_where_the_resolver_settings_lead_is_bound_at_its_own_path(self):
+        target = "/run/systemd/resolve/stub-resolv.conf"
+        argv = self.argv_of_a_run(links={"/etc/resolv.conf": target})
+        self.assertIn(("--ro-bind", target, target), binds(argv))
+
+    def test_a_machine_with_no_resolver_settings_binds_nothing_for_them(self):
+        argv = self.argv_of_a_run()
+        self.assertEqual([d for d in destinations(argv) if d.startswith("/run")], [])
+
+    def test_a_linked_places_git_folders_are_bound_writable_and_nothing_else_of_its_origin(self):
+        argv = self.argv_of_a_run(git_folders=["/main/.git", "/main/.git/worktrees/place"])
+        self.assertIn(("--bind", "/main/.git", "/main/.git"), binds(argv))
+        self.assertFalse([d for d in destinations(argv) if d == "/main"])
+
+    def test_a_plain_places_git_folder_is_inside_the_place_and_adds_no_bind(self):
+        argv = self.argv_of_a_run()
+        self.assertNotIn(f"{scenes.PLACE}/.git", destinations(argv))
 
 
 class TheOrderTheBindsMustHave(unittest.TestCase):

@@ -94,6 +94,10 @@ attempt("connect to the user's bus", lambda: socket.socket(socket.AF_UNIX).conne
 command_fails("systemctl --user", ["systemctl", "--user", "is-system-running"])
 command_fails("busctl --user", ["busctl", "--user", "list"])
 attempt("read the resolver settings", lambda: read("/etc/resolv.conf"))
+try:
+    report["resolver settings"] = open("/etc/resolv.conf", "rb").read().decode("latin-1")
+except OSError:
+    report["resolver settings"] = None
 report["runtime variables"] = [
     n for n in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS") if n in os.environ
 ]
@@ -233,6 +237,10 @@ class TheReachOfTheExecutor(real_run.RealRun):
         # name lookup keeps working where the machine's settings are a link into a hidden folder
         if os.path.exists("/etc/resolv.conf"):
             self.assertEqual(report["read the resolver settings"], "ok")
+            # the very settings the machine has, not an empty file: the lookup itself needs the
+            # network, which the suite does not, so it is not done here
+            with open("/etc/resolv.conf", "rb") as f:
+                self.assertEqual(report["resolver settings"], f.read().decode("latin-1"))
         self.assertEqual(report["runtime variables"], [])
         for name in ("systemctl --user", "busctl --user"):
             with self.subTest(name):

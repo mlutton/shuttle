@@ -151,7 +151,12 @@ def setup_requests(settings: Settings, environment: Mapping[str, str]) -> list[S
         # A copy, not a link: the box hides the caller's own folders, and the tool saves a
         # refreshed login by writing a file beside it and renaming over it, which needs a
         # writable folder of its own. Nothing is copied back.
-        {"action": "copy", "name": f"{_HOME}/{_LOGIN}", "source": f"{home}/{_LOGIN}"},
+        {
+            "action": "copy",
+            "name": f"{_HOME}/{_LOGIN}",
+            "source": f"{home}/{_LOGIN}",
+            "follow": True,  # a login kept elsewhere and linked to is copied as the file it is
+        },
         _keep("out"),
         {"action": "variable", "variable": "CODEX_HOME", "in_run_area": _HOME},
     ]

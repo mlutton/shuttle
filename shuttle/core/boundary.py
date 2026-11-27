@@ -105,9 +105,16 @@ class Reach(TypedDict):
     """The paths of one run's reach, each already resolved (absolute, no link, no `..`).
 
     The box makes the system folders and `/etc` read-only, then makes visible (read-only) each of
-    `visible` and `references`, and writable `place` and `area`. `home` and `tmp` are folders
-    inside `area`: `tmp` is the executor's `/tmp` and `home` its `HOME`. `records` is hidden
-    whatever else is bound.
+    `visible` and `references`, and writable `place`, `area` and `git_folders`. `home` and `tmp`
+    are folders inside `area`: `tmp` is the executor's `/tmp` and `home` its `HOME`. `records` is
+    hidden whatever else is bound.
+
+    `git_folders` are the place's own git folder and the one it shares with the checkout it was
+    made from, as the shell found them: for a linked working copy (the usual place) they are
+    outside the place, and git cannot run without them. They are as writable as the place is,
+    which is what a run could do before the box narrowed its reach; nothing else of the
+    repository the place was made from is shown. `resolver` is the file `/etc/resolv.conf` leads
+    to, when there is one (see `_resolver_bind`).
     """
 
     place: str
@@ -116,6 +123,8 @@ class Reach(TypedDict):
     tmp: str
     references: Sequence[str]
     visible: Sequence[str]
+    git_folders: Sequence[str]
+    resolver: str | None
     records: str
 
 
@@ -125,7 +134,6 @@ class Reach(TypedDict):
 # argument list serves each layout. (A link bound by name would lead nowhere inside the box.)
 _SYSTEM_FOLDERS = ("/usr", "/etc")
 _SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib64")
-_RESOLVER_LINK_TARGET = "/run/systemd/resolve/stub-resolv.conf"
 
 
 def _depth(path: str) -> int:
@@ -146,9 +154,42 @@ def _reach_binds(reach: Reach) -> list[str]:
         (path, 0, ["--ro-bind", path, path])
         for path in dict.fromkeys([*reach["visible"], *reach["references"]])
     ]
-    wanted += [(path, 1, ["--bind", path, path]) for path in (reach["area"], reach["place"])]
+    wanted += [(path, 1, ["--bind", path, path]) for path in _writable(reach)]
     wanted.sort(key=lambda item: (_depth(item[0]), item[1]))
     return [part for _, _, parts in wanted for part in parts]
+
+
+def _inside(path: str, folder: str) -> bool:
+    return refusals.inside_folder(path, folder)
+
+
+def _writable(reach: Reach) -> list[str]:
+    """The run area, the place and the git folders that are not already inside the place or
+    inside another of them, without duplicates."""
+    held = [reach["area"], reach["place"]]
+    every = list(dict.fromkeys(reach["git_folders"]))
+    for folder in every:
+        others = [other for other in (*held, *every) if other != folder]
+        if not any(_inside(folder, other) for other in others):
+            held.append(folder)
+    return held
+
+
+# The paths the box's own binds are made at: a path under one of these is not the machine's, so
+# a file the shell found there is not bound in again.
+_BOX_OWN = ("/usr", "/etc", "/tmp", "/proc", "/dev")
+
+
+def _resolver_bind(reach: Reach) -> list[str]:
+    """The bind that makes name lookup work where `/etc/resolv.conf` is a link to a file outside
+    `/etc`: the link would lead nowhere in the box, and a bind cannot be made onto a link, so the
+    file it leads to is bound at its own path, as the link names it. Nothing is bound where the
+    file is a plain one in `/etc`, is under `/usr` (shown already) or is under `/tmp` (which the
+    executor's own would cover), or where there is no file. The rest of `/run` stays hidden."""
+    target = reach["resolver"]
+    if target is None or any(_inside(target, own) for own in _BOX_OWN):
+        return []
+    return ["--ro-bind", target, target]
 
 
 def _hidden_records(reach: Reach) -> list[str]:
@@ -159,6 +200,7 @@ def _hidden_records(reach: Reach) -> list[str]:
         *_SYSTEM_FOLDERS,
         reach["place"],
         reach["area"],
+        *reach["git_folders"],
         *reach["references"],
         *reach["visible"],
     ]
@@ -177,14 +219,7 @@ def box_arguments(reach: Reach) -> list[str]:
         "--ro-bind",
         "/etc",
         "/etc",
-        # Name lookup: where the machine keeps its resolver settings in a link into `/run` (the
-        # usual setup with systemd-resolved), the link would lead nowhere inside the box, and a
-        # bind cannot be made onto a link. The file it leads to is bound at the place the link
-        # names instead (a snapshot taken at the start); with no such link this binds nothing
-        # that matters, and the rest of `/run` stays hidden.
-        "--ro-bind-try",
-        "/etc/resolv.conf",
-        _RESOLVER_LINK_TARGET,
+        *_resolver_bind(reach),
         "--dev",
         "/dev",
         "--proc",

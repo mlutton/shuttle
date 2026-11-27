@@ -62,9 +62,8 @@ def login_path(environment: Mapping[str, str]) -> str | None:
 
 
 def check(settings: Settings, facts: DriverFacts) -> tuple[str, str] | None:
-    # The box enforces neither setting yet (the network stays shared; the place stays writable), and this driver has no sandbox of its own
-    # (as the Codex driver's tool has), so a restriction asked for would be silently unhonoured:
-    # refuse it instead.
+    # This driver has no sandbox of its own (as the Codex driver's tool has), so a restriction
+    # asked for that the box does not enforce would be silently unhonoured: refuse it instead.
     for asked, what in (
         (facts["network"] is False, "network off"),
         (facts["changes_allowed"] is False, "changes_to_place not"),

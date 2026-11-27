@@ -298,6 +298,40 @@ class TheCheckForm(unittest.TestCase):
         self.assertIn("not a promise", lines[-1])
         self.assertNotIn("inj-1.request.json", world.names_in(scenes.RECORDS))
 
+    def with_folders(self, doc, home="/home/me"):
+        world = scenes.scene(doc)
+        world.variables.update({"XDG_RUNTIME_DIR": "/run/user/1000", "HOME": home})
+        for folder in (
+            "/run",
+            "/run/user",
+            "/run/user/1000",
+            "/home",
+            home,
+            f"{home}/tools",
+            "/tmp",
+        ):
+            world.make_folder(folder)
+        return world
+
+    def test_a_listed_folder_that_is_or_holds_the_runtime_folder_the_home_folder_or_tmp_is_refused(
+        self,
+    ):
+        for reason, path in (
+            ("visible_overlaps_the_runtime_folder", "/run"),
+            ("visible_overlaps_the_home_folder", "/home"),
+            ("visible_overlaps_the_home_folder", "/home/me"),
+            ("visible_overlaps_the_box", "/tmp"),
+        ):
+            with self.subTest(reason, path=path):
+                world = self.with_folders(scenes.document(reach={"visible": [path]}))
+                _, lines, _ = self.check(world)
+                self.assertEqual(lines[-2], f"check: refused: {reason}")
+
+    def test_a_folder_inside_the_home_folder_is_accepted(self):
+        world = self.with_folders(scenes.document(reach={"visible": ["/home/me/tools"]}))
+        _, lines, _ = self.check(world)
+        self.assertEqual(lines[-2], "check: no refusal found")
+
     def test_every_check_is_run_and_every_problem_is_listed(self):
         doc = scenes.document(
             kind="nonesuch", command="absent-tool", reach={"visible": ["nowhere"]}

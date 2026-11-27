@@ -132,7 +132,11 @@ class SimulatedWorld:
                 new_id=self._new_id,
                 process_number=self._process_number,
             ),
-            git=GitOperations(look_at_place=self._look_at_place, freeze=self._freeze),
+            git=GitOperations(
+                look_at_place=self._look_at_place,
+                git_folders=self._git_folders,
+                freeze=self._freeze,
+            ),
         )
 
     # ------------------------------------------------------------ setting the scene
@@ -587,6 +591,10 @@ class SimulatedWorld:
 
     def _resolve(self, path):
         self._enter("boundary.resolve", path)
+        for _ in range(40):  # a name that is a link resolves to where it leads
+            if path not in self.links:
+                break
+            path = self.links[path]
         return path
 
     def _in_place(self, place):
@@ -636,6 +644,13 @@ class SimulatedWorld:
             ],
             "filtered": [],
         }
+
+    def _git_folders(self, place, environment):
+        self._enter("git.git_folders", place, dict(environment))
+        held = self.places.get(place)
+        if held is None:
+            return []
+        return list(held.get("git_folders", [f"{place}/.git"]))
 
     def _freeze(self, command, environment):
         """Run the freeze's command: the scope's tool around the freeze script. The files of the

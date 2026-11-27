@@ -115,6 +115,17 @@ def look_at_place(place: str, environment: Mapping[str, str]) -> PlaceFacts:
     }
 
 
+def git_folders(place: str, environment: Mapping[str, str]) -> list[str]:
+    found: list[str] = []
+    for option in ("--git-dir", "--git-common-dir"):
+        done = _git(place, environment, "rev-parse", "--path-format=absolute", option)
+        if done.returncode != 0 or not done.stdout.endswith(b"\n"):
+            return []
+        # one name and its line end: the name may hold a line end itself, so it is cut by one
+        found.append(os.path.realpath(os.fsdecode(done.stdout[:-1])))
+    return list(dict.fromkeys(found))
+
+
 def freeze(command: Sequence[str], environment: Mapping[str, str]) -> FreezeAnswer:
     done = subprocess.run(
         list(command),
@@ -126,4 +137,4 @@ def freeze(command: Sequence[str], environment: Mapping[str, str]) -> FreezeAnsw
     return FreezeAnswer(done.returncode, done.stdout)
 
 
-GIT = GitOperations(look_at_place=look_at_place, freeze=freeze)
+GIT = GitOperations(look_at_place=look_at_place, git_folders=git_folders, freeze=freeze)

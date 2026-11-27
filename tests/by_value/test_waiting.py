@@ -25,6 +25,8 @@ REACH: boundary.Reach = {
     "tmp": "/area/tmp",
     "references": [],
     "visible": [],
+    "git_folders": [],
+    "resolver": None,
     "records": "/rec",
 }
 

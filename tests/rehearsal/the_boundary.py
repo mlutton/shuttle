@@ -35,6 +35,8 @@ def absent_reason() -> str | None:
                 "tmp": os.path.join(area, "tmp"),
                 "references": [],
                 "visible": [],
+                "git_folders": [],
+                "resolver": None,
                 "records": os.path.join(area, "records"),
             }
             # The box the runs use, so a machine that cannot make it is seen to lack it.
