@@ -82,15 +82,52 @@ class Outcome(TypedDict, total=False):
     problem: str | None
 
 
-class CommandSettings(TypedDict):
-    """The command driver's settings, once the document is checked."""
-
-    command: str
-    arguments: list[str]
+# An executor driver's own settings, as the document gave them; each driver's check says what
+# it holds (the table of drivers is shuttle.core.drivers.table).
+Settings = dict[str, Any]
 
 
 class LaunchSpec(TypedDict):
     argv: list[str]
+    output_to: NotRequired[str]  # a file made new for the child's standard output, in the run area
+
+
+class DriverFacts(TypedDict):
+    """What the shell found out for a driver's check; the driver decides from these alone."""
+
+    tool_found: bool
+    login_found: bool  # whether the name `login_path` gave is there; the login is never opened
+    network: bool | None  # the document's standard settings; None when it gave none
+    changes_allowed: bool | None
+
+
+class LaunchContext(TypedDict):
+    """What a driver's launch command is built from besides its settings."""
+
+    place: str
+    run_area: str
+    network: bool
+    changes_allowed: bool
+
+
+class OutputFiles(TypedDict, total=False):
+    """Where a driver's tool leaves what the shell hands back to `observe`, whole paths."""
+
+    events: str
+    last_message: str
+
+
+class SavedOutput(TypedDict):
+    """The text of what the tool left, each None when it could not be read."""
+
+    events: str | None
+    last_message: str | None
+    session_record: str | None
+
+
+class Observed(TypedDict):
+    group: "ExecutorDriverGroup"
+    statement_text: str | None  # what the tool says is its statement; None when it has none
 
 
 SetupAction = Literal["copy", "share", "leave_out", "write", "writable", "variable"]
@@ -395,6 +432,7 @@ class Starter(Protocol):
         environment: Mapping[str, str],
         report: int | None = None,
         input_from: str | None = None,
+        output_to: str | None = None,
     ) -> Process: ...
 
 
@@ -405,7 +443,9 @@ class ProcessOperations(NamedTuple):
     # start: argv, environment, the number `open_report` gave or None, and the name of a file the
     # child reads as its standard input (None: nothing to read, the null device). The file is
     # opened before anything starts: FileNotFoundError and nothing started when it is not there.
-    # OSError, ValueError
+    # `output_to` is a name made new for the child's standard output (None: the null device):
+    # FileExistsError, or FileNotFoundError when the folder above it is not there, and nothing
+    # started. OSError, ValueError
     start: Starter
     poll: Callable[[Process], int | None]  # None while running; negative: ended by that signal
     wait: Callable[

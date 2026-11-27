@@ -578,6 +578,36 @@ class ContractCases:
             self.fresh("absent"),
         )
 
+    def test_a_child_started_with_an_output_name_writes_its_standard_output_there(self):
+        path = self.fresh("output")
+        process = self.world.processes.start(
+            self.harness.argv("prints_hello"), self.harness.environment(), None, None, path
+        )
+        self.addCleanup(self.harness.end, process)
+        self.assertTrue(self.ended(process))
+        self.assertEqual(self.world.files.read(path), b"hello\n")
+
+    def test_starting_with_an_output_name_that_is_taken_or_has_no_folder_raises_and_starts_nothing(
+        self,
+    ):
+        taken = self.fresh("taken")
+        self.world.files.write_new(taken, "kept")
+        for name, error in (
+            (taken, FileExistsError),
+            (f"{self.fresh('absent')}/in", FileNotFoundError),
+        ):
+            with self.subTest(name):
+                self.assertRaisesExactly(
+                    error,
+                    self.world.processes.start,
+                    self.harness.argv("prints_hello"),
+                    self.harness.environment(),
+                    None,
+                    None,
+                    name,
+                )
+        self.assertEqual(self.world.files.read(taken), b"kept")
+
     def test_a_child_started_without_a_report_descriptor_has_an_empty_report(self):
         process = self.start("exits_at_once")
         self.assertTrue(self.ended(process))

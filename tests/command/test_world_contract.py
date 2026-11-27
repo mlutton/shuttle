@@ -77,6 +77,7 @@ class RealHarness:
                 "import sys; open(sys.argv[1], 'wb').write(sys.stdin.buffer.read())",
                 report,
             ],
+            "prints_hello": [python, "-c", "print('hello')"],
             "not_a_program": [os.path.join(self.root, "no-such-program")],
         }[kind]
 

@@ -24,7 +24,6 @@ from typing import Any, TextIO
 
 from shuttle import __version__
 from shuttle.core import boundary, decisions, refusals
-from shuttle.core.drivers import command
 from shuttle.core.shapes import (
     Conclusion,
     Decision,
@@ -45,6 +44,7 @@ from shuttle.shell import (
     stand_ins,
     stop_and_confirm_empty,
     tear_down,
+    the_driver,
     wait_for_the_end,
 )
 
@@ -167,13 +167,12 @@ def step_run_input_checks_and_executor_driver_check(state: RunState) -> None:
 
 def driver_check(world: Operations, raw: Mapping[str, Any]) -> tuple[str | None, str | None]:
     """The executor driver's check, and the check of the environment variables the document names."""
-    settings = raw["executor"]["settings"]
     names = raw.get("environment", [])
     return decisions.executor_driver_check(
-        settings,
+        raw["executor"],
         names,
         launch_executor.caller_environment(world, names),
-        world.processes.find_program(settings["command"]),
+        the_driver.facts(world, raw),
     )
 
 
@@ -190,7 +189,19 @@ def step_run_gates(state: RunState) -> None:
 
 
 def step_observe(state: RunState) -> None:
-    state["executor_driver_observations"] = command.observe()
+    """Ask the driver what the tool left. A statement the tool gives as text (and not as a file)
+    is put at the statement location, for the step that keeps it."""
+    world, raw = state["world"], state["raw"]
+    driver = the_driver.of(raw)
+    area = state.get("run_area")
+    saved = the_driver.saved_output(world, driver, area) if area else None
+    if saved is None:
+        saved = {"events": None, "last_message": None, "session_record": None}
+    observed = driver.observe(raw["executor"]["settings"], saved)
+    state["executor_driver_observations"] = observed["group"]
+    location, text = raw.get("statement_location"), observed["statement_text"]
+    if location is not None and text is not None and not world.files.exists(location):
+        world.files.write_new(location, text)
 
 
 def step_deliver(state: RunState) -> None:  # stand-in

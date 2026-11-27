@@ -64,6 +64,11 @@ class ValidateDocument(unittest.TestCase):
                     core.validate_document(with_change(time_limit_seconds=limit))["refusal"]
                 )
 
+    def test_a_good_document_may_give_the_two_standard_settings(self):
+        for network, changes in (("on", "allowed"), ("off", "not")):
+            doc = with_change(network=network, changes_to_place=changes)
+            self.assertIsNone(core.validate_document(doc)["refusal"])
+
     def test_a_good_document_may_name_environment_variables(self):
         self.assertIsNone(core.validate_document(with_change(environment=["A_B", "C"]))["refusal"])
 
@@ -73,7 +78,7 @@ class ValidateDocument(unittest.TestCase):
         no_args = copy.deepcopy(GOOD)
         del no_args["executor"]["settings"]["arguments"]
         other_executor = copy.deepcopy(GOOD)
-        other_executor["executor"]["name"] = "codex"
+        other_executor["executor"]["name"] = "claude"
         cases = [
             ("unknown field", with_change(surprise=1), "unknown_field"),
             ("other version", with_change(format_version=2), "unknown_format_version"),
@@ -82,6 +87,8 @@ class ValidateDocument(unittest.TestCase):
             ("other executor", other_executor, "unknown_executor"),
             ("unknown setting", bad_settings, "unknown_setting"),
             ("missing setting", no_args, "missing_setting"),
+            ("network neither on nor off", with_change(network="maybe"), "missing_setting"),
+            ("changes neither allowed nor not", with_change(changes_to_place=1), "missing_setting"),
             ("version true", with_change(format_version=True), "unknown_format_version"),
             ("version 1.0", with_change(format_version=1.0), "unknown_format_version"),
             ("version text", with_change(format_version="1"), "unknown_format_version"),

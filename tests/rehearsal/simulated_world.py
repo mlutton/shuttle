@@ -219,6 +219,8 @@ class SimulatedWorld:
         creates=(),
         fails_to_start=False,
         report=None,
+        output="",
+        writes=None,
     ):
         """Say what starting `command` in the boundary makes: a child that exits at once with
         `exit_code`; or, with `hangs`, one that runs until the boundary is stopped; or, with
@@ -226,7 +228,9 @@ class SimulatedWorld:
         the first time it is looked at. With `survives_stop` stopping the boundary does nothing.
         The child creates the named files as it starts. A child started in the boundary reports
         that it started, unless `fails_to_start` (the boundary's own tool exits with `exit_code`
-        before the executor runs); `report` is the text a child writes to the report it was given."""
+        before the executor runs); `report` is the text a child writes to the report it was given.
+        `output` is the text it writes to its standard output when that is a file it was given
+        (`output_to`); `writes` maps names to the text of files it makes as it starts."""
         self.programs[command] = {
             "hangs": hangs or times_out or survives_stop,
             "times_out": times_out,
@@ -235,6 +239,8 @@ class SimulatedWorld:
             "creates": tuple(creates),
             "fails_to_start": fails_to_start,
             "report": report,
+            "output": output,
+            "writes": dict(writes or {}),
         }
 
     # ------------------------------------------------------------ making things fail
@@ -490,17 +496,33 @@ class SimulatedWorld:
             return inside[inside.index("--") + 1 :], unit, False
         return inside, unit, False
 
-    def _start(self, argv, environment, report=None, input_from=None):
+    def _check_output_name(self, output_to):
+        if output_to is not None:
+            if self._taken(output_to):
+                raise FileExistsError(output_to)
+            if not self._parent_exists(output_to):
+                raise FileNotFoundError(output_to)
+
+    def _make_files(self, behaviour, output_to):
+        """What a child leaves as it starts: the files it creates and its standard output."""
+        for name in behaviour["creates"]:
+            self.files[name] = bytearray(b"1")
+        for name, text in behaviour["writes"].items():
+            self.files[name] = bytearray(text.encode("utf-8"))
+        if output_to is not None:
+            self.files[output_to] = bytearray(behaviour["output"].encode("utf-8"))
+
+    def _start(self, argv, environment, report=None, input_from=None, output_to=None):
         self._enter("processes.start", list(argv), dict(environment), input_from)
         given = b"" if input_from is None else self.files[self._regular(input_from, True)]
+        self._check_output_name(output_to)
         if any("\0" in part for part in argv):
             raise ValueError("embedded null byte")
         executor, unit, gate = self._what_runs(argv)
         if not executor or executor[0] not in self.programs:
             raise FileNotFoundError(executor[0] if executor else "")
         behaviour = self.programs[executor[0]]
-        for name in behaviour["creates"]:
-            self.files[name] = bytearray(b"1")
+        self._make_files(behaviour, output_to)
         self.started.append((list(argv), dict(environment)))
         child = _Child(executor, behaviour, unit)
         child.input = bytes(given)
