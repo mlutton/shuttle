@@ -22,6 +22,8 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
         case "folder":
             files.make_folders(step["target"])
         case "copy":
+            if step.get("optional") and not files.exists(step["source"]):
+                return  # the request said a missing source is no error
             files.copy_path(step["source"], step["target"], step["leave_out"])
         case "share":
             files.share_by_link(step["source"], step["target"])

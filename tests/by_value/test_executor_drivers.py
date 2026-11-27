@@ -11,8 +11,10 @@ import importlib
 import io
 import os
 import sys
+import types
 import unittest
 
+from shuttle.core import run_area
 from shuttle.core.drivers import command, table
 from shuttle.shell import check_form
 
@@ -171,6 +173,76 @@ class ARunNamingTheCodexDriver(unittest.TestCase):
         self.run_it(world)
         self.assertFalse(any(n.startswith(AREA) for n in world.files))
         self.assertEqual(world.text_of(LOGIN), "NOT-A-LOGIN-just-a-stand-in\n")
+
+
+class TheCheckAndTheRunAgreeOnWhatTheSetupNeeds(unittest.TestCase):
+    def a_command_driver_that_asks_for(self, requests):
+        """The command driver with a setup of its own, in the table for the length of a test."""
+        driver = types.SimpleNamespace(**vars(command))
+        driver.setup_requests = lambda settings, environment: requests
+        held = table.DRIVERS["command"]
+        table.DRIVERS["command"] = driver
+        self.addCleanup(table.DRIVERS.__setitem__, "command", held)
+
+    def verdicts(self, world):
+        out, err = io.StringIO(), io.StringIO()
+        check_form.check(scenes.DOCUMENT, out, err, world.operations)
+        checked = out.getvalue()
+        code, _, _ = scenes.run_in(world)
+        return checked, flat(scenes.outcome(world)["receipt"])["ending"], code
+
+    def test_a_source_the_setup_needs_that_is_not_there_is_refused_by_both_with_the_same_reason(
+        self,
+    ):
+        self.a_command_driver_that_asks_for(
+            [{"action": "copy", "name": "home/settings", "source": "/absent/settings"}]
+        )
+        checked, ending, _ = self.verdicts(scenes.scene())
+        self.assertIn("setup_failed", checked)
+        self.assertIn("/absent/settings", checked)
+        self.assertEqual(
+            (ending["ending"], ending["reason"], ending["failed_step"]),
+            ("could_not_start", "setup_failed", "setup"),
+        )
+
+    def test_a_source_that_is_there_passes_both(self):
+        self.a_command_driver_that_asks_for(
+            [
+                {"action": "copy", "name": "settings", "source": "/there"},
+                {"action": "share", "name": "login", "source": "/there"},
+            ]
+        )
+        world = scenes.scene()
+        world.put_file("/there", "text")
+        checked, ending, _ = self.verdicts(world)
+        self.assertNotIn("setup_failed", checked)
+        self.assertEqual(ending["ending"], "ended_by_itself")
+
+    def test_an_optional_copy_whose_source_is_not_there_is_left_out_by_both(self):
+        self.a_command_driver_that_asks_for(
+            [{"action": "copy", "name": "settings", "source": "/absent", "optional": True}]
+        )
+        world = scenes.scene()
+        checked, ending, _ = self.verdicts(world)
+        self.assertNotIn("setup_failed", checked)
+        self.assertEqual(ending["ending"], "ended_by_itself")
+        self.assertEqual(world.calls("files.copy_path"), [])
+
+    def test_only_a_copy_may_be_optional_and_only_with_true_or_false(self):
+        copy = {"action": "copy", "name": "a", "source": "/s"}
+        self.assertIsNone(run_area.refusal([{**copy, "optional": True}]))
+        self.assertIn("optional", run_area.refusal([{**copy, "optional": "yes"}]))
+        self.assertEqual(run_area.required_sources([{**copy, "optional": True}]), [])
+        self.assertEqual(run_area.required_sources([copy]), ["/s"])
+
+    def test_a_tool_home_with_a_login_and_no_settings_file_passes_the_check_and_the_run(self):
+        world = world_for("events-finished.jsonl", "last-message-done.txt")
+        world.files.pop("/h/.codex/config.toml")
+        checked, ending, _ = self.verdicts(world)
+        self.assertNotIn("setup_failed", checked)
+        self.assertEqual(ending["ending"], "ended_by_itself")
+        self.assertEqual(world.calls("files.copy_path"), [])  # the settings file was not asked for
+        self.assertEqual(len(world.calls("files.share_by_link")), 1)  # the login still is
 
 
 class TheCheckFormWithTheCodexDriver(unittest.TestCase):

@@ -91,6 +91,10 @@ class _Action:
         """The variable it passes to the executor, by name."""
         return {}
 
+    def required_source(self, request: SetupRequest) -> str | None:
+        """The path outside the area that the run's set-up fails without, or None."""
+        return None
+
 
 def _folder_above(name: str, area: str) -> list[SetupStep]:
     above = name.rpartition("/")[0]
@@ -111,20 +115,33 @@ class _Sourced(_Action):
 
 
 class _Copy(_Sourced):
+    def shape_problem(self, index: int, request: SetupRequest) -> str | None:
+        return super().shape_problem(index, request) or (
+            None
+            if isinstance(request.get("optional", False), bool)
+            else f"setup request {index + 1} (copy): optional is not true or false"
+        )
+
     def steps(self, request: SetupRequest, area: str, leave_out: Sequence[str]) -> list[SetupStep]:
         name = request["name"]
-        return [
-            *_folder_above(name, area),
-            {
-                "do": "copy",
-                "source": request["source"],
-                "target": _inside(area, name),
-                "leave_out": _left_out_of(name, leave_out),
-            },
-        ]
+        copy: SetupStep = {
+            "do": "copy",
+            "source": request["source"],
+            "target": _inside(area, name),
+            "leave_out": _left_out_of(name, leave_out),
+        }
+        if request.get("optional"):
+            copy["optional"] = True
+        return [*_folder_above(name, area), copy]
+
+    def required_source(self, request: SetupRequest) -> str | None:
+        return None if request.get("optional") else request["source"]
 
 
 class _Share(_Sourced):
+    def required_source(self, request: SetupRequest) -> str | None:
+        return request["source"]
+
     def steps(self, request: SetupRequest, area: str, leave_out: Sequence[str]) -> list[SetupStep]:
         name = request["name"]
         return [
@@ -322,3 +339,10 @@ def plan(area: str, requests: Sequence[SetupRequest]) -> SetupPlan:
 def refusal(requests: Sequence[SetupRequest]) -> str | None:
     """Why the requests are refused, or None: the plan's own answer, needing no run area yet."""
     return plan("/area", requests)["problem"]
+
+
+def required_sources(requests: Sequence[SetupRequest]) -> list[str]:
+    """The paths outside the area that the set-up of these requests fails without (a copy's source
+    and a share's, unless the copy is optional), so a check can look for them before a run."""
+    held = [ACTIONS[r["action"]].required_source(r) for r in requests if r["action"] in ACTIONS]
+    return [source for source in held if source is not None]

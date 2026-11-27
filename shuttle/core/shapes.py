@@ -144,7 +144,7 @@ class SetupRequest(TypedDict, total=False):
     other fields are those that action reads: `name` (the path made, or acted on, inside the
     area), `source` (the absolute path a copy or share comes from), `text` (a written file's),
     and for a variable, `variable` with either `value` or `in_run_area` (the name whose path is
-    the value)."""
+    the value). A copy may be `optional`."""
 
     action: SetupAction
     name: str
@@ -153,6 +153,7 @@ class SetupRequest(TypedDict, total=False):
     variable: str
     value: str
     in_run_area: str
+    optional: bool  # a copy only: left out, not an error, when its source is not there
 
 
 class SetupStep(TypedDict, total=False):
@@ -162,6 +163,7 @@ class SetupStep(TypedDict, total=False):
     source: str
     target: str
     leave_out: list[str]  # for a copy: names relative to the source
+    optional: bool  # for a copy: present (true) only when the request said so
     text: str
 
 

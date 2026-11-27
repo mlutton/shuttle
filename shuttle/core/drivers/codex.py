@@ -132,7 +132,12 @@ def setup_requests(settings: Settings, environment: Mapping[str, str]) -> list[S
     if home is None:
         return []
     return [
-        {"action": "copy", "name": f"{_HOME}/{_CONFIG}", "source": f"{home}/{_CONFIG}"},
+        {
+            "action": "copy",
+            "name": f"{_HOME}/{_CONFIG}",
+            "source": f"{home}/{_CONFIG}",
+            "optional": True,  # the tool starts without one, as it does in an empty tool home
+        },
         {"action": "share", "name": f"{_HOME}/{_LOGIN}", "source": f"{home}/{_LOGIN}"},
         _keep("tmp"),
         _keep("cache"),

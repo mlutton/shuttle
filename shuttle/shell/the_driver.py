@@ -8,7 +8,7 @@ whether the login's name is there.
 from collections.abc import Iterator, Mapping
 from typing import Any
 
-from shuttle.core import decisions
+from shuttle.core import decisions, run_area
 from shuttle.core.drivers import table
 from shuttle.core.drivers.interface import Driver
 from shuttle.core.shapes import DriverFacts, LaunchContext, Line, Operations, SavedOutput
@@ -77,3 +77,11 @@ def saved_output(world: Operations, driver: Driver, run_area: str) -> SavedOutpu
         "last_message": lines(files.get("last_message")),
         "session_record": None,
     }
+
+
+def missing_setup_source(world: Operations, raw: Mapping[str, Any]) -> str | None:
+    """The first path the driver's set-up needs and that is not there, or None; looked at, never
+    opened. The run's set-up fails on exactly such a path."""
+    driver = of(raw)
+    requests = driver.setup_requests(raw["executor"]["settings"], caller_variables(world, driver))
+    return next((s for s in run_area.required_sources(requests) if not world.files.exists(s)), None)

@@ -177,6 +177,7 @@ class TheSetupRequests(unittest.TestCase):
                 "source": "/h/.codex/config.toml",
                 "target": f"{AREA}/home/config.toml",
                 "leave_out": [],
+                "optional": True,  # the tool starts without a settings file
             },
             steps,
         )
