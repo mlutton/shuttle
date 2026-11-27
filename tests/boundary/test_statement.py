@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 locations_table = importlib.import_module("hostile.statement_locations_table")
 flat = importlib.import_module("rehearsal.receipts").flat
 real_run = importlib.import_module("rehearsal.real_run")
+real_place = importlib.import_module("rehearsal.real_place")
 
 # What every script below does first: finds, in the notice on its standard input, the path it is
 # told to write its statement at.
@@ -100,7 +101,7 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
     def run_leaving(self, data, request_id="r-1"):
         """Run a kind that expects a statement; the script leaves `data` at its path in the run area."""
         location = os.path.join(self.root, "statement-" + request_id)
-        given = os.path.join(self.root, "given-" + request_id)
+        given = os.path.join(self.support, "given-" + request_id)
         with open(given, "wb") as f:
             f.write(data)
         script = self.script("leaves.py", LEAVES_WHAT_IT_IS_GIVEN)
@@ -171,7 +172,7 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
 
     def test_the_documents_statement_location_is_nowhere_in_what_the_executor_is_given(self):
         location = os.path.join(self.root, "statement-r-1")
-        record = os.path.join(self.root, "everything-it-was-given")
+        record = os.path.join(self.place, "everything-it-was-given")
         script = self.script("records.py", RECORDS_EVERYTHING_IT_WAS_GIVEN)
         doc = self.document(script, [record])
         self.expecting_a_statement(doc, location)
@@ -226,7 +227,7 @@ class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
             with self.subTest(row["label"]):
                 request_id = f"loc-{index}"
                 location = os.path.join(self.root, f"statement-{index}")
-                given = os.path.join(self.root, f"given-{index}")
+                given = os.path.join(self.support, f"given-{index}")
                 with open(given, "wb") as f:
                     f.write(b"-----BEGIN PRIVATE KEY-----\n")
                 script = self.script(f"leaves-{index}.py", LEAVES_WHAT_IS_NOT_A_FILE)
@@ -252,18 +253,17 @@ class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
                 self.assertEqual([u for u in self.units_left() if request_id in u], [])
 
 
-# argv 1 is the file holding the statement, argv 2 the records folder, argv 3 a folder with a
-# folder `inner` in it, argv 4 the row's line, argv 5 the request id. It leaves its statement where the notice says, then
-# learns the document's location from the request record and
-# changes the folders above it.
+# argv 1 is the file holding the statement, argv 2 the document's statement location (the executor
+# is never told it; here the test hands it over so the script can change the folders above it),
+# argv 3 a folder with a folder `inner` in it, argv 4 the row's line. It leaves its statement where
+# the notice says, then changes the folders above the location.
 SWAPS_THE_FOLDERS_ABOVE_THE_LOCATION = (
     FINDS_ITS_PATH
     + """
 import json, os
 with open(sys.argv[1], "rb") as source, open(inner, "wb") as target:
     target.write(source.read())
-with open(os.path.join(sys.argv[2], sys.argv[5] + ".request.json")) as f:
-    location = json.loads(json.load(f)["input"])["statement_location"]
+location = sys.argv[2]
 parent = os.path.dirname(location)
 grandparent = os.path.dirname(parent)
 victim = sys.argv[3]
@@ -277,21 +277,26 @@ class AStatementIsNeverCopiedThroughAFolderTheExecutorSwapped(real_run.RealRun):
         for index, row in enumerate(locations_table.PARENTS):
             with self.subTest(row["label"]):
                 request_id = f"swap-{index}"
-                base = os.path.join(self.root, f"swap-{index}")
+                # The executor can only swap the folders above the location where it can write:
+                # in its place, made new for each row because the run before changed the last.
+                place = os.path.join(self.root, f"place-{index}")
+                real_place.make_checkout(place)
+                base = os.path.join(place, "swap")
                 location = os.path.join(base, "outer", "inner", "statement.json")
                 os.makedirs(os.path.dirname(location))
                 victim = os.path.join(base, "victim")
                 os.makedirs(os.path.join(victim, "inner"))
                 data = json.dumps(STATEMENT).encode()
-                given = os.path.join(base, "given")
+                given = os.path.join(self.support, f"swap-given-{index}")
                 with open(given, "wb") as f:
                     f.write(data)
                 script = self.script(f"swaps-{index}.py", SWAPS_THE_FOLDERS_ABOVE_THE_LOCATION)
                 doc = self.document(
                     script,
-                    [given, self.records, victim, row["swaps"], request_id],
+                    [given, location, victim, row["swaps"]],
                     request_id=request_id,
                 )
+                doc["place"] = place
                 self.expecting_a_statement(doc, location)
                 code, lines, err = self.run_to_the_end(doc)
                 self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
@@ -353,7 +358,7 @@ class AReferenceCannotBeChangedByTheExecutor(real_run.RealRun):
         reference = os.path.join(self.root, self.NAME)
         with open(reference, "w") as f:
             f.write("the runbook")
-        log = os.path.join(self.root, "log.txt")
+        log = os.path.join(self.place, "log.txt")
         script = self.script("tries.py", TRIES_TO_CHANGE_THE_REFERENCE)
         doc = self.document(script, [reference, log])
         doc["references"] = [
