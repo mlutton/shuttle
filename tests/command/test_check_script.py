@@ -5,6 +5,7 @@ passes or fails the stage it is told to, so these tests do not run the real suit
 """
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -99,17 +100,25 @@ class CheckScriptTest(unittest.TestCase):
         result = self.check(FAIL_STAGE="tests", FAIL_CODE="3")
         self.assertEqual(self.last_line(result), "check: failed: tests")
 
-    def test_the_real_process_stage_has_no_time_budget_of_its_own(self):
+    def test_a_real_stage_ended_by_its_budget_says_it_timed_out(self):
         result = self.check(FAIL_STAGE="real", FAIL_CODE="124")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            self.last_line(result), "check: failed: real (timed out after 120 seconds)"
+        )
+
+    def test_a_real_stage_that_fails_for_another_reason_does_not_say_timed_out(self):
+        result = self.check(FAIL_STAGE="real", FAIL_CODE="3")
         self.assertEqual(self.last_line(result), "check: failed: real")
 
     def test_every_folder_of_tests_is_run_by_exactly_one_stage(self):
         with open(SCRIPT) as f:
             script = f.read()
         run = [
-            line.split("-s ")[1].split(" ")[0]
+            folder
             for line in script.splitlines()
-            if "unittest discover -s " in line and not line.lstrip().startswith("#")
+            if not line.lstrip().startswith("#")
+            for folder in re.findall(r"unittest discover -s (\S+)", line)
         ]
         holding = sorted(
             os.path.join("tests", name)
