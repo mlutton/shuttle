@@ -154,10 +154,14 @@ def _hidden_records(reach: Reach) -> list[str]:
     """The cover for the records folder when it sits inside a path the box binds in from the host
     (the place, a reference or a system folder), where hiding by not binding it is not enough: an
     empty temporary filesystem over it. Elsewhere it is simply not bound."""
-    holders = [*_SYSTEM_FOLDERS, reach["place"], reach["area"], *reach["references"], *reach["visible"]]
-    inside = any(
-        refusals.inside_folder(reach["records"], holder) for holder in holders
-    )
+    holders = [
+        *_SYSTEM_FOLDERS,
+        reach["place"],
+        reach["area"],
+        *reach["references"],
+        *reach["visible"],
+    ]
+    inside = any(refusals.inside_folder(reach["records"], holder) for holder in holders)
     return ["--tmpfs", reach["records"]] if inside else []
 
 

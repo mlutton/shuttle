@@ -106,10 +106,10 @@ class SimulatedWorld:
                 hash=self._hash,
                 remove=self._remove,
                 usable_folder=self._usable_folder,
+                is_folder=self._is_folder,
                 make_temporary_folder=self._make_temporary_folder,
                 make_folders=self._make_folders,
                 copy_path=self._copy_path,
-                share_by_link=self._share_by_link,
                 make_writable=self._make_writable,
                 remove_tree=self._remove_tree,
             ),
@@ -357,6 +357,10 @@ class SimulatedWorld:
             or path in self.special
         )
 
+    def _is_folder(self, path):
+        self._enter("files.is_folder", path)
+        return path in self.folders or self.links.get(path) in self.folders
+
     def _usable_folder(self, path):
         self._enter("files.usable_folder", path)
         return path in self.folders
@@ -453,16 +457,6 @@ class SimulatedWorld:
                 self.files[target] = bytearray(self.files[name])
             elif name in self.folders:
                 self.folders.add(target)
-
-    def _share_by_link(self, existing, new):
-        self._enter("files.share_by_link", existing, new)
-        if not self._taken(existing) or existing in self.dangling:
-            raise FileNotFoundError(existing)
-        if not self._parent_exists(new):
-            raise FileNotFoundError(new)
-        if self._taken(new):
-            raise FileExistsError(new)
-        self.links[new] = existing
 
     def _make_writable(self, path):
         self._enter("files.make_writable", path)

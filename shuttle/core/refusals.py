@@ -159,7 +159,7 @@ def _reach_shape_problem(reach: object) -> Found | None:
         return _found(
             "reach_not_valid",
             _INPUT,
-            "reach is not an object; give {\"visible\": [<absolute paths of folders>]} or leave "
+            'reach is not an object; give {"visible": [<absolute paths of folders>]} or leave '
             "it out",
         )
     unknown = sorted(str(name) for name in reach if name not in _REACH_MEMBERS)

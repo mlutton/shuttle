@@ -18,6 +18,16 @@ from shuttle.shell import run, stop_and_confirm_empty, wait_for_the_end
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 simulated = importlib.import_module("rehearsal.simulated_world")
 
+REACH: boundary.Reach = {
+    "place": "/place",
+    "area": "/area",
+    "home": "/area/home",
+    "tmp": "/area/tmp",
+    "references": [],
+    "visible": [],
+    "records": "/rec",
+}
+
 TIMED_OUT = {"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout"}
 GONE = {"LoadState": "not-found", "ActiveState": "inactive", "Result": "success"}
 STILL_THERE = {"LoadState": "loaded", "ActiveState": "active", "Result": "success"}
@@ -166,16 +176,14 @@ class TheLimitTheTimerCanTake(unittest.TestCase):
             with self.subTest(seconds=seconds):
                 self.assertEqual(boundary.limit_microseconds(seconds), expected)
 
-    def test_the_launch_command_carries_the_limit_the_grace_and_the_protected_paths(self):
-        argv = boundary.launch_argv(
-            "shuttle-run-r-1", 2.5, ["tool", "--", "x"], ["HOME"], ["/rec"], 7
-        )
+    def test_the_launch_command_carries_the_limit_the_grace_and_the_reach(self):
+        argv = boundary.launch_argv("shuttle-run-r-1", 2.5, ["tool", "--", "x"], ["HOME"], REACH, 7)
         self.assertIn("--unit=shuttle-run-r-1", argv)
         self.assertIn("RuntimeMaxSec=2500000us", argv)
         self.assertIn("TimeoutStopSec=3s", argv)
         self.assertEqual(
             argv[argv.index("--ro-bind") : argv.index("--ro-bind") + 3],
-            ["--ro-bind", "/rec", "/rec"],
+            ["--ro-bind", "/usr", "/usr"],
         )
         self.assertEqual(argv[-3:], ["tool", "--", "x"])  # the executor's own arguments untouched
         self.assertIn("--die-with-parent", argv)
@@ -190,7 +198,7 @@ class TheLimitTheTimerCanTake(unittest.TestCase):
             (["XDG_RUNTIME_DIR"], ["DBUS_SESSION_BUS_ADDRESS"]),
         ):
             with self.subTest(names=names):
-                argv = boundary.launch_argv("n", 1, ["tool"], names, [], 3)
+                argv = boundary.launch_argv("n", 1, ["tool"], names, REACH, 3)
                 found = [argv[i + 1] for i, part in enumerate(argv) if part == "--unsetenv"]
                 self.assertEqual(found, unset)
 

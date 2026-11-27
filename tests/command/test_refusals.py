@@ -129,7 +129,12 @@ class Refusals(RealCommand):
                 "unknown_field",  # a kind that expects no statement, given a location
                 self.document(statement_location=os.path.join(self.root, "free")),
             ),
-            ("reach_not_available", self.document(reach=["x"])),
+            ("reach_not_valid", self.document(reach=["x"])),
+            ("visible_not_absolute", self.document(reach={"visible": ["x"]})),
+            ("visible_missing", self.document(reach={"visible": [self.absent]})),
+            ("visible_not_a_folder", self.document(reach={"visible": [runbook]})),
+            ("visible_overlaps_the_records", self.document(reach={"visible": [self.records]})),
+            ("visible_overlaps_the_records", self.document(reach={"visible": [self.root]})),
             (
                 "no_time_limit",
                 {k: v for k, v in self.document().items() if k != "time_limit_seconds"},
