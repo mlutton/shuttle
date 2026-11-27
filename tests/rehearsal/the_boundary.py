@@ -36,6 +36,7 @@ def absent_reason() -> str | None:
                 "references": [],
                 "visible": [],
                 "git_folders": [],
+                "place_writable": True,
                 "resolver": None,
                 "records": os.path.join(area, "records"),
             }

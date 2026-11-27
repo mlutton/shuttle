@@ -281,10 +281,17 @@ class TheReferences(unittest.TestCase):
             self.assertIn((path, path), bound, name)
         self.assertNotIn("/records", world.started[0][0])  # the records are not in the box at all
 
-    def test_the_references_are_the_only_paths_added_to_the_read_only_system_ones(self):
+    def test_the_references_and_the_places_git_folder_are_the_only_paths_added_to_the_read_only_system_ones(
+        self,
+    ):
         world = self.scene_with([REF], **{"/refs/runbook": "contents"})
         scenes.run_in(world)
         self.assertEqual(
             self.bound_read_only(world),
-            [("/usr", "/usr"), ("/etc", "/etc"), ("/refs/runbook", "/refs/runbook")],
+            [
+                ("/usr", "/usr"),
+                ("/etc", "/etc"),
+                ("/refs/runbook", "/refs/runbook"),
+                ("/place/.git", "/place/.git"),  # the place's git folder, read-only
+            ],
         )

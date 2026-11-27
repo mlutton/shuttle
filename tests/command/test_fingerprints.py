@@ -34,14 +34,15 @@ import sys
 open(sys.argv[2], "w").write("started")
 """
 
-# Makes its own commits in the place: one that changes a file, then a file that is not committed.
+# Tries to commit a change in the place, which the box refuses (the git folder is read-only), then
+# writes a file.
 MAKES_ITS_OWN_COMMITS = """
 import os, subprocess, sys
 place = sys.argv[1]
 def git(*args):
     subprocess.run(["git", "-c", "user.name=exec", "-c", "user.email=exec@example.invalid",
-                    "-C", place, *args], check=True, capture_output=True)
-open(os.path.join(place, "changed.txt"), "w").write("committed by the executor\\n")
+                    "-C", place, *args], capture_output=True)
+open(os.path.join(place, "changed.txt"), "w").write("written by the executor\\n")
 git("add", "-A")
 git("commit", "-q", "-m", "the executor's own commit")
 open(os.path.join(place, "later.txt"), "w").write("not committed\\n")
@@ -277,13 +278,13 @@ class AScriptThatMakesItsOwnCommits(FingerprintCase):
     def test_does_not_move_the_closing_fingerprint_which_is_the_working_files_not_the_history(self):
         self.finished(self.document_for(MAKES_ITS_OWN_COMMITS))
         executors_commit = self.git("rev-parse", "HEAD")
-        self.assertNotEqual(executors_commit, self.head)  # the script did commit
+        self.assertEqual(executors_commit, self.head)  # the script's commit was refused
         saw = outcome_fields(self)["execution"]
         self.assertEqual(saw["fingerprint_before"], self.head)
         self.assertNotIn(saw["fingerprint_after"], (self.head, executors_commit))
         self.assertEqual(self.git("rev-parse", f"{saw['fingerprint_after']}^"), self.head)
-        # the files as they are: the committed change and the file that was never committed,
-        # both counted against the opening commit
+        # the files as they are, both counted against the opening commit: the changed one the
+        # commit would have held and the one never committed
         self.assertEqual(
             (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (1, 1, 0)
         )
@@ -598,17 +599,21 @@ class FilterDrivers(FingerprintCase):
                 os.remove(os.path.join(self.records, "r-1.request.json"))
 
     def test_drivers_added_by_the_script_during_the_run_are_never_run(self):
-        # a clean driver named by .gitattributes and a process driver named by info/attributes,
-        # both written, with their configuration, by the script
+        # the script tries to add a clean driver named by .gitattributes and a process driver
+        # named by info/attributes, with their configuration; the box refuses the writes to the
+        # git folder, so only the files in the place arrive
         script = (
             "import os, sys\n"
             "place, config, command = sys.argv[1], sys.argv[3], sys.argv[4]\n"
-            "open(config, 'a').write('[filter \"x\"]\\n\\tclean = ' + command + '; cat\\n')\n"
-            "open(config, 'a').write('[filter \"p\"]\\n\\tprocess = ' + command + '\\n')\n"
+            "try:\n"
+            "    open(config, 'a').write('[filter \"x\"]\\n\\tclean = ' + command + '; cat\\n')\n"
+            "    open(config, 'a').write('[filter \"p\"]\\n\\tprocess = ' + command + '\\n')\n"
+            "    info = os.path.join(os.path.dirname(config), 'info')\n"
+            "    os.makedirs(info, exist_ok=True)\n"
+            "    open(os.path.join(info, 'attributes'), 'w').write('*.dat filter=p\\n')\n"
+            "except OSError:\n"
+            "    pass\n"
             "open(os.path.join(place, '.gitattributes'), 'w').write('*.txt filter=x\\n')\n"
-            "info = os.path.join(os.path.dirname(config), 'info')\n"
-            "os.makedirs(info, exist_ok=True)\n"
-            "open(os.path.join(info, 'attributes'), 'w').write('*.dat filter=p\\n')\n"
             "open(os.path.join(place, 'new.txt'), 'w').write('as written\\n')\n"
             "open(os.path.join(place, 'new.dat'), 'w').write('as written\\n')\n"
         )

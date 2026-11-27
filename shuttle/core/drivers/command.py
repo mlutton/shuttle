@@ -2,8 +2,9 @@
 
 It offers the functions of `shuttle.core.drivers.interface`. It asks of the run area nothing, has
 no login, and leaves no statement of its own: the command writes the statement file itself, at the path in the run area its notice gives it. It
-refuses a document that asks for a restriction of the two standard settings (network off, changes
-to the place not allowed), since nothing yet enforces either for it.
+refuses a document that asks for `network` off, since nothing yet enforces that for it. Changes to
+the place not allowed needs no refusal here: the box makes the place read-only whichever driver
+runs.
 """
 
 from collections.abc import Mapping
@@ -62,18 +63,14 @@ def login_path(environment: Mapping[str, str]) -> str | None:
 
 
 def check(settings: Settings, facts: DriverFacts) -> tuple[str, str] | None:
-    # This driver has no sandbox of its own (as the Codex driver's tool has), so a restriction
-    # asked for that the box does not enforce would be silently unhonoured: refuse it instead.
-    for asked, what in (
-        (facts["network"] is False, "network off"),
-        (facts["changes_allowed"] is False, "changes_to_place not"),
-    ):
-        if asked:
-            return (
-                "unknown_setting",
-                f"the command driver cannot enforce {what} yet; leave the setting out or "
-                "choose an executor that can",
-            )
+    # This driver has no sandbox of its own (as the Codex driver's tool has), and the box does
+    # not yet cut the network, so that restriction would be silently unhonoured: refuse it.
+    if facts["network"] is False:
+        return (
+            "unknown_setting",
+            "the command driver cannot enforce network off yet; leave the setting out or "
+            "choose an executor that can",
+        )
     if not facts["tool_found"]:
         return (
             "tool_not_installed",

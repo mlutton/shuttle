@@ -514,6 +514,12 @@ class IdentityOperations(NamedTuple):
     host_name: Callable[[], str]
     new_id: Callable[[], str]  # a fresh id: 32 lower-case hex digits, never the same twice
     process_number: Callable[[], int]  # this process's number, as the system gives it
+    home_folder: Callable[
+        [], str | None
+    ]  # the home folder the system's account records give this process's user, whatever the environment says; None when the account has none
+    runtime_folder: Callable[
+        [], str
+    ]  # the folder the system keeps this user's runtime files in (their systemd and D-Bus sockets), whatever the environment says
 
 
 class PlaceFacts(TypedDict):

@@ -70,6 +70,7 @@ def step(state: RunState) -> None:
         raise RuntimeError("no header source: the document was not read")
     name = boundary.scope_name(source["request_id"], state["run_part"])
     resolve = world.boundary.resolve
+    _, changes = decisions.standard_settings(raw)
     place = resolve(raw["place"])
     area = resolve(state["run_area"])
     reach: boundary.Reach = {
@@ -82,6 +83,7 @@ def step(state: RunState) -> None:
         "git_folders": world.git.git_folders(
             place, git_place.git_environment(world.environment.read_variable("PATH"))
         ),
+        "place_writable": boundary.place_is_writable(changes),
         "resolver": resolver_file(world),
         "records": resolve(source["records_location"]),
     }
