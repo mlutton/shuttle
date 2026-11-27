@@ -223,7 +223,7 @@ class TheSteps(unittest.TestCase):
         self.assertEqual(got, {"ok": True})
         self.assertEqual(self.world.text_of(f"{area}/tool/settings"), "settings text")
         self.assertEqual(self.world.text_of(f"{area}/tool/generated"), "made")
-        self.assertEqual(self.world.text_of(f"{area}/home/login"), "LOGIN-STAND-IN")  # a copy
+        self.assertEqual(self.world.text_of(f"{area}/home/login"), "LOGIN-STAND-IN")
         self.assertNotIn(f"{area}/home/login", self.world.links)
         self.assertIn(f"{area}/tmp", self.world.folders)  # the executor's own, empty
         self.assertNotIn(f"{area}/tool/history/old", self.world.files)

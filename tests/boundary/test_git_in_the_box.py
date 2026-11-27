@@ -1,9 +1,8 @@
 """Git inside the box, in the place a run is really made in: a linked working copy of the
 caller's repository, and in a plain checkout.
 
-The place's git folders are as writable as they were before the box narrowed the reach (a later
-change narrows them); nothing else of the repository the place was made from is shown, and its
-working files stay hidden.
+Nothing else of the repository the place was made from is shown, and its working files stay
+hidden.
 """
 
 import importlib

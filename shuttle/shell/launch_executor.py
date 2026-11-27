@@ -1,9 +1,8 @@
 """Step 7, launch the executor: start it in the boundary, with the limit and its reach.
 
 The boundary is a systemd user scope around bubblewrap (shuttle.core.boundary). The scope owns the
-time limit; nothing here times the executor. The reach is the place and the run area (writable),
-the references and the folders the document lists as visible (read-only), and the system folders;
-every path is resolved here so the box binds what the checks looked at.
+time limit; nothing here times the executor. The reach is built here from resolved paths, so the
+box binds what the checks looked at.
 """
 
 from collections.abc import Sequence

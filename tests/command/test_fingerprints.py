@@ -112,8 +112,7 @@ class FingerprintCase(real_run.RealRun):
         real_place.make_checkout(self.main, FILES)
         self.place = os.path.join(self.root, "linked")
         self.head = real_place.make_linked_checkout(self.main, self.place)
-        # The executor can write only its place (and its run area, which goes with the run), so
-        # a script says it ran by writing a file there. The repository's own ignore list keeps
+        # The executor writes its place, so a script says it ran by writing a file there. The repository's own ignore list keeps
         # that file out of the fingerprints and the counts these tests read.
         self.witness = os.path.join(self.place, "witness")
         self.ignore_the_witness()

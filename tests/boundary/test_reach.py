@@ -6,8 +6,8 @@ for anything) and reports one word for each; the test asserts only that report a
 the machine afterwards. The reach limits the damage of a lost or confused agent; these tests are
 not a proof against an attacker.
 
-The same table holds wherever the test's own folders live: under the machine's temporary folder
-(the common case in this suite, and a place the box binds over with the executor's own `/tmp`),
+The same table holds wherever the test's own folders live: under the temporary folder (`/tmp` on the usual machine, the common case in this suite, and a
+place the box binds over with the executor's own `/tmp`),
 and under another folder (`/var/tmp`) that the box does not bind unless it is asked to. The run
 area is made in the temporary folder or in the other, by the variable the command reads.
 
@@ -146,7 +146,7 @@ class TheReachOfTheExecutor(real_run.RealRun):
         return os.path.realpath(folder)
 
     def in_the_real_tmp(self, name):
-        """A path that is directly in the machine's temporary folder."""
+        """A path directly in `/tmp`."""
         path = os.path.join(os.path.realpath("/tmp"), name)
         self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
         return path

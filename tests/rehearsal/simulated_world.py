@@ -591,7 +591,7 @@ class SimulatedWorld:
 
     def _resolve(self, path):
         self._enter("boundary.resolve", path)
-        for _ in range(40):  # a name that is a link resolves to where it leads
+        for _ in range(40):
             if path not in self.links:
                 break
             path = self.links[path]

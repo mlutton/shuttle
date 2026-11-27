@@ -104,16 +104,15 @@ def for_the_scope_tool(argv: Sequence[str]) -> list[str]:
 class Reach(TypedDict):
     """The paths of one run's reach, each already resolved (absolute, no link, no `..`).
 
-    The box makes the system folders and `/etc` read-only, then makes visible (read-only) each of
-    `visible` and `references`, and writable `place`, `area` and `git_folders`. `home` and `tmp`
+    The box makes the system folders and `/etc` read-only; `visible` and `references` are
+    read-only, `place`, `area` and `git_folders` writable. `home` and `tmp`
     are folders inside `area`: `tmp` is the executor's `/tmp` and `home` its `HOME`. `records` is
     hidden whatever else is bound.
 
     `git_folders` are the place's own git folder and the one it shares with the checkout it was
     made from, as the shell found them: for a linked working copy (the usual place) they are
-    outside the place, and git cannot run without them. They are as writable as the place is,
-    which is what a run could do before the box narrowed its reach; nothing else of the
-    repository the place was made from is shown. `resolver` is the file `/etc/resolv.conf` leads
+    outside the place, and git cannot run without them. Nothing else of the repository the place
+    was made from is shown. `resolver` is the file `/etc/resolv.conf` leads
     to, when there is one (see `_resolver_bind`).
     """
 
@@ -164,8 +163,6 @@ def _inside(path: str, folder: str) -> bool:
 
 
 def _writable(reach: Reach) -> list[str]:
-    """The run area, the place and the git folders that are not already inside the place or
-    inside another of them, without duplicates."""
     held = [reach["area"], reach["place"]]
     every = list(dict.fromkeys(reach["git_folders"]))
     for folder in every:
@@ -175,8 +172,8 @@ def _writable(reach: Reach) -> list[str]:
     return held
 
 
-# The paths the box's own binds are made at: a path under one of these is not the machine's, so
-# a file the shell found there is not bound in again.
+# The paths the box's own binds are made at: a file the shell found under one of these is already
+# shown or replaced by those binds, so it is not bound again.
 _BOX_OWN = ("/usr", "/etc", "/tmp", "/proc", "/dev")
 
 
@@ -194,7 +191,7 @@ def _resolver_bind(reach: Reach) -> list[str]:
 
 def _hidden_records(reach: Reach) -> list[str]:
     """The cover for the records folder when it sits inside a path the box binds in from the host
-    (the place, a reference or a system folder), where hiding by not binding it is not enough: an
+    where hiding by not binding it is not enough: an
     empty temporary filesystem over it. Elsewhere it is simply not bound."""
     holders = [
         *_SYSTEM_FOLDERS,

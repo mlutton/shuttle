@@ -130,7 +130,7 @@ def _folder_above(name: str, area: str) -> list[SetupStep]:
 
 
 class _Sourced(_Action):
-    """What a copy has in common with any action that takes an absolute source: a name made from it."""
+    """A copy: a name made from an absolute source."""
 
     role = "makes"
 

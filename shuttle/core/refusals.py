@@ -183,7 +183,7 @@ def _reach_shape_problem(reach: object) -> Found | None:
 
 def visible_paths(reach: object) -> list[str]:
     """The paths a reach lists as visible, in the order given; none for a reach left out or one
-    the check refuses."""
+    that is not a list of paths in an object."""
     if reach is None or _reach_shape_problem(reach) is not None:
         return []
     return list(reach.get("visible", [])) if isinstance(reach, dict) else []

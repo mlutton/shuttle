@@ -112,9 +112,7 @@ class TheRealRunArea(unittest.TestCase):
         login = os.path.join(home, "login")
         self.assertFalse(os.path.islink(login))  # a copy: the area holds its own bytes
         self.assertEqual(read(login), MARKER.encode())
-        with open(
-            login, "w"
-        ) as f:  # and writing it, or replacing it, leaves the original as it was
+        with open(login, "w") as f:  # and writing it leaves the original as it was
             f.write("replaced")
         self.assertEqual(read(self.login), MARKER.encode())
         # the original is as it was, and the only change outside the area is the area itself

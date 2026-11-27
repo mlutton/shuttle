@@ -70,8 +70,8 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         asked = os.path.join(self.root, "asked")
         runbook = self.script("runbook.txt", REFERENCE_TEXT)
         statement = os.path.join(self.root, "statement.json")
-        # What the script reports it writes in the place, the one folder it can write that outlives
-        # it; the test reads it there once the run is over.
+        # What the script reports it writes in the place, the place, which outlives it; the test
+        # reads it there once the run is over.
         linked = os.path.join(self.root, "linked-place")
         given, seen = os.path.join(linked, "given"), os.path.join(linked, "seen")
         temporary = os.path.join(self.root, "temporary")
@@ -128,7 +128,7 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
             ("time_limit", "time_limit", "none"),
         )
         self.assertIs(ending["everything_stopped"], True)
-        saw = receipt["execution"]  # the script wrote its two reports in the place, nothing else
+        saw = receipt["execution"]  # the script's reports in the place, nothing else
         self.assertEqual(saw["fingerprint_before"], head)
         self.assertEqual(
             (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (2, 0, 0)

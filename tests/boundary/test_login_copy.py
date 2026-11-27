@@ -4,7 +4,7 @@ original is as it was.
 The program that stands in for the tool is written and run by `run_a_stand_in_tool`
 (tests/rehearsal/real_run.py). The login is made-up text; no test opens a real one. The stand-in
 saves a refreshed login the way the real tool does (a temporary file beside it, then a rename over
-it, with a lock file in the same folder), which fails on a link and on a single bound file.
+it, with a lock file in the same folder).
 """
 
 import importlib
@@ -41,7 +41,7 @@ open(arguments[arguments.index("-o") + 1], "w").write("Done.")
 class AToolThatReplacesItsLogin(real_run.RealRun):
     def make_the_login(self, as_a_link=False):
         """The caller's login (made-up text) where the driver says it is; kept elsewhere and
-        linked to when `as_a_link`. Returns the home, the login's name and the file with the text."""
+        linked to when `as_a_link`. Returns the driver, the home, the login's path and the file that holds the text."""
         driver = real_run.tool_driver_names()[0]
         home = os.path.join(self.root, "callers-home")
         login = real_run.table.DRIVERS[driver].login_path({"HOME": home})

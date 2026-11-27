@@ -73,9 +73,7 @@ class TheBinds(unittest.TestCase):
         for link in ("/bin", "/sbin", "/lib", "/lib64"):
             self.assertIn(("--ro-bind-try", link, link), got)
 
-    # Where /etc/resolv.conf leads, as the shell found it, and whether the file is bound there. The
-    # layouts a machine can have: the link into systemd-resolved's stub file or its other file,
-    # NetworkManager's file, one under /usr, a plain file in /etc, no file, a file under /tmp.
+    # Where /etc/resolv.conf leads, as the shell found it, and whether the file is bound there.
     RESOLVER_LAYOUTS = (
         ("the stub file of systemd-resolved", "/run/systemd/resolve/stub-resolv.conf", True),
         ("the other file of systemd-resolved", "/run/systemd/resolve/resolv.conf", True),

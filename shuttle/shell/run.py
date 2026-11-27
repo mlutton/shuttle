@@ -429,7 +429,7 @@ def _clean_up(state: RunState) -> None:
                 stop_and_confirm_empty.stop_boundary(state["world"], name)
             )
             state["facts"]["stop"] = "confirmed" if empty else "not_confirmed"
-        except BaseException as error:  # the last look at the boundary failed
+        except BaseException as error:  # the last look at the scope failed
             state["facts"]["stop"] = "not_confirmed"
             state["problems"].setdefault(
                 "stop_not_confirmed",

@@ -255,7 +255,7 @@ class ARunNamingTheCodexDriver(unittest.TestCase):
             [args for args, _ in world.calls("files.copy_path")],
             [
                 ("/h/.codex/config.toml", f"{AREA}/home/.codex/config.toml", ()),
-                (LOGIN, f"{AREA}/home/.codex/auth.json", ()),  # a copy, never a link
+                (LOGIN, f"{AREA}/home/.codex/auth.json", ()),
             ],
         )
         self.assertEqual(world.links, {})

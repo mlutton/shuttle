@@ -23,7 +23,7 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
             files.make_folders(step["target"])
         case "copy":
             # a link is followed only where the request said so (a login kept elsewhere and linked
-            # to); the file it leads to is what is copied, and it must be a regular file
+            # to); the file it leads to is what is copied
             source = (
                 world.boundary.resolve(step["source"]) if step.get("follow") else step["source"]
             )
@@ -45,7 +45,7 @@ def _for(step: SetupStep) -> str:
         return ""
     return (
         f" on {step['source']!r}; give a regular file the run may read at that path "
-        "(a folder, a pipe or a device cannot be copied), or take it out of the tool's setup"
+        "(a pipe, a device or a socket cannot be copied), or take it out of the tool's setup"
     )
 
 
