@@ -9,11 +9,15 @@ a pipe, and the run's end is waited for, not slept to. It skips, with its reason
 that lacks the boundary, and fails there instead when SHUTTLE_REQUIRE_BOUNDARY is set (the
 hosted runner sets it).
 
+The executor is given the instruction and the notice on its standard input, and the run area made
+for it (in a temporary folder of the test's own) is there while it runs and gone at the end.
+
 The statement (#48) is left by the script before it hangs and reads "right shape".
 
 #47 (delivery) extends this test when its piece becomes real; it does not add one of its own.
 """
 
+import ast
 import hashlib
 import importlib
 import os
@@ -34,9 +38,12 @@ STATEMENT_TEXT = (
 )
 
 HANGS_WITH_A_CHILD = """
-import subprocess, sys, time
+import os, subprocess, sys, time
 subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)", sys.argv[2]])
 open(sys.argv[3], "w").write(sys.argv[4])  # the statement, before the hang
+open(sys.argv[5], "w").write(sys.stdin.read())  # what it was given as its standard input
+areas = os.listdir(sys.argv[6])  # the run areas there are while it runs, with what each holds
+open(sys.argv[7], "w").write(repr({a: sorted(os.listdir(sys.argv[6] + "/" + a)) for a in areas}))
 open(sys.argv[1], "w").write("up")
 time.sleep(600)
 """
@@ -48,6 +55,7 @@ open(sys.argv[1], "w").write("asked")
 """
 
 REFERENCE_TEXT = "the runbook"
+INSTRUCTION = "Do the work.\nSecond line with 'quotes', $HOME and `ticks`.\n"
 
 
 class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
@@ -58,8 +66,15 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         asked = os.path.join(self.root, "asked")
         runbook = self.script("runbook.txt", REFERENCE_TEXT)
         statement = os.path.join(self.root, "statement.json")
-        doc = self.document(script, [up, marker, statement, STATEMENT_TEXT], limit=1)
+        given, seen = os.path.join(self.root, "given"), os.path.join(self.root, "seen")
+        temporary = os.path.join(self.root, "temporary")
+        os.mkdir(temporary)
+        doc = self.document(
+            script, [up, marker, statement, STATEMENT_TEXT, given, temporary, seen], limit=1
+        )
         doc["kind"], doc["statement_location"] = "judge", statement  # a kind that expects one
+        doc["instruction"] = INSTRUCTION
+        doc["instruction_hash"] = hashlib.sha256(INSTRUCTION.encode()).hexdigest()
         # the place is a linked working copy of the caller's repository, as it is in use
         callers = os.path.join(self.root, "callers-repo")
         real_place.make_checkout(callers)
@@ -82,7 +97,7 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
                 "limit_seconds": 60,
             }
         ]
-        proc = self.start(doc)
+        proc = self.start(doc, variables={"TMPDIR": temporary})
         # Block until the script says it is up or the command ends, whichever comes first: a run
         # that is refused never starts the script, and must fail here, not hang.
         said = os.open(up, os.O_RDONLY | os.O_NONBLOCK)
@@ -115,6 +130,20 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertNotEqual(self.scope_state(), "active")
         self.assertTrue(os.path.exists(asked))  # the gate was asked, said yes, and the run went on
         self.assertEqual(self.units_left(), [])  # no scope of the run, a gate or the freeze is left
+        with open(given) as f:  # the instruction, then the notice, on its standard input
+            text = f.read()
+        self.assertTrue(text.startswith(INSTRUCTION + "\n"))
+        self.assertIn("Shuttle notice, version", text)
+        self.assertIn(statement, text)
+        self.assertIn("- runbook: " + runbook, text)
+        with open(seen) as f:  # one run area while it ran, holding the instruction's file
+            during = ast.literal_eval(f.read())
+        self.assertEqual(len(during), 1)
+        (name, held), = during.items()
+        self.assertTrue(name.startswith("shuttle-run-area-"))
+        self.assertEqual(held, ["shuttle-instruction.txt"])
+        self.assertEqual(os.listdir(temporary), [])  # removed whole at the end
+        self.assertEqual(receipt["execution"]["teardown_failure"], "none")
         kept = os.path.join(self.records, "r-1.statement.kept")
         with open(kept, "rb") as f:  # the statement is kept as written, even at the time limit
             self.assertEqual(f.read(), STATEMENT_TEXT.encode())

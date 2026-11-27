@@ -109,7 +109,7 @@ def usable_folder(path: str) -> bool:
 
 
 def make_temporary_folder(prefix: str) -> str:
-    return os.path.realpath(tempfile.mkdtemp(prefix=prefix))
+    return os.path.realpath(tempfile.mkdtemp(prefix=prefix, dir=os.environ.get("TMPDIR") or None))
 
 
 def make_folders(path: str) -> None:
