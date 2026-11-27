@@ -1,7 +1,8 @@
 """A tool that prints a large event stream is handled in bounded memory, through the real command.
 
-The program that stands in for the tool is a script written into a folder of the test's own and
-put first on the command's PATH, which holds nothing else but the system's two folders, so no
+The program that stands in for the tool is written and run by the harness's one helper for that
+(`run_a_stand_in_tool`), which gives the command a PATH holding the stand-in's folder and the
+system's two, and fails before starting anything if the program would resolve anywhere else, so no
 real tool can be found, let alone started. The login and settings file it is given are made-up
 text. The stream is hand-made in the shape of the tool's own, with made-up counts: many small
 events, one line longer than any line is read, and a last turn that gives the usage.
@@ -15,20 +16,16 @@ that read the whole stream into memory, a dictionary per line, passes 100 MB on 
 import importlib
 import os
 import resource
-import stat
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 flat = importlib.import_module("rehearsal.receipts").flat
 real_run = importlib.import_module("rehearsal.real_run")
 
-# The stand-in is named as the driver looks for it; the name is built from two parts, as the rule
-# test of the suite builds it, so this file never holds the word whole.
-PROGRAM = "co" + "dex"
 SMALL_EVENTS = 120_000
 ONE_LONG_LINE = 2 << 20  # longer than the longest line the command reads
 
-STAND_IN = """#!{python}
+STAND_IN = """
 import sys
 arguments = sys.argv[1:]
 sys.stdin.read()
@@ -46,30 +43,32 @@ open(arguments[arguments.index("-o") + 1], "w").write("Done.")
 class AToolThatPrintsALargeStream(real_run.RealRun):
     def setUp(self):
         super().setUp()
-        self.bin = os.path.join(self.root, "bin")
-        os.mkdir(self.bin)
-        stand_in = os.path.join(self.bin, PROGRAM)
-        with open(stand_in, "w") as f:
-            f.write(STAND_IN.format(python=sys.executable, small=SMALL_EVENTS, long=ONE_LONG_LINE))
-        os.chmod(stand_in, os.stat(stand_in).st_mode | stat.S_IXUSR)
         self.home = os.path.join(self.root, "home")
-        os.makedirs(os.path.join(self.home, ".codex"))
-        for name, text in (
-            ("auth.json", "a made-up stand-in, not a login\n"),
-            ("config.toml", "\n"),
-        ):
-            with open(os.path.join(self.home, ".codex", name), "w") as f:
+        # The driver of the one tool that is a program of its own; the stand-in is the tool's.
+        self.driver = real_run.tool_driver_names()[0]
+        self.stand_in = STAND_IN.format(small=SMALL_EVENTS, long=ONE_LONG_LINE)
+
+    def document_for_the_tool(self):
+        doc = self.document(self.script("unused.py", ""))
+        doc["executor"] = {"name": self.driver, "settings": {"model": "example-model"}}
+        doc["network"], doc["changes_to_place"] = "off", "allowed"
+        return doc
+
+    def make_the_callers_tool_home(self, home):
+        """A made-up login and settings file where the driver says the login is."""
+        login = real_run.table.DRIVERS[self.driver].login_path({"HOME": home})
+        folder = os.path.dirname(login)
+        os.makedirs(folder, exist_ok=True)
+        for name, text in ((login, "a made-up stand-in, not a login\n"), ("config.toml", "\n")):
+            with open(os.path.join(folder, os.path.basename(name)), "w") as f:
                 f.write(text)
 
     def test_the_run_ends_with_its_record_the_counts_are_read_and_memory_does_not_follow_the_stream(
         self,
     ):
-        doc = self.document(self.script("unused.py", ""))
-        doc["executor"] = {"name": PROGRAM, "settings": {"model": "example-model"}}
-        doc["network"], doc["changes_to_place"] = "off", "allowed"
-        # Only the stand-in's folder and the system's own: no real tool is on this PATH.
-        path = os.pathsep.join([self.bin, "/usr/bin", "/bin"])
-        code, lines, err = self.run_to_the_end(doc, variables={"PATH": path, "HOME": self.home})
+        self.make_the_callers_tool_home(self.home)
+        doc = self.document_for_the_tool()
+        code, lines, err = self.run_a_stand_in_tool(doc, self.stand_in, {"HOME": self.home})
         self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
         receipt = flat(self.outcome()["receipt"])
         group = receipt["executor_driver"]
@@ -80,3 +79,20 @@ class AToolThatPrintsALargeStream(real_run.RealRun):
         self.assertEqual(group["session_id"], "thread-big")
         peak_kilobytes = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
         self.assertLess(peak_kilobytes, 100 * 1024)
+
+    def test_a_program_that_would_resolve_outside_the_tests_stand_in_is_refused_and_nothing_starts(
+        self,
+    ):
+        self.make_the_callers_tool_home(self.home)
+        doc = self.document_for_the_tool()
+        program = real_run.table.DRIVERS[self.driver].program(doc["executor"]["settings"])
+        elsewhere, marker = os.path.join(self.root, "elsewhere"), os.path.join(self.root, "started")
+        os.mkdir(elsewhere)
+        decoy = os.path.join(elsewhere, program)
+        with open(decoy, "w") as f:
+            f.write(f"#!{sys.executable}\nopen({marker!r}, 'w').write('started')\n")
+        os.chmod(decoy, 0o755)
+        with self.assertRaises(AssertionError):
+            self.run_a_stand_in_tool(doc, self.stand_in, {"HOME": self.home}, path_first=elsewhere)
+        self.assertEqual(os.listdir(self.records), [])  # no request was claimed: nothing ran
+        self.assertFalse(os.path.exists(marker))

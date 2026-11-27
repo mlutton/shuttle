@@ -8,6 +8,11 @@ one-off cases." A real Codex run is done once, by hand, on purpose. So:
   program: a string that is, or ends a path with, the word followed by nothing or a space;
 - no file under checks/ that is not Python names it at all, as a word.
 
+The one way a test runs a driver's tool is the harness helper `run_a_stand_in_tool`
+(tests/rehearsal/real_run.py): it takes the program's name from the driver, so the test never
+holds it, and before starting anything it fails the test unless that name resolves, on the PATH
+the command will run with, to the stand-in it just wrote in the test's own folder.
+
 A by-value test never starts a process (it is given the simulated world), so it may hold the word as
 data: the driver's launch command is a list of text it compares. These rules read source text
 only; they start nothing.
@@ -122,6 +127,19 @@ class TheSuiteNeverStartsTheTool(unittest.TestCase):
         }.items():
             with self.subTest(label):
                 self.assertTrue(strings_naming_the_program(head + line), label)
+
+    def test_the_rule_refuses_a_file_that_names_the_program_and_accepts_one_that_uses_the_helper(
+        self,
+    ):
+        starts = "import rehearsal.real_run as real_run\n"
+        names_it = starts + f'doc = {{"executor": {{"name": "{PROGRAM}"}}}}\n'
+        uses_the_helper = starts + (
+            "names = real_run.tool_driver_names()\n"
+            'doc = {"executor": {"name": names[0], "settings": {}}}\n'
+            "self.run_a_stand_in_tool(doc, SCRIPT)\n"
+        )
+        self.assertTrue(strings_naming_the_program(names_it))
+        self.assertEqual(strings_naming_the_program(uses_the_helper), [])
 
     def test_the_rule_lets_a_by_value_file_hold_the_word_as_data_and_other_words_pass(self):
         self.assertEqual(strings_naming_the_program(f'launch = ["{PROGRAM}", "exec"]\n'), [])
