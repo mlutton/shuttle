@@ -177,11 +177,12 @@ class CommandSeam(unittest.TestCase):
         receipt = self.read("req-1.outcome.json")["receipt"]
         for group, field in [
             ("execution", "delivered"),
-            ("execution", "teardown_failure"),
             ("execution", "peak_memory_bytes"),
         ]:
             self.assertEqual(receipt[group][field], {"state": "not built", "value": None}, field)
         self.assertEqual(receipt["ending"]["everything_stopped"], {"state": "value", "value": True})
+        # The run area was removed: looked, nothing went wrong.
+        self.assertEqual(receipt["execution"]["teardown_failure"], {"state": "none", "value": None})
         # Both states in one receipt: the command driver cannot look at its tool's own commits.
         driver = receipt["executor_driver"]
         self.assertEqual(driver["tool_made_own_commits"], {"state": "cannot tell", "value": None})

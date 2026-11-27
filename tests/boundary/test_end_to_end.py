@@ -139,7 +139,7 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         with open(seen) as f:  # one run area while it ran, holding the instruction's file
             during = ast.literal_eval(f.read())
         self.assertEqual(len(during), 1)
-        (name, held), = during.items()
+        ((name, held),) = during.items()
         self.assertTrue(name.startswith("shuttle-run-area-"))
         self.assertEqual(held, ["shuttle-instruction.txt"])
         self.assertEqual(os.listdir(temporary), [])  # removed whole at the end

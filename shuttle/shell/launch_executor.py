@@ -73,9 +73,7 @@ def step(state: RunState) -> None:
     )
     state["started_at"] = world.clock.timestamp()
     state["clock_start"] = world.clock.now()
-    state["boundary_process"] = world.processes.start(
-        argv, environment, report, instruction_file
-    )
+    state["boundary_process"] = world.processes.start(argv, environment, report, instruction_file)
     state["boundary_name"] = name
     # Peak memory and processor time are not read from the boundary yet.
     state["stand_ins"]["boundary"] = {fixed.STAND_IN_KEY: "boundary measurements"}

@@ -15,6 +15,7 @@ the original); so is a name made twice.
 
 import re
 from collections.abc import Sequence
+from typing import cast
 
 from shuttle.core import fixed
 from shuttle.core.shapes import SetupPlan, SetupRequest, SetupStep
@@ -58,7 +59,9 @@ def _name_problem(index: int, request: SetupRequest, field: str = "name") -> str
             "run area (letters, digits, '.', '_' and '-', parts joined by '/', no '.' or '..' part)"
         )
     if request.get(field) == INSTRUCTION_NAME:
-        return f"setup request {index + 1}: the name {INSTRUCTION_NAME!r} is kept for the instruction"
+        return (
+            f"setup request {index + 1}: the name {INSTRUCTION_NAME!r} is kept for the instruction"
+        )
     return None
 
 
@@ -66,10 +69,11 @@ def _shape_problem(index: int, request: object) -> str | None:
     """Why one request is not one of the actions, or None."""
     if not isinstance(request, dict) or request.get("action") not in _ACTIONS:
         return f"setup request {index + 1} is not one of: {', '.join(_ACTIONS)}"
-    action = request["action"]
+    held = cast(SetupRequest, request)  # the shape is looked at below, field by field
+    action = held["action"]
     if action == "variable":
-        return _variable_problem(index, request)
-    problem = _name_problem(index, request)
+        return _variable_problem(index, held)
+    problem = _name_problem(index, held)
     if problem:
         return problem
     if action in ("copy", "share") and not valid_source(request.get("source")):
@@ -115,7 +119,9 @@ def _writable_problem(index: int, request: SetupRequest, made: dict[str, str]) -
     name = request["name"]
     for earlier, how in made.items():
         if how == "share" and (name == earlier or _under(name, earlier)):
-            return f"setup request {index + 1}: {name!r} is shared in place and is not made writable"
+            return (
+                f"setup request {index + 1}: {name!r} is shared in place and is not made writable"
+            )
     if name in made or any(_under(name, e) for e, how in made.items() if how == "copy"):
         return None
     return f"setup request {index + 1}: {name!r} was not made by an earlier request"
@@ -151,7 +157,9 @@ def plan(area: str, requests: Sequence[SetupRequest]) -> SetupPlan:
         if problem:
             return _refused(problem)
     problem = _leave_out_problem(leave_out, [n for n, how in made.items() if how == "copy"])
-    return _refused(problem) if problem else {"steps": steps, "variables": variables, "problem": None}
+    return (
+        _refused(problem) if problem else {"steps": steps, "variables": variables, "problem": None}
+    )
 
 
 def _one(

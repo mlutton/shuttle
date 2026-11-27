@@ -145,6 +145,7 @@ class StepResult(TypedDict, total=False):
     statement_location: str
     claim: str
     session_file: str
+    failure: str  # a tear-down that failed says how; "" reads "none"
 
 
 class Facts(TypedDict, total=False):

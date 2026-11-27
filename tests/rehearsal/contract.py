@@ -404,9 +404,7 @@ class ContractCases:
         for label, path in self.not_regular_things():
             with self.subTest(label):
                 new = self.fresh("new")
-                self.assertRaisesExactly(
-                    NotARegularFile, self.world.files.copy_path, path, new, []
-                )
+                self.assertRaisesExactly(NotARegularFile, self.world.files.copy_path, path, new, [])
                 self.assertFalse(self.world.files.exists(new))
 
     def test_sharing_a_path_by_a_link_reads_the_original_and_writes_nothing_of_its_own(self):

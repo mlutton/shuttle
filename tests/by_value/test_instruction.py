@@ -26,7 +26,9 @@ def given(world):
 
 class TheInstruction(unittest.TestCase):
     def test_a_plain_kind_with_an_instruction_gets_it_and_the_notice_without_a_statement_part(self):
-        doc = scenes.document(instruction=TEXT, instruction_hash=hashlib.sha256(TEXT.encode()).hexdigest())
+        doc = scenes.document(
+            instruction=TEXT, instruction_hash=hashlib.sha256(TEXT.encode()).hexdigest()
+        )
         world = scenes.scene(doc)
         code, _, err = scenes.run_in(world)
         self.assertEqual((code, err), (0, ""))
@@ -63,19 +65,23 @@ class TheInstruction(unittest.TestCase):
         self.assertIn("- runbook: /refs/runbook.md", given(world))
 
     def test_it_is_given_by_a_file_in_the_run_area_and_never_on_the_command_line(self):
-        doc = scenes.document(instruction=TEXT, instruction_hash=hashlib.sha256(TEXT.encode()).hexdigest())
+        doc = scenes.document(
+            instruction=TEXT, instruction_hash=hashlib.sha256(TEXT.encode()).hexdigest()
+        )
         world = scenes.scene(doc)
         scenes.run_in(world)
-        (argv, _), = world.started[-1:]
+        ((argv, _),) = world.started[-1:]
         self.assertFalse(any("Do the thing" in part or "Shuttle notice" in part for part in argv))
-        (arguments, _), = world.calls("processes.start")[-1:]
+        ((arguments, _),) = world.calls("processes.start")[-1:]
         area = world.calls("files.make_temporary_folder")
         self.assertEqual(len(area), 1)
         self.assertTrue(arguments[2].endswith("/" + run_area.INSTRUCTION_NAME))
         self.assertTrue(arguments[2].startswith("/tmp/" + run_area.AREA_PREFIX))
         self.assertFalse(world.files.get(arguments[2]))  # removed with the area
 
-    def test_a_kind_that_expects_a_statement_with_no_instruction_is_refused_before_anything_runs(self):
+    def test_a_kind_that_expects_a_statement_with_no_instruction_is_refused_before_anything_runs(
+        self,
+    ):
         doc = scenes.document(kind="judge", statement_location=LOCATION)
         for field in ("instruction", "instruction_hash"):
             del doc[field]

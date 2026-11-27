@@ -24,17 +24,21 @@ MARKER = "MARKER-not-a-real-login-4f9c1e"
 
 
 def everything(root):
+    """Every file's bytes by its name below `root`, links not followed, and each folder's name."""
     found = {}
     for folder, names, files in os.walk(root):
         for name in files:
             path = os.path.join(folder, name)
             if not os.path.islink(path):
-                with open(path, "rb") as f:
-                    found[os.path.relpath(path, root)] = f.read()
+                found[os.path.relpath(path, root)] = read(path)
         for name in names:
-            path = os.path.join(folder, name)
-            found.setdefault(os.path.relpath(path, root) + "/", b"")
+            found.setdefault(os.path.relpath(os.path.join(folder, name), root) + "/", b"")
     return found
+
+
+def read(path):
+    with open(path, "rb") as f:
+        return f.read()
 
 
 class TheRealRunArea(unittest.TestCase):
@@ -46,7 +50,11 @@ class TheRealRunArea(unittest.TestCase):
         self.tool = os.path.join(self.root, "tool-home")
         os.makedirs(os.path.join(self.tool, "history"))
         os.makedirs(os.path.join(self.tool, "cache", "deep"))
-        for name, text in (("config.toml", "settings"), ("history/log", "old"), ("cache/deep/x", "c")):
+        for name, text in (
+            ("config.toml", "settings"),
+            ("history/log", "old"),
+            ("cache/deep/x", "c"),
+        ):
             with open(os.path.join(self.tool, name), "w") as f:
                 f.write(text)
         os.chmod(os.path.join(self.tool, "config.toml"), 0o444)
@@ -101,7 +109,9 @@ class TheRealRunArea(unittest.TestCase):
         self.assertEqual(os.readlink(os.path.join(home, "login")), self.login)
         # the original is as it was, and the only change outside the area is the area itself
         outside = {k: v for k, v in everything(self.root).items() if not k.startswith("temporary/")}
-        self.assertEqual(outside, {k: v for k, v in before.items() if not k.startswith("temporary/")})
+        self.assertEqual(
+            outside, {k: v for k, v in before.items() if not k.startswith("temporary/")}
+        )
         self.assertEqual(os.stat(os.path.join(self.tool, "config.toml")).st_mode & 0o777, 0o444)
 
     def test_the_tear_down_removes_the_area_whole_the_read_only_copies_too_and_keeps_the_original(
@@ -136,7 +146,9 @@ class TheRealRunArea(unittest.TestCase):
         self.assertEqual(set_up_run_area.set_up(self.state, requests), {"ok": False})
         self.assertFalse(os.path.exists(os.path.join(self.tool, "new")))
 
-    def test_a_source_that_is_not_there_fails_the_step_and_the_tear_down_still_clears_the_area(self):
+    def test_a_source_that_is_not_there_fails_the_step_and_the_tear_down_still_clears_the_area(
+        self,
+    ):
         requests = [{"action": "copy", "name": "home", "source": os.path.join(self.root, "absent")}]
         self.assertEqual(set_up_run_area.set_up(self.state, requests), {"ok": False})
         self.assertIn("FileNotFoundError", self.state["problems"]["setup"])

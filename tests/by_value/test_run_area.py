@@ -59,9 +59,7 @@ class ThePlan(unittest.TestCase):
         self.assertEqual(got["variables"], {"TOOL_HOME": f"{AREA}/home", "MODE": "quiet"})
 
     def test_a_leave_out_applies_to_a_copy_listed_after_it_too(self):
-        got = run_area.plan(
-            AREA, [{"action": "leave_out", "name": "h/old"}, copy("h")]
-        )
+        got = run_area.plan(AREA, [{"action": "leave_out", "name": "h/old"}, copy("h")])
         self.assertEqual(got["steps"][0]["leave_out"], ["old"])
 
     def test_no_requests_is_an_empty_plan(self):
@@ -183,7 +181,9 @@ class TheSteps(unittest.TestCase):
         self.assertEqual(self.world.calls("files.read"), [])  # nothing was read, the login least
 
     def test_the_run_area_is_new_and_the_tear_down_removes_it_whole_and_leaves_the_original(self):
-        set_up_run_area.set_up(self.state, [{"action": "share", "name": "l", "source": "/src/login"}])
+        set_up_run_area.set_up(
+            self.state, [{"action": "share", "name": "l", "source": "/src/login"}]
+        )
         area = self.state["run_area"]
         self.assertTrue(self.world.operations.files.usable_folder(area))
         self.assertEqual(tear_down.remove(self.state), {"failure": ""})
