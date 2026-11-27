@@ -4,6 +4,7 @@ Tests of the boundary go here: the real one, a systemd user scope around bubblew
 - `test_statement.py`: the statement a script leaves is kept byte for byte and read as none, right shape or wrong shape; a script cannot change a reference.
 - `test_arguments.py`: arguments (the executor's and a gate's), a records location with `$`, `%` and a backslash, and a place whose own path holds every awkward name of the table, arrive and are protected unchanged.
 - `test_boundary.py`: what is left after a child outlives its script and after the command is killed hard, what a script cannot write, a boundary whose tools fail (the run could not start), and a script that kills itself.
+- `test_tool_output.py`: a stand-in tool, written and run by the harness's `run_a_stand_in_tool`, prints a large event stream, with one line longer than any line is read; the run ends with its record, the counts are read, and the peak size of the processes stays far below what reading the stream whole would take; and the helper refuses, before starting anything, a program that would resolve outside the test's own folder.
 - `test_scope_names.py`: a run's scope names are its own: two runs of one request id at once, held units of old names left alone, a check during a run's gates.
 
 They skip, with the reason, on a machine without the boundary (`tests/rehearsal/the_boundary.py`), and fail instead where `SHUTTLE_REQUIRE_BOUNDARY` is set, which the hosted runner sets. No test here sleeps or reads a clock: a script says it is up through a pipe, and the time limit is the boundary's.

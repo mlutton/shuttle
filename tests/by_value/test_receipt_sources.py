@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 scenes = importlib.import_module("rehearsal.scene")
 flat = importlib.import_module("rehearsal.receipts").flat
 
+NOTHING_SAVED = {"events": None, "last_message": None, "session_record": None}
 ENDED = {"ending": "ended_by_itself", "reason": fixed.NONE, "failed_step": fixed.NONE}
 
 
@@ -231,7 +232,7 @@ class AnOddValueCostsOnlyItsOwnField(unittest.TestCase):
     def test_a_driver_group_that_cannot_be_held_is_still_refused_by_the_builder(self):
         from shuttle.core.drivers import command
 
-        observed = command.observe()
+        observed = command.observe({}, NOTHING_SAVED)["group"]
         observed["model"] = "bare"
         with self.assertRaises(core.ReceiptNotBuilt) as raised:
             core.build_receipt(ENDED, facts(executor_driver_observations=observed))
@@ -261,7 +262,7 @@ class TheMinimalReceiptIsNeverSilent(unittest.TestCase):
         def a_driver_with_a_bare_string(state):
             from shuttle.core.drivers import command
 
-            observed = command.observe()
+            observed = command.observe({}, NOTHING_SAVED)["group"]
             observed["model"] = "bare"
             state["executor_driver_observations"] = observed
 

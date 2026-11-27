@@ -201,13 +201,22 @@ class WhatIsPrinted(unittest.TestCase):
             self.assertNotEqual(got["exit"], 0)
 
 
-TOOL = {"command": "tool", "arguments": []}
+TOOL = {"name": "command", "settings": {"command": "tool", "arguments": []}}
+
+
+def found(tool_found):
+    return {
+        "tool_found": tool_found,
+        "login_found": False,
+        "network": None,
+        "changes_allowed": None,
+    }
 
 
 class Environment(unittest.TestCase):
     def test_a_missing_variable_has_its_own_reason_text(self):
         reason, text = core.executor_driver_check(
-            TOOL, ["NAMED", "OTHER"], {"PATH": "/bin"}, tool_found=True
+            TOOL, ["NAMED", "OTHER"], {"PATH": "/bin"}, found(True)
         )
         self.assertEqual(reason, "missing_setting")
         self.assertIn("NAMED", text)
@@ -215,13 +224,13 @@ class Environment(unittest.TestCase):
         self.assertNotIn("not found", text)
 
     def test_a_missing_tool_has_its_own_reason_text(self):
-        reason, text = core.executor_driver_check(TOOL, [], {"PATH": "/bin"}, tool_found=False)
+        reason, text = core.executor_driver_check(TOOL, [], {"PATH": "/bin"}, found(False))
         self.assertEqual(reason, "tool_not_installed")
         self.assertIn("tool", text)
 
     def test_nothing_missing_is_no_refusal(self):
         self.assertEqual(
-            core.executor_driver_check(TOOL, ["A"], {"A": "1"}, tool_found=True), (None, None)
+            core.executor_driver_check(TOOL, ["A"], {"A": "1"}, found(True)), (None, None)
         )
 
     def test_the_executor_gets_path_and_the_named_variables_only(self):

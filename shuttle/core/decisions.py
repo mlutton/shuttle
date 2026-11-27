@@ -4,15 +4,16 @@ Nothing here touches a file, the clock, the environment or a process.
 """
 
 from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 from shuttle.core import boundary, fixed, pairs, refusals
-from shuttle.core.drivers import command as command_driver
+from shuttle.core.drivers import table
 from shuttle.core.shapes import (
-    CommandSettings,
     Conclusion,
     Decision,
     Document,
     DocumentCheck,
+    DriverFacts,
     EndingGroup,
     ExecutionGroup,
     ExecutorDriverGroup,
@@ -384,11 +385,12 @@ _DOCUMENT_FIELDS = (
     "reach",
     "place",
     "freeze_limit_seconds",
+    "network",
+    "changes_to_place",
 )
 _REFERENCE_FIELDS = ("name", "path", "hash", "size", "hash_source")
 _GATE_FIELDS = ("name", "command", "arguments", "limit_seconds")
 _EXECUTOR_FIELDS = ("name", "settings")
-_COMMAND_SETTINGS = ("command", "arguments")
 _ID_CHARACTERS = fixed.ID_CHARACTERS
 _NAME_CHARACTERS = fixed.ID_CHARACTERS
 
@@ -469,20 +471,13 @@ def _executor_refusal(executor: object) -> tuple[str, str] | None:
     unknown = _unknown_names(executor, _EXECUTOR_FIELDS)
     if unknown:
         return "unknown_field", f"unknown field in executor: {unknown}"
-    if executor.get("name") != "command":
-        return "unknown_executor", "executor name must be 'command' (the command driver)"
+    driver = table.DRIVERS.get(str(executor.get("name")))
+    if driver is None:
+        return "unknown_executor", f"executor name must be one of: {', '.join(table.DRIVERS)}"
     settings = executor.get("settings")
     if not isinstance(settings, dict):
         return "missing_setting", "executor settings are missing"
-    unknown = _unknown_names(settings, _COMMAND_SETTINGS)
-    if unknown:
-        return "unknown_setting", f"unknown setting: {unknown}"
-    command, arguments = settings.get("command"), settings.get("arguments")
-    if not _text(command):
-        return "missing_setting", "setting 'command' is missing"
-    if not isinstance(arguments, list) or not all(isinstance(a, str) for a in arguments):
-        return "missing_setting", "setting 'arguments' is missing or not a list of text"
-    return None
+    return driver.settings_refusal(settings)
 
 
 def _document_refusal(raw: Document) -> tuple[str, str] | None:
@@ -542,11 +537,21 @@ def _gate_refusal(gate: Document) -> tuple[str, str] | None:
     return None
 
 
+def _standard_settings_refusal(raw: Document) -> tuple[str, str] | None:
+    for field, words in (("network", ("on", "off")), ("changes_to_place", ("allowed", "not"))):
+        if field in raw and raw[field] not in words:
+            return "unknown_setting", f"{field} must be one of: {', '.join(words)}"
+    return None
+
+
 def _parts_refusal(raw: Document) -> tuple[str, str] | None:
     """The shape of the parts the refusal checks judge; what they hold is judged by those checks."""
     for field in ("instruction", "instruction_hash", "statement_location", "place"):
         if field in raw and not isinstance(raw[field], str):
             return "missing_setting", f"{field} is not text"
+    refusal = _standard_settings_refusal(raw)
+    if refusal:
+        return refusal
     if "freeze_limit_seconds" in raw and not _usable_time_limit(raw["freeze_limit_seconds"]):
         return (
             "missing_setting",
@@ -595,13 +600,31 @@ def parse_command_line(argv: Sequence[str]) -> dict[str, str]:
     return {"refusal": "shuttle: usage: python3 -m shuttle run|check <input document>"}
 
 
+def standard_settings(raw: Mapping[str, Any]) -> tuple[bool | None, bool | None]:
+    """The document's two standard settings as (network on, changes to the place allowed); None
+    for one the document did not give."""
+    network, changes = raw.get("network"), raw.get("changes_to_place")
+    return (
+        None if network is None else network == "on",
+        None if changes is None else changes == "allowed",
+    )
+
+
+def copy_reply_to_statement(
+    arrives: str, location: str | None, location_taken: bool, reply_given: bool
+) -> bool:
+    """Whether the tool's final message is to be copied to the statement location; a file the
+    executor left itself is never replaced."""
+    return arrives == "reply" and reply_given and location is not None and not location_taken
+
+
 def executor_driver_check(
-    settings: CommandSettings,
+    executor: Mapping[str, Any],
     environment_names: Iterable[str],
     caller_environment: Mapping[str, str],
-    tool_found: bool,
+    facts: DriverFacts,
 ) -> tuple[str | None, str | None]:
-    """The command driver's check and the check of the named variables: (reason, one line) or (None, None)."""
+    """The named variables' check, then the driver's own: (reason, one line) or (None, None)."""
     missing = [n for n in environment_names if n not in caller_environment]
     if missing:
         return (
@@ -610,13 +633,8 @@ def executor_driver_check(
                 ", ".join(missing)
             ),
         )
-    reason = command_driver.check(settings, tool_found)
-    if reason:
-        return (
-            reason,
-            f"the command {settings['command']!r} was not found; install it or name one that exists",
-        )
-    return None, None
+    refusal = table.DRIVERS[executor["name"]].check(executor["settings"], facts)
+    return refusal if refusal else (None, None)
 
 
 def claim_problem(kind: str, request_id: str, records_location: str, error_name: str) -> str:

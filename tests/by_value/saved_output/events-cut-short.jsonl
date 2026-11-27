@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"thread-0002"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"sleep 5","status":"in_progress"}}
+a line the tool cut off mid-wr

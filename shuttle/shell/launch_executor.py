@@ -7,9 +7,8 @@ time limit; nothing here times the executor.
 from collections.abc import Sequence
 
 from shuttle.core import boundary, decisions, fixed, notice, run_area
-from shuttle.core.drivers import command
 from shuttle.core.shapes import Operations, RunState
-from shuttle.shell import kinds, statement_schema
+from shuttle.shell import kinds, statement_schema, the_driver
 
 
 def caller_environment(world: Operations, names: Sequence[str]) -> dict[str, str]:
@@ -33,6 +32,7 @@ def put_instruction(state: RunState) -> str:
         raw.get("statement_location"),
         statement_schema.read_schema(world),
         raw.get("references", []),
+        the_driver.of(raw).STATEMENT,
     )
     name = decisions.join_path(state["run_area"], run_area.INSTRUCTION_NAME)
     world.files.write_new(name, text)
@@ -43,7 +43,9 @@ def step(state: RunState) -> None:
     world = state["world"]
     raw = state["raw"]
     names = raw.get("environment", [])
-    spec = command.launch(raw["executor"]["settings"])
+    spec = the_driver.of(raw).launch(
+        raw["executor"]["settings"], the_driver.launch_context(world, raw, state["run_area"])
+    )
     environment = decisions.build_environment(names, caller_environment(world, names))
     environment.update(state.get("setup_variables", {}))
     instruction_file = put_instruction(state)
@@ -73,7 +75,9 @@ def step(state: RunState) -> None:
     )
     state["started_at"] = world.clock.timestamp()
     state["clock_start"] = world.clock.now()
-    state["boundary_process"] = world.processes.start(argv, environment, report, instruction_file)
+    state["boundary_process"] = world.processes.start(
+        argv, environment, report, instruction_file, spec.get("output_to")
+    )
     state["boundary_name"] = name
     # Peak memory and processor time are not read from the boundary yet.
     state["stand_ins"]["boundary"] = {fixed.STAND_IN_KEY: "boundary measurements"}

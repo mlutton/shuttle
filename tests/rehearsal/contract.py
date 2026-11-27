@@ -74,6 +74,52 @@ class ContractCases:
         self.world.files.write_new(path, TEXT)
         self.assertEqual(self.world.files.read(path), TEXT.encode("utf-8"))
 
+    def test_a_file_read_by_lines_gives_each_line_without_its_end_and_never_a_cut_one_whole(self):
+        path = self.fresh()
+        self.world.files.write_new(path, "one\ntwo\r\n\nlast without an end")
+        lines = list(self.world.files.read_lines(path, 100))
+        self.assertEqual(
+            lines,
+            [(b"one", False), (b"two\r", False), (b"", False), (b"last without an end", False)],
+        )
+
+    def test_a_line_over_the_limit_gives_its_first_bytes_cut_and_the_lines_after_it_whole(self):
+        path = self.fresh()
+        self.world.files.write_new(path, "abcdef\n12345\nxyzzy\nabcdefghij")
+        got = list(self.world.files.read_lines(path, 5))
+        self.assertEqual(
+            got, [(b"abcde", True), (b"12345", False), (b"xyzzy", False), (b"abcde", True)]
+        )
+
+    def test_a_file_of_one_endless_line_is_read_in_bounded_pieces(self):
+        path = self.fresh()
+        self.world.files.write_new(path, "x" * 3_000_000 + "\nnext\n")
+        got = list(self.world.files.read_lines(path, 10))
+        self.assertEqual(got, [(b"x" * 10, True), (b"next", False)])
+
+    def test_reading_an_empty_file_by_lines_gives_none_and_an_end_with_a_line_end_gives_no_extra(
+        self,
+    ):
+        empty, ended = self.fresh("empty"), self.fresh("ended")
+        self.world.files.write_new(empty, "")
+        self.world.files.write_new(ended, "a\n")
+        self.assertEqual(list(self.world.files.read_lines(empty, 5)), [])
+        self.assertEqual(list(self.world.files.read_lines(ended, 5)), [(b"a", False)])
+
+    def test_reading_by_lines_raises_as_reading_does_when_the_call_is_made(self):
+        things = dict(self.not_regular_things())
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.read_lines, self.fresh("absent"), 5
+        )
+        self.assertRaisesExactly(
+            IsADirectoryError, self.world.files.read_lines, self.harness.folder(), 5
+        )
+        for label in ("a named pipe", "a device", "a link to a device", "a link to a named pipe"):
+            with self.subTest(label):
+                self.assertRaisesExactly(
+                    NotARegularFile, self.world.files.read_lines, things[label], 5
+                )
+
     def test_a_new_file_that_is_not_there_yet_is_not_there_and_then_is(self):
         path = self.fresh()
         self.assertFalse(self.world.files.exists(path))
@@ -577,6 +623,36 @@ class ContractCases:
             None,
             self.fresh("absent"),
         )
+
+    def test_a_child_started_with_an_output_name_writes_its_standard_output_there(self):
+        path = self.fresh("output")
+        process = self.world.processes.start(
+            self.harness.argv("prints_hello"), self.harness.environment(), None, None, path
+        )
+        self.addCleanup(self.harness.end, process)
+        self.assertTrue(self.ended(process))
+        self.assertEqual(self.world.files.read(path), b"hello\n")
+
+    def test_starting_with_an_output_name_that_is_taken_or_has_no_folder_raises_and_starts_nothing(
+        self,
+    ):
+        taken = self.fresh("taken")
+        self.world.files.write_new(taken, "kept")
+        for name, error in (
+            (taken, FileExistsError),
+            (f"{self.fresh('absent')}/in", FileNotFoundError),
+        ):
+            with self.subTest(name):
+                self.assertRaisesExactly(
+                    error,
+                    self.world.processes.start,
+                    self.harness.argv("prints_hello"),
+                    self.harness.environment(),
+                    None,
+                    None,
+                    name,
+                )
+        self.assertEqual(self.world.files.read(taken), b"kept")
 
     def test_a_child_started_without_a_report_descriptor_has_an_empty_report(self):
         process = self.start("exits_at_once")

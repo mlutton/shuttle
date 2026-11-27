@@ -1,14 +1,33 @@
 """The command driver: the executor driver for a plain command.
 
-An executor driver offers four functions (check, launch, observe, declare) and
-its declarations as data. It never names an ending. There is no base class.
+It offers the functions of `shuttle.core.drivers.interface`. It asks of the run area nothing, has
+no login, and leaves no statement of its own: the command writes the statement file itself. It
+refuses a document that asks for a restriction of the two standard settings (network off, changes
+to the place not allowed), since nothing yet enforces either for it.
 """
 
+from collections.abc import Mapping
+
 from shuttle.core import pairs
-from shuttle.core.shapes import CommandSettings, ExecutorDriverGroup, LaunchSpec, SetupRequest
+from shuttle.core.shapes import (
+    DriverFacts,
+    ExecutorDriverGroup,
+    LaunchContext,
+    LaunchSpec,
+    Observed,
+    OutputFiles,
+    SavedOutput,
+    Settings,
+    SetupRequest,
+    StatementArrival,
+)
 
 NAME = "command"
 VERSION = "1"
+STATEMENT: StatementArrival = "file"
+READS: tuple[str, ...] = ()
+
+_SETTINGS = ("command", "arguments")
 
 # What this tool loads and runs by itself, and what it needs set up: nothing.
 DECLARATIONS: dict[str, list[str]] = {
@@ -22,30 +41,68 @@ def declare() -> dict[str, list[str]]:
     return DECLARATIONS
 
 
-def setup_requests(settings: CommandSettings) -> list[SetupRequest]:
-    """Pure: what this tool asks of the run area. A plain command asks for nothing."""
-    return []
-
-
-def check(settings: CommandSettings, tool_found: bool) -> str | None:
-    """Pure: the reason code that refuses these settings, or None."""
-    if not tool_found:
-        return "tool_not_installed"
+def settings_refusal(settings: Settings) -> tuple[str, str] | None:
+    unknown = ", ".join(sorted(set(settings) - set(_SETTINGS)))
+    if unknown:
+        return "unknown_setting", f"unknown setting: {unknown}"
+    command, arguments = settings.get("command"), settings.get("arguments")
+    if not isinstance(command, str) or not command:
+        return "missing_setting", "setting 'command' is missing"
+    if not isinstance(arguments, list) or not all(isinstance(a, str) for a in arguments):
+        return "missing_setting", "setting 'arguments' is missing or not a list of text"
     return None
 
 
-def launch(settings: CommandSettings) -> LaunchSpec:
-    """Pure: the one command to start. It exits when done. The environment is built by the core."""
+def program(settings: Settings) -> str:
+    return str(settings["command"])
+
+
+def login_path(environment: Mapping[str, str]) -> str | None:
+    return None
+
+
+def check(settings: Settings, facts: DriverFacts) -> tuple[str, str] | None:
+    # The boundary itself enforces neither setting yet, and this driver has no sandbox of its own
+    # (as the Codex driver's tool has), so a restriction asked for would be silently unhonoured:
+    # refuse it instead.
+    for asked, what in (
+        (facts["network"] is False, "network off"),
+        (facts["changes_allowed"] is False, "changes_to_place not"),
+    ):
+        if asked:
+            return (
+                "unknown_setting",
+                f"the command driver cannot enforce {what} yet; leave the setting out or "
+                "choose an executor that can",
+            )
+    if not facts["tool_found"]:
+        return (
+            "tool_not_installed",
+            f"the command {settings['command']!r} was not found; install it or name one that exists",
+        )
+    return None
+
+
+def setup_requests(settings: Settings, environment: Mapping[str, str]) -> list[SetupRequest]:
+    return []
+
+
+def launch(settings: Settings, context: LaunchContext) -> LaunchSpec:
+    """The command and its arguments. The environment is built by the core."""
     return {"argv": [settings["command"]] + list(settings["arguments"])}
 
 
-def observe() -> ExecutorDriverGroup:
-    """Pure: the driver group of the receipt. A plain command reports nothing of its own.
+def output_files(run_area: str) -> OutputFiles:
+    return {}
+
+
+def observe(settings: Settings, saved: SavedOutput) -> Observed:
+    """A plain command reports nothing of its own, and has no statement but its file.
 
     "none" means looked and nothing there; "cannot tell" means could not look.
     """
     nothing = pairs.none()
-    return {
+    group: ExecutorDriverGroup = {
         "executor_driver_name": pairs.value(NAME),
         "executor_driver_version": pairs.value(VERSION),
         "tool_version": nothing,
@@ -66,3 +123,4 @@ def observe() -> ExecutorDriverGroup:
         "changed_self_loaded_file": nothing,
         "waiting_question": nothing,
     }
+    return {"group": group, "reply_given": False}

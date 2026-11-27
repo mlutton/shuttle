@@ -9,10 +9,11 @@ fails the step with one line saying which.
 """
 
 from collections.abc import Sequence
+from typing import assert_never
 
 from shuttle.core import run_area
-from shuttle.core.drivers import command
 from shuttle.core.shapes import Operations, RunState, SetupRequest, SetupStep, StepResult
+from shuttle.shell import the_driver
 
 
 def _carry_out(world: Operations, step: SetupStep) -> None:
@@ -21,6 +22,8 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
         case "folder":
             files.make_folders(step["target"])
         case "copy":
+            if step.get("optional") and not files.exists(step["source"]):
+                return  # the request said a missing source is no error
             files.copy_path(step["source"], step["target"], step["leave_out"])
         case "share":
             files.share_by_link(step["source"], step["target"])
@@ -28,8 +31,8 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
             files.write_new(step["target"], step["text"])
         case "writable":
             files.make_writable(step["target"])
-        case other:
-            raise ValueError(f"unknown setup step {other!r}")
+        case never:
+            assert_never(never)  # the type checker refuses a kind of step with no case here
 
 
 def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
@@ -56,6 +59,11 @@ def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
 
 
 def step(state: RunState) -> None:
-    result = set_up(state, command.setup_requests(state["raw"]["executor"]["settings"]))
+    raw = state["raw"]
+    driver = the_driver.of(raw)
+    requests = driver.setup_requests(
+        raw["executor"]["settings"], the_driver.caller_variables(state["world"], driver)
+    )
+    result = set_up(state, requests)
     state["stand_ins"]["setup"] = result
     state["facts"]["setup"] = "failed" if result.get("ok") is False else "ok"

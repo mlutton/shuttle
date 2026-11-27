@@ -7,7 +7,7 @@ import os
 import shutil
 import stat
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import BinaryIO
 
 from shuttle.core.shapes import FileOperations, NotARegularFile
@@ -47,6 +47,25 @@ def read(path: str) -> bytes:
     source, _ = _open_regular(path, follow=True)
     with source:
         return source.read()
+
+
+def _lines(source: BinaryIO, limit: int) -> Iterator[tuple[bytes, bool]]:
+    with source:
+        while True:
+            chunk = source.readline(limit + 1)  # memory is bounded by the limit, not by the file
+            if not chunk:
+                return
+            if len(chunk) <= limit or chunk.endswith(b"\n"):
+                yield chunk.removesuffix(b"\n"), False
+                continue
+            yield chunk[:limit], True
+            while chunk and not chunk.endswith(b"\n"):  # skip the rest of the line in blocks
+                chunk = source.readline(_BLOCK)
+
+
+def read_lines(path: str, limit: int) -> Iterator[tuple[bytes, bool]]:
+    source, _ = _open_regular(path, follow=True)
+    return _lines(source, limit)
 
 
 def exists(path: str) -> bool:
@@ -180,6 +199,7 @@ def remove_tree(path: str) -> None:
 
 FILES = FileOperations(
     read=read,
+    read_lines=read_lines,
     exists=exists,
     write_new=write_new,
     link=link,

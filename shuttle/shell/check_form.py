@@ -27,7 +27,7 @@ from shuttle.core.shapes import (
     ReceiptFacts,
     RunState,
 )
-from shuttle.shell import gates, input_checks, records, run
+from shuttle.shell import gates, input_checks, records, run, the_driver
 
 
 def _id_claim_refusal(state: RunState) -> Found | None:
@@ -74,7 +74,16 @@ def _every_check(state: RunState) -> list[Found | None]:
     gate_refusal, _ = gates.run_gates(
         world, run.header_source_of(state)["request_id"], state["run_part"], raw.get("gates", [])
     )
-    return [*found, gate_refusal]
+    missing = the_driver.missing_setup_source(world, raw)
+    setup: Found | None = None
+    if missing is not None and not reason:
+        setup = {
+            "reason": "setup_failed",
+            "step": "setup",
+            "problem": f"the driver's set-up needs {missing!r}, which is not there; a run would "
+            "end here, so nothing was launched; make it exist or choose another executor",
+        }
+    return [*found, gate_refusal, setup]
 
 
 def _receipt(state: RunState, decision: Decision, problems: str) -> Receipt:

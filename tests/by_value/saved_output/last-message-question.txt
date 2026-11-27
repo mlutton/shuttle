@@ -1,0 +1,1 @@
+Which schema should I keep, the old one or the new one?

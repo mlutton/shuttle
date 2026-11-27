@@ -43,6 +43,7 @@ class SimulatedHarness:
             "reports_session": {},
             "writes_to_the_report": {"report": "hello\n"},
             "copies_its_input": {},
+            "prints_hello": {"output": "hello\n"},
         }
         if kind in behaviours:
             self.world.program(kind, **behaviours[kind])

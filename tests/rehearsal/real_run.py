@@ -8,12 +8,15 @@ import hashlib
 import json
 import os
 import resource
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 
 from shuttle.core import boundary
+from shuttle.core.drivers import table
 
 import rehearsal.real_place as real_place
 import rehearsal.the_boundary as the_boundary
@@ -28,6 +31,15 @@ DEFAULT_LIMITS = {
 }
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+# What the boundary needs on a PATH besides a stand-in's folder: the system's own two folders.
+SYSTEM_PATH = ("/usr/bin", "/bin")
+
+
+def tool_driver_names():
+    """The names of the drivers whose tool is a program of its own, not the plain command."""
+    return sorted(name for name in table.DRIVERS if name != "command")
 
 
 class RealRun(unittest.TestCase):
@@ -128,6 +140,32 @@ class RealRun(unittest.TestCase):
         for unit in self.units_left():  # only the units this test's own runs made
             subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True)
             subprocess.run(["systemctl", "--user", "reset-failed", unit], capture_output=True)
+
+    def run_a_stand_in_tool(self, doc, script, variables=None, path_first=None):
+        """Run the command on `doc` with `script` standing in for the executor driver's tool. It is
+        the way to do that, because it checks where the program resolves before anything starts.
+
+        The script (a Python program's text) is written into this test's own folder under the
+        program name the driver asks for (`program(settings)` of the driver the document names),
+        and the command runs with a PATH of that folder, then only the system's. Before anything
+        starts the program is looked up on exactly that PATH and must be the file just written,
+        inside this test's folder: anywhere else, or nowhere, fails the test and starts nothing.
+        `path_first` puts a folder of the test's own ahead of the stand-in's, which only a test
+        of the guard has use for. Returns what `run_to_the_end` does."""
+        executor = doc["executor"]
+        program = table.DRIVERS[executor["name"]].program(executor["settings"])
+        folder = os.path.join(self.root, "stand-in")
+        os.makedirs(folder, exist_ok=True)
+        written = os.path.join(folder, program)
+        with open(written, "w") as f:
+            f.write(f"#!{sys.executable}\n{script}")
+        os.chmod(written, os.stat(written).st_mode | stat.S_IXUSR)
+        path = os.pathsep.join([*([path_first] if path_first else []), folder, *SYSTEM_PATH])
+        found = shutil.which(program, path=path)
+        inside = os.path.realpath(written).startswith(self.root + os.sep)
+        if found is None or os.path.realpath(found) != os.path.realpath(written) or not inside:
+            self.fail(f"the program {program!r} does not resolve to the stand-in written for it")
+        return self.run_to_the_end(doc, variables={**(variables or {}), "PATH": path})
 
     def run_to_the_end(self, doc, path_first=None, variables=None):
         """Run the command to its end: (exit code, standard output lines, standard error)."""

@@ -6,6 +6,8 @@ from shuttle.core import decisions as core
 from shuttle.core import fixed, pairs
 from shuttle.core.drivers import command
 
+NOTHING_SAVED = {"events": None, "last_message": None, "session_record": None}
+
 STAND_INS = {
     name: {fixed.STAND_IN_KEY: name}
     for name in (
@@ -34,7 +36,7 @@ def ran_facts(**changes):
         "executor_duration": 0.9,
         "exit_code": 3,
         "signal": None,
-        "executor_driver_observations": command.observe(),
+        "executor_driver_observations": command.observe({}, NOTHING_SAVED)["group"],
         "stand_ins": dict(STAND_INS),
         "reason_text": None,
     }
@@ -273,7 +275,7 @@ class UnitsAreInTheKeyNames(unittest.TestCase):
 class ARightFieldIsRefusedWhenItIsNotAPair(unittest.TestCase):
     def test_a_bare_string_where_a_pair_belongs_is_refused_by_the_builder(self):
         for bare in ("none", "cannot tell", "something", ""):
-            observed = command.observe()
+            observed = command.observe({}, NOTHING_SAVED)["group"]
             observed["model"] = bare
             with self.subTest(bare=bare), self.assertRaises(core.ReceiptNotBuilt):
                 core.build_receipt(ENDED, ran_facts(executor_driver_observations=observed))
@@ -286,14 +288,14 @@ class ARightFieldIsRefusedWhenItIsNotAPair(unittest.TestCase):
             {"state": "value"},
             {"state": "value", "value": 1, "extra": 2},
         ):
-            observed = command.observe()
+            observed = command.observe({}, NOTHING_SAVED)["group"]
             observed["model"] = bad
             with self.subTest(bad=bad), self.assertRaises(core.ReceiptNotBuilt):
                 core.build_receipt(ENDED, ran_facts(executor_driver_observations=observed))
 
     def test_a_receipt_cannot_be_built_with_a_field_left_out(self):
         for name in fixed.RECEIPT_GROUPS["executor_driver"]:
-            observed = command.observe()
+            observed = command.observe({}, NOTHING_SAVED)["group"]
             del observed[name]
             with self.subTest(name), self.assertRaises(core.ReceiptNotBuilt):
                 core.build_receipt(ENDED, ran_facts(executor_driver_observations=observed))

@@ -6,8 +6,8 @@ outside and are checked by value: `Document` (the input document as read from JS
 until the validation code has looked at it) and what `records.read_record` reads back from disk.
 """
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any, NamedTuple, NotRequired, Protocol, TextIO, TypedDict
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Literal, NamedTuple, NotRequired, Protocol, TextIO, TypedDict
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 
@@ -82,39 +82,92 @@ class Outcome(TypedDict, total=False):
     problem: str | None
 
 
-class CommandSettings(TypedDict):
-    """The command driver's settings, once the document is checked."""
-
-    command: str
-    arguments: list[str]
+# An executor driver's own settings, as the document gave them; each driver's check says what
+# it holds (the table of drivers is shuttle.core.drivers.table).
+Settings = dict[str, Any]
 
 
 class LaunchSpec(TypedDict):
     argv: list[str]
+    output_to: NotRequired[str]  # a file made new for the child's standard output, in the run area
+
+
+class DriverFacts(TypedDict):
+    """What the shell found out for a driver's check; the driver's check reads these with the settings."""
+
+    tool_found: bool
+    login_found: bool  # whether the name `login_path` gave is there; the login is never opened
+    network: bool | None  # the document's standard settings; None when it gave none
+    changes_allowed: bool | None
+
+
+class LaunchContext(TypedDict):
+    """What a driver's launch command is built from besides its settings."""
+
+    place: str
+    run_area: str
+    network: bool
+    changes_allowed: bool
+
+
+class OutputFiles(TypedDict, total=False):
+    """Where a driver's tool leaves what the shell hands back to `observe`, whole paths."""
+
+    events: str
+    last_message: str
+
+
+# One line of a saved file, as `FileOperations.read_lines` gives it: the bytes, and whether the
+# line was longer than the limit and so cut.
+Line = tuple[bytes, bool]
+
+
+class SavedOutput(TypedDict):
+    """What the tool left, each a single pass over its lines, or None when it is not available."""
+
+    events: Iterable[Line] | None
+    last_message: Iterable[Line] | None
+    session_record: Iterable[Line] | None
+
+
+class Observed(TypedDict):
+    group: "ExecutorDriverGroup"
+    # The tool left a final message file with at least one line, blank ones included.
+    reply_given: bool
+
+
+# How a driver's tool hands over its statement: it writes a file at the statement location, or its
+# final message is the statement.
+StatementArrival = Literal["file", "reply"]
+SetupAction = Literal["copy", "share", "leave_out", "write", "writable", "variable"]
+SetupStepKind = Literal["folder", "copy", "share", "write", "writable"]
 
 
 class SetupRequest(TypedDict, total=False):
-    """One thing a driver asks of the run area (shuttle.core.run_area). `action` is one of
-    "copy" and "share" (`source`, the name made: `name`), "leave_out" (`name`: left out of any
-    copy that would hold it), "write" (`name`, `text`), "writable" (`name`) and "variable"
-    (`variable`, and either `value` or `in_run_area`, the name whose path is the value)."""
+    """One thing a driver asks of the run area (shuttle.core.run_area). `action` says which; the
+    other fields are those that action reads: `name` (the path made, or acted on, inside the
+    area), `source` (the absolute path a copy or share comes from), `text` (a written file's),
+    and for a variable, `variable` with either `value` or `in_run_area` (the name whose path is
+    the value). A copy may be `optional`."""
 
-    action: str
+    action: SetupAction
     name: str
     source: str
     text: str
     variable: str
     value: str
     in_run_area: str
+    optional: bool  # a copy only: left out, not an error, when its source is not there
 
 
 class SetupStep(TypedDict, total=False):
     """What the shell does for one request, with every path whole."""
 
-    do: str  # "folder", "copy", "share", "write" or "writable"
+    do: SetupStepKind
     source: str
     target: str
     leave_out: list[str]  # for a copy: names relative to the source
+    optional: bool  # for a copy: present (true) only when the request said so
     text: str
 
 
@@ -334,6 +387,12 @@ class FileOperations(NamedTuple):
     read: Callable[[str], bytes]  # a regular file, or a link to one; raises OSError
     # (FileNotFoundError, IsADirectoryError, NotARegularFile for a pipe, a device, a socket, a
     # link to one of those), and never waits on what is there
+    # read_lines: (name, limit): the same file as `read`, handed back a line at a time so what is
+    # held never grows with the file. Each line is its bytes without the line's end, at most
+    # `limit` of them, and whether it was cut: a longer line gives its first `limit` bytes and
+    # True, and the rest of it is skipped, never held. A file that ends without a line end gives
+    # its last line as it is; an empty file gives none. Raises, when called, as `read` does
+    read_lines: Callable[[str, int], Iterator[tuple[bytes, bool]]]
     exists: Callable[[str], bool]  # a name is there, even if it leads nowhere
     write_new: Callable[[str, str], None]  # create, write, flush to disk; FileExistsError if there
     link: Callable[[str, str], None]  # (existing name, new name); FileExistsError if new is there
@@ -390,6 +449,7 @@ class Starter(Protocol):
         environment: Mapping[str, str],
         report: int | None = None,
         input_from: str | None = None,
+        output_to: str | None = None,
     ) -> Process: ...
 
 
@@ -400,7 +460,9 @@ class ProcessOperations(NamedTuple):
     # start: argv, environment, the number `open_report` gave or None, and the name of a file the
     # child reads as its standard input (None: nothing to read, the null device). The file is
     # opened before anything starts: FileNotFoundError and nothing started when it is not there.
-    # OSError, ValueError
+    # `output_to` is a name made new for the child's standard output (None: the null device):
+    # FileExistsError, or FileNotFoundError when the folder above it is not there, and nothing
+    # started. OSError, ValueError
     start: Starter
     poll: Callable[[Process], int | None]  # None while running; negative: ended by that signal
     wait: Callable[
