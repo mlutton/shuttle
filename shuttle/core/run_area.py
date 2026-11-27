@@ -25,6 +25,10 @@ from shuttle.core.shapes import SetupAction, SetupPlan, SetupRequest, SetupStep
 AREA_PREFIX = "shuttle-run-area-"
 # Where the instruction is put for the executor's standard input; no request may name it.
 INSTRUCTION_NAME = "shuttle-instruction.txt"
+# Where the executor writes its statement: the one name Shuttle fixes inside the run area, so the
+# document's own statement location is never shown to the executor. No request may name it.
+STATEMENT_NAME = "shuttle-statement.json"
+_KEPT_NAMES = (INSTRUCTION_NAME, STATEMENT_NAME)
 
 _PART = r"(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+"
 _NAME = re.compile(f"{_PART}(?:/{_PART})*")
@@ -50,6 +54,11 @@ def _inside(area: str, name: str) -> str:
     return area + "/" + name
 
 
+def statement_path(area: str) -> str:
+    """The path inside the run area where the executor writes its statement."""
+    return _inside(area, STATEMENT_NAME)
+
+
 def _refused(why: str) -> SetupPlan:
     return {"steps": [], "variables": {}, "problem": why}
 
@@ -61,11 +70,12 @@ def _name_problem(index: int, request: SetupRequest, field: str = "name") -> str
             "run area (letters, digits, '.', '_' and '-', parts joined by '/', no '.' or '..' part)"
         )
     name = str(request.get(field))
-    if name == INSTRUCTION_NAME or _under(name, INSTRUCTION_NAME):
-        return (
-            f"setup request {index + 1}: the name {INSTRUCTION_NAME!r} and anything below it are "
-            "kept for the instruction"
-        )
+    for kept in _KEPT_NAMES:
+        if name == kept or _under(name, kept):
+            return (
+                f"setup request {index + 1}: the name {kept!r} and anything below it are "
+                "kept for the instruction and the statement"
+            )
     return None
 
 

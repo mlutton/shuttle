@@ -12,7 +12,9 @@ hosted runner sets it).
 The executor is given the instruction and the notice on its standard input, and the run area made
 for it (in a temporary folder of the test's own) is there while it runs and gone at the end.
 
-The statement (#48) is left by the script before it hangs and reads "right shape".
+The statement (#48) is left by the script before it hangs, at the path in the run area the notice
+gives it, and reads "right shape"; it is kept beside the records and copied to the document's
+statement location, which the executor is never told.
 
 #47 (delivery) extends this test when its piece becomes real; it does not add one of its own.
 """
@@ -38,12 +40,14 @@ STATEMENT_TEXT = (
 )
 
 HANGS_WITH_A_CHILD = """
-import os, subprocess, sys, time
+import os, re, subprocess, sys, time
 subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)", sys.argv[2]])
-open(sys.argv[3], "w").write(sys.argv[4])  # the statement, before the hang
-open(sys.argv[5], "w").write(sys.stdin.read())  # what it was given as its standard input
-areas = os.listdir(sys.argv[6])  # the run areas there are while it runs, with what each holds
-open(sys.argv[7], "w").write(repr({a: sorted(os.listdir(sys.argv[6] + "/" + a)) for a in areas}))
+given = sys.stdin.read()
+open(sys.argv[4], "w").write(given)  # what it was given as its standard input
+areas = os.listdir(sys.argv[5])  # the run areas there are while it runs, with what each holds
+open(sys.argv[6], "w").write(repr({a: sorted(os.listdir(sys.argv[5] + "/" + a)) for a in areas}))
+# the statement, before the hang, where the notice says to write it
+open(re.search("exact path: (.+)", given).group(1), "w").write(sys.argv[3])
 open(sys.argv[1], "w").write("up")
 time.sleep(600)
 """
@@ -69,9 +73,7 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         given, seen = os.path.join(self.root, "given"), os.path.join(self.root, "seen")
         temporary = os.path.join(self.root, "temporary")
         os.mkdir(temporary)
-        doc = self.document(
-            script, [up, marker, statement, STATEMENT_TEXT, given, temporary, seen], limit=1
-        )
+        doc = self.document(script, [up, marker, STATEMENT_TEXT, given, temporary, seen], limit=1)
         doc["kind"], doc["statement_location"] = "judge", statement  # a kind that expects one
         doc["instruction"] = INSTRUCTION
         doc["instruction_hash"] = hashlib.sha256(INSTRUCTION.encode()).hexdigest()
@@ -130,14 +132,16 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertNotEqual(self.scope_state(), "active")
         self.assertTrue(os.path.exists(asked))  # the gate was asked, said yes, and the run went on
         self.assertEqual(self.units_left(), [])  # no scope of the run, a gate or the freeze is left
+        with open(seen) as f:  # one run area while it ran, holding the instruction's file
+            during = ast.literal_eval(f.read())
         with open(given) as f:  # the instruction, then the notice, on its standard input
             text = f.read()
         self.assertTrue(text.startswith(INSTRUCTION + "\n"))
         self.assertIn("Shuttle notice, version", text)
-        self.assertIn(statement, text)
+        self.assertNotIn(statement, text)  # the document's location is not shown to the executor
+        inner = os.path.join(next(iter(during)), "shuttle-statement.json")
+        self.assertIn("exact path: " + os.path.join(temporary, inner), text)
         self.assertIn("- runbook: " + runbook, text)
-        with open(seen) as f:  # one run area while it ran, holding the instruction's file
-            during = ast.literal_eval(f.read())
         self.assertEqual(len(during), 1)
         ((name, held),) = during.items()
         self.assertTrue(name.startswith("shuttle-run-area-"))
@@ -146,6 +150,8 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertEqual(receipt["execution"]["teardown_failure"], "none")
         kept = os.path.join(self.records, "r-1.statement.kept")
         with open(kept, "rb") as f:  # the statement is kept as written, even at the time limit
+            self.assertEqual(f.read(), STATEMENT_TEXT.encode())
+        with open(statement, "rb") as f:  # and copied to the document's location
             self.assertEqual(f.read(), STATEMENT_TEXT.encode())
         self.assertEqual(
             receipt["executor"],

@@ -14,6 +14,7 @@ import sys
 import unittest
 
 from shuttle.core import decisions as core
+from shuttle.core import run_area
 from shuttle.shell import statement_schema
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,6 +22,8 @@ scenes = importlib.import_module("rehearsal.scene")
 flat = importlib.import_module("rehearsal.receipts").flat
 
 LOCATION = "/out/statement.json"
+# Where the executor writes: inside the first run area the simulated world makes.
+INNER = run_area.statement_path("/tmp/shuttle-run-area-000001")
 KEPT = "/records/inj-1.statement.kept"
 STATEMENT = {
     "claim": "done",
@@ -42,9 +45,9 @@ def pairs(world):
 
 
 def writes(world, text):
-    """The script leaves `text` at the statement location as it starts."""
+    """The script leaves `text` at its statement path in the run area as it starts."""
     world.make_folder("/out")
-    world.on_call("processes.start", lambda: world.put_file(LOCATION, text))
+    world.on_call("processes.start", lambda: world.put_file(INNER, text))
 
 
 def document(**extra):
@@ -64,7 +67,7 @@ class TheKeptStatement(unittest.TestCase):
     def test_a_right_shaped_statement_is_kept_exactly_and_its_claim_is_copied_unchanged(self):
         world = self.run_with(UNTIDY)
         self.assertEqual(world.text_of(KEPT), UNTIDY)  # byte for byte: not tidied, not completed
-        self.assertEqual(world.text_of(LOCATION), UNTIDY)
+        self.assertEqual(world.text_of(LOCATION), UNTIDY)  # the copy at the document's location
         got = pairs(world)
         self.assertEqual(got["statement_state"], {"state": "value", "value": "right_shape"})
         self.assertEqual(got["statement_hash"], {"state": "value", "value": sha(UNTIDY)})
@@ -105,7 +108,7 @@ class TheKeptStatement(unittest.TestCase):
     def test_a_folder_at_the_location_is_wrong_shape_with_nothing_to_hash_or_keep(self):
         world = scenes.scene(document())
         world.make_folder("/out")
-        world.on_call("processes.start", lambda: world.make_folder(LOCATION))
+        world.on_call("processes.start", lambda: world.make_folder(INNER))
         scenes.run_in(world)
         got = pairs(world)
         self.assertEqual(got["statement_state"], {"state": "value", "value": "wrong_shape"})
@@ -116,13 +119,13 @@ class TheKeptStatement(unittest.TestCase):
         things = {
             "a link to a file": lambda w: (
                 w.put_file("/out/other", "secret"),
-                w.put_link(LOCATION, "/out/other"),
+                w.put_link(INNER, "/out/other"),
             ),
-            "a link to a missing name": lambda w: w.put_link(LOCATION, "/out/absent"),
-            "a named pipe": lambda w: w.put_pipe(LOCATION),
+            "a link to a missing name": lambda w: w.put_link(INNER, "/out/absent"),
+            "a named pipe": lambda w: w.put_pipe(INNER),
             "a link to a device": lambda w: (
                 w.put_device("/dev/zero"),
-                w.put_link(LOCATION, "/dev/zero"),
+                w.put_link(INNER, "/dev/zero"),
             ),
         }
         for label, leave in things.items():
@@ -137,10 +140,31 @@ class TheKeptStatement(unittest.TestCase):
                     self.assertEqual(got[field], {"state": "none", "value": None}, field)
                 self.assertNotIn(KEPT, world.files)
 
-    def test_the_kept_copy_is_made_and_read_through_the_operations_and_the_original_stays(self):
+    def test_the_kept_copy_is_made_from_the_run_area_and_then_copied_to_the_location(self):
         world = self.run_with(UNTIDY)
-        self.assertEqual(world.calls("files.copy"), [((LOCATION, KEPT), 0.0)])
+        self.assertEqual(world.calls("files.copy"), [((INNER, KEPT), 0.0), ((KEPT, LOCATION), 0.0)])
         self.assertEqual([a for a, _ in world.calls("files.hash")], [(KEPT,)])
+        self.assertNotIn(INNER, world.files)  # the run area, and the original with it, is removed
+
+    def test_a_statement_written_at_the_documents_location_and_not_in_the_run_area_is_none(self):
+        world = scenes.scene(document())
+        world.make_folder("/out")
+        world.on_call("processes.start", lambda: world.put_file(LOCATION, UNTIDY))
+        scenes.run_in(world)
+        for field in ("statement_state", "statement_hash", "statement_location", "claim"):
+            self.assertEqual(pairs(world)[field], {"state": "none", "value": None}, field)
+        self.assertNotIn(KEPT, world.files)
+        self.assertEqual(world.calls("files.copy"), [])
+
+    def test_a_name_taken_at_the_location_during_the_run_is_left_and_the_kept_copy_stands(self):
+        world = scenes.scene(document())
+        world.make_folder("/out")
+        world.on_call("processes.start", lambda: world.put_file(INNER, UNTIDY))
+        world.on_call("processes.start", lambda: world.put_file(LOCATION, "the executor's"))
+        scenes.run_in(world)
+        self.assertEqual(pairs(world)["statement_state"]["value"], "right_shape")
+        self.assertEqual(world.text_of(KEPT), UNTIDY)
+        self.assertEqual(world.text_of(LOCATION), "the executor's")
 
     def test_when_it_cannot_be_kept_the_four_fields_cannot_tell_and_the_ending_stands(self):
         world = scenes.scene(document())

@@ -1,7 +1,7 @@
 """The command driver: the executor driver for a plain command.
 
 It offers the functions of `shuttle.core.drivers.interface`. It asks of the run area nothing, has
-no login, and leaves no statement of its own: the command writes the statement file itself. It
+no login, and leaves no statement of its own: the command writes the statement file itself, at the path in the run area its notice gives it. It
 refuses a document that asks for a restriction of the two standard settings (network off, changes
 to the place not allowed), since nothing yet enforces either for it.
 """

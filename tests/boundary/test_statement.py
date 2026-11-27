@@ -1,7 +1,8 @@
 """The statement and the references, through the real command in the real boundary.
 
-A small real script is the executor. It leaves a statement at the statement location, or tries to
-change a reference, and the test asserts only what a caller can see: the files, the outcome
+A small real script is the executor. It leaves a statement at the path inside the run area that
+its notice gives it (it is never told the document's statement location), or tries to change a
+reference, and the test asserts only what a caller can see: the files, the outcome
 record, and what is left running. The shape check is a table in tests/by_value/test_statement.py;
 the run on the simulated world is tests/by_value/test_kept_statement.py. None of these keeps time.
 """
@@ -17,11 +18,39 @@ locations_table = importlib.import_module("hostile.statement_locations_table")
 flat = importlib.import_module("rehearsal.receipts").flat
 real_run = importlib.import_module("rehearsal.real_run")
 
-# argv 1 is the statement location, argv 2 the path of a file holding the bytes to leave there.
-LEAVES_WHAT_IT_IS_GIVEN = """
-import sys
-with open(sys.argv[2], "rb") as source, open(sys.argv[1], "wb") as target:
+# What every script below does first: finds, in the notice on its standard input, the path it is
+# told to write its statement at.
+FINDS_ITS_PATH = """
+import re, sys
+inner = re.search("exact path: (.+)", sys.stdin.read()).group(1)
+"""
+
+# argv 1 is the path of a file holding the bytes to leave at the statement path.
+LEAVES_WHAT_IT_IS_GIVEN = (
+    FINDS_ITS_PATH
+    + """
+with open(sys.argv[1], "rb") as source, open(inner, "wb") as target:
     target.write(source.read())
+"""
+)
+
+# argv 1 is the document's statement location, which a script has no way to know: it writes there
+# and not at its own path, as a script that guessed would.
+WRITES_AT_THE_DOCUMENTS_LOCATION = (
+    FINDS_ITS_PATH
+    + """
+with open(sys.argv[1], "w") as target:
+    target.write("not at the path it was told")
+"""
+)
+
+# argv 1 is a file to write everything the executor was given into: its arguments, its whole
+# environment, its working directory and its standard input.
+RECORDS_EVERYTHING_IT_WAS_GIVEN = """
+import json, os, sys
+with open(sys.argv[1], "w") as f:
+    json.dump({"argv": sys.argv, "environ": dict(os.environ), "cwd": os.getcwd(),
+               "stdin": sys.stdin.read()}, f)
 """
 
 LEAVES_NOTHING = "pass\n"
@@ -75,7 +104,7 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
         with open(given, "wb") as f:
             f.write(data)
         script = self.script("leaves.py", LEAVES_WHAT_IT_IS_GIVEN)
-        doc = self.document(script, [location, given], request_id=request_id)
+        doc = self.document(script, [given], request_id=request_id)
         self.expecting_a_statement(doc, location)
         code, lines, err = self.run_to_the_end(doc)
         self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
@@ -90,6 +119,10 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
         data = json.dumps(STATEMENT, indent=2).replace("\n", "  \r\n").encode()
         got = self.run_leaving(data)
         self.assertEqual(self.kept(), data)
+        with open(
+            os.path.join(self.root, "statement-r-1"), "rb"
+        ) as f:  # at the document's location
+            self.assertEqual(f.read(), data)
         self.assertEqual(
             got,
             {
@@ -115,6 +148,52 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
             },
         )
         self.assertFalse(os.path.exists(os.path.join(self.records, "r-1.statement.kept")))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "never-written")))
+
+    def test_a_script_that_writes_at_the_documents_location_and_not_in_the_run_area_shows_none(
+        self,
+    ):
+        location = os.path.join(self.root, "statement-r-1")
+        script = self.script("writes-there.py", WRITES_AT_THE_DOCUMENTS_LOCATION)
+        doc = self.document(script, [location])
+        self.expecting_a_statement(doc, location)
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
+        got = flat(self.outcome()["receipt"])["executor"]
+        self.assertEqual(
+            got,
+            {
+                k: "none"
+                for k in ("statement_state", "statement_hash", "statement_location", "claim")
+            },
+        )
+        self.assertFalse(os.path.exists(os.path.join(self.records, "r-1.statement.kept")))
+
+    def test_the_documents_statement_location_is_nowhere_in_what_the_executor_is_given(self):
+        location = os.path.join(self.root, "statement-r-1")
+        record = os.path.join(self.root, "everything-it-was-given")
+        script = self.script("records.py", RECORDS_EVERYTHING_IT_WAS_GIVEN)
+        doc = self.document(script, [record])
+        self.expecting_a_statement(doc, location)
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
+        with open(record) as f:
+            seen = json.load(f)
+        self.assertIn("exact path: ", seen["stdin"])  # it was told where, and it is not that
+        for what in ("argv", "environ", "cwd", "stdin"):
+            self.assertNotIn(location, json.dumps(seen[what]), what)
+        self.assertNotIn(os.path.basename(location), json.dumps(seen))
+
+    def test_a_location_taken_at_the_start_is_still_refused(self):
+        location = os.path.join(self.root, "statement-r-1")
+        with open(location, "w") as f:
+            f.write("taken")
+        script = self.script("never-runs.py", LEAVES_NOTHING)
+        doc = self.expecting_a_statement(self.document(script), location)
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err, lines[-1]), (0, "", "could_not_start"))
+        ending = flat(self.outcome()["receipt"])["ending"]
+        self.assertEqual(ending["reason"], "statement_location_occupied")
 
     def test_a_statement_of_the_wrong_shape_shows_wrong_shape_and_is_kept_as_written(self):
         data = b"I need to know which file you mean. Can you tell me?\n"
@@ -129,12 +208,16 @@ class AStatementIsKeptAsWritten(real_run.RealRun):
         self.assertEqual((got["statement_state"], got["claim"]), ("wrong_shape", "none"))
 
 
-# argv 1 is the statement location, argv 2 a file that is not a statement; argv 3 the row's line.
-LEAVES_WHAT_IS_NOT_A_FILE = """
-import os, sys
-location, given = sys.argv[1], sys.argv[2]
-exec(sys.argv[3])
+# argv 1 is a file that is not a statement; argv 2 the row's line, which sees `location` (the path
+# the notice gave) and `given`.
+LEAVES_WHAT_IS_NOT_A_FILE = (
+    FINDS_ITS_PATH
+    + """
+import os
+location, given = inner, sys.argv[1]
+exec(sys.argv[2])
 """
+)
 
 
 class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
@@ -147,7 +230,7 @@ class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
                 with open(given, "wb") as f:
                     f.write(b"-----BEGIN PRIVATE KEY-----\n")
                 script = self.script(f"leaves-{index}.py", LEAVES_WHAT_IS_NOT_A_FILE)
-                doc = self.document(script, [location, given, row["leaves"]], request_id=request_id)
+                doc = self.document(script, [given, row["leaves"]], request_id=request_id)
                 self.expecting_a_statement(doc, location)
                 # `communicate` has a limit, so a run that waits on the thing fails, not hangs.
                 code, lines, err = self.run_to_the_end(doc)
@@ -165,6 +248,7 @@ class WhatIsNotARegularFileIsNotAStatement(real_run.RealRun):
                 self.assertEqual(
                     [n for n in os.listdir(self.records) if n.endswith(".statement.kept")], []
                 )
+                self.assertFalse(os.path.lexists(doc["statement_location"]))
                 self.assertEqual([u for u in self.units_left() if request_id in u], [])
 
 
