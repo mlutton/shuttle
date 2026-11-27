@@ -613,9 +613,8 @@ def standard_settings(raw: Mapping[str, Any]) -> tuple[bool | None, bool | None]
 def copy_reply_to_statement(
     arrives: str, location: str | None, location_taken: bool, reply_given: bool
 ) -> bool:
-    """Whether the tool's final message is to be copied to the statement location: only for a
-    tool whose statement is its final message, when it gave one, the kind has a location, and
-    nothing is there yet (a file the executor left itself is never replaced)."""
+    """Whether the tool's final message is to be copied to the statement location; a file the
+    executor left itself is never replaced."""
     return arrives == "reply" and reply_given and location is not None and not location_taken
 
 

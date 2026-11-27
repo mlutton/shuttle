@@ -93,7 +93,7 @@ class LaunchSpec(TypedDict):
 
 
 class DriverFacts(TypedDict):
-    """What the shell found out for a driver's check; the driver decides from these alone."""
+    """What the shell found out for a driver's check; the driver's check reads these with the settings."""
 
     tool_found: bool
     login_found: bool  # whether the name `login_path` gave is there; the login is never opened
@@ -123,7 +123,7 @@ Line = tuple[bytes, bool]
 
 
 class SavedOutput(TypedDict):
-    """What the tool left, each a single pass over its lines, or None when it could not be opened."""
+    """What the tool left, each a single pass over its lines, or None when it is not available."""
 
     events: Iterable[Line] | None
     last_message: Iterable[Line] | None

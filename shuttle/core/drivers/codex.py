@@ -128,16 +128,13 @@ def check(settings: Settings, facts: DriverFacts) -> tuple[str, str] | None:
 
 
 def _keep(name: str) -> SetupRequest:
-    """A request that only makes the folder above `name`, by writing an empty file in it."""
+    """A request that only makes the folder `name`, by writing an empty file in it."""
     return {"action": "write", "name": f"{name}/keep.txt", "text": ""}
 
 
 def setup_requests(settings: Settings, environment: Mapping[str, str]) -> list[SetupRequest]:
-    """A tool home inside the run area holding the settings file (copied, when there is one) and
-    the login (shared by a link, never copied or opened), folders for temporary files, caches
-    and saved output, and the variables that point the tool at them. Nothing else of the
-    caller's tool home is taken: its history, sessions and caches are left behind because they
-    are never named."""
+    """A tool home inside the run area that names only what the tool needs of the caller's: its
+    history, sessions and caches are left behind because they are never named."""
     home = _tool_home(environment)
     if home is None:
         return []
@@ -171,8 +168,8 @@ def launch(settings: Settings, context: LaunchContext) -> LaunchSpec:
     Changes to the place allowed is the tool's workspace-write sandbox, not allowed its read-only
     one; the sandbox is always on. The network is a setting of the workspace-write sandbox only,
     so network on with changes not allowed is refused by `check` (and the launch is never asked
-    for it); with changes allowed the network is that setting, true or false. To be confirmed on
-    the first real run.
+    for it); with changes allowed the network is that setting, true or false. That the read-only
+    sandbox has no network setting is not yet confirmed by a real run.
     """
     files = output_files(context["run_area"])
     argv = [PROGRAM, "exec", "-C", context["place"], "-m", settings["model"]]
@@ -227,7 +224,7 @@ class _Events:
         self.counts: dict[str, int | None] = {name: 0 for name in _COUNTS}
         self.started = False
         self.thread_id: str | None = None
-        self.lost = False  # a cut line that may have held a count or the thread id
+        self.lost = False  # a cut line that may have held something the driver reads
 
     def add(self, line: bytes, cut: bool) -> None:
         kind = _kind_of_cut(line) if cut else None
@@ -253,8 +250,7 @@ class _Events:
                 self.counts[name] = None if added is None or had is None else had + added
 
     def tokens(self) -> dict[str, Pair]:
-        """Each count: "none" when no turn finished, "cannot tell" when one was lost or gave no
-        number for it, else the sum over the finished turns. A count is never made up as zero."""
+        """A count is a value only when every finished turn gave it; it is never made up as zero."""
         if self.lost:
             return {name: pairs.cannot_tell() for name in _COUNTS}
         if self.turns == 0:
@@ -290,7 +286,7 @@ _RECORD_KINDS = ("session_meta", "turn_context", "token_count")
 
 def _fold_record(lines: Iterable[Line] | None) -> tuple[dict[str, dict[str, Any]], set[str]] | None:
     """The payload of the last record of each kind that is read, and the kinds a cut line may
-    have held (a cut line of an unknown type, or one that wraps its type in a payload)."""
+    have held: a field the driver reads that such a line may have held is "cannot tell"."""
     if lines is None:
         return None
     found: dict[str, dict[str, Any]] = {}
@@ -369,9 +365,7 @@ def _read_last_message(lines: Iterable[Line] | None) -> tuple[bool, Pair]:
 
 def observe(settings: Settings, saved: SavedOutput) -> Observed:
     """The driver group from the saved event stream, last message and session record, each read
-    once, a line at a time. A file that could not be opened, or a field it lacks (a count that is
-    not a number, a start with no id), is "cannot tell"; "none" is for a stream that ran and holds
-    no finished turn or no start at all.
+    once, a line at a time. A field the output lacks reads "cannot tell"; it is never invented.
 
     Time is not here: the tool writes none, and the run's own clock measures it.
     """

@@ -1,16 +1,15 @@
 """A tool that prints a large event stream is handled in bounded memory, through the real command.
 
-The program that stands in for the tool is written and run by the harness's one helper for that
-(`run_a_stand_in_tool`), which gives the command a PATH holding the stand-in's folder and the
-system's two, and fails before starting anything if the program would resolve anywhere else, so no
-real tool can be found, let alone started. The login and settings file it is given are made-up
+The program that stands in for the tool is written and run by `run_a_stand_in_tool`
+(tests/rehearsal/real_run.py), whose docstring holds the guard. The login and settings file it is given are made-up
 text. The stream is hand-made in the shape of the tool's own, with made-up counts: many small
 events, one line longer than any line is read, and a last turn that gives the usage.
 
 The harness holds the command and everything it starts to its file-size and address-space limits
 (tests/rehearsal/real_run.py), so a regression is a failed assertion in seconds. The check that
 nothing grows with the stream is the peak size of the processes this test waited for: a command
-that read the whole stream into memory, a dictionary per line, passes 100 MB on the stream below.
+that read the whole stream into memory, a dictionary per line, passes `PEAK_KILOBYTES` on the
+stream below.
 """
 
 import importlib
@@ -24,6 +23,7 @@ real_run = importlib.import_module("rehearsal.real_run")
 
 SMALL_EVENTS = 120_000
 ONE_LONG_LINE = 2 << 20  # longer than the longest line the command reads
+PEAK_KILOBYTES = 100 * 1024  # the most the command and what it starts may peak at
 
 STAND_IN = """
 import sys
@@ -44,7 +44,7 @@ class AToolThatPrintsALargeStream(real_run.RealRun):
     def setUp(self):
         super().setUp()
         self.home = os.path.join(self.root, "home")
-        # The driver of the one tool that is a program of its own; the stand-in is the tool's.
+        # The stand-in is the tool's.
         self.driver = real_run.tool_driver_names()[0]
         self.stand_in = STAND_IN.format(small=SMALL_EVENTS, long=ONE_LONG_LINE)
 
@@ -78,7 +78,7 @@ class AToolThatPrintsALargeStream(real_run.RealRun):
         self.assertEqual(group["activity"], SMALL_EVENTS + 1)  # the long line is counted, not held
         self.assertEqual(group["session_id"], "thread-big")
         peak_kilobytes = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-        self.assertLess(peak_kilobytes, 100 * 1024)
+        self.assertLess(peak_kilobytes, PEAK_KILOBYTES)
 
     def test_a_program_that_would_resolve_outside_the_tests_stand_in_is_refused_and_nothing_starts(
         self,

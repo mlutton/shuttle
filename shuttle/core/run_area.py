@@ -6,7 +6,7 @@ operations. Nothing here touches the world.
 
 What an action means is one block (a subclass of `_Action`: its fields' shape check and the
 steps it becomes), found by name in `ACTIONS`. The rules that hold between requests are in
-`plan`, which calls the blocks and knows them only by their role.
+`plan`, which calls the blocks.
 
 Why the refusals are what they are: a name is plain and relative so nothing a request names can
 be outside the area; a source is only handed on, never split or quoted; a shared path is linked,
@@ -314,11 +314,7 @@ def _one(
 
 
 def plan(area: str, requests: Sequence[SetupRequest]) -> SetupPlan:
-    """The plan for `requests` in the run area at `area`, or the problem that refuses them all.
-
-    A request is checked against those before it; the leave-outs apply to every copy, wherever
-    in the list they stand.
-    """
+    """The plan for `requests` in the run area at `area`, or the problem that refuses them all."""
     for index, request in enumerate(requests):
         problem = _shape_problem(index, request)
         if problem:

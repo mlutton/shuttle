@@ -52,7 +52,7 @@ def read(path: str) -> bytes:
 def _lines(source: BinaryIO, limit: int) -> Iterator[tuple[bytes, bool]]:
     with source:
         while True:
-            chunk = source.readline(limit + 1)  # never more than one line's limit in hand
+            chunk = source.readline(limit + 1)  # memory is bounded by the limit, not by the file
             if not chunk:
                 return
             if len(chunk) <= limit or chunk.endswith(b"\n"):

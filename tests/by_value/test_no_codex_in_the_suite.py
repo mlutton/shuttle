@@ -8,10 +8,8 @@ one-off cases." A real Codex run is done once, by hand, on purpose. So:
   program: a string that is, or ends a path with, the word followed by nothing or a space;
 - no file under checks/ that is not Python names it at all, as a word.
 
-The one way a test runs a driver's tool is the harness helper `run_a_stand_in_tool`
-(tests/rehearsal/real_run.py): it takes the program's name from the driver, so the test never
-holds it, and before starting anything it fails the test unless that name resolves, on the PATH
-the command will run with, to the stand-in it just wrote in the test's own folder.
+A test runs a driver's tool only through `run_a_stand_in_tool` (tests/rehearsal/real_run.py), whose
+docstring holds the guard.
 
 A by-value test never starts a process (it is given the simulated world), so it may hold the word as
 data: the driver's launch command is a list of text it compares. These rules read source text
