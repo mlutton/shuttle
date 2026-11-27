@@ -485,9 +485,7 @@ class BoundaryOperations(NamedTuple):
         [str], None
     ]  # stop the unit and everything in it; OSError when it cannot be asked
     forget: Callable[[str], None]  # clear a failed unit's record; OSError when it cannot be asked
-    resolve: Callable[
-        [str], str
-    ]  # a path made absolute with links resolved, as the boundary sees it
+    resolve: Callable[[str], str]  # a path made absolute with links resolved, as the box binds it
 
 
 class ClockOperations(NamedTuple):

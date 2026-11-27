@@ -62,7 +62,7 @@ def login_path(environment: Mapping[str, str]) -> str | None:
 
 
 def check(settings: Settings, facts: DriverFacts) -> tuple[str, str] | None:
-    # The boundary itself enforces neither setting yet, and this driver has no sandbox of its own
+    # The box enforces neither setting yet (the network stays shared; the place stays writable), and this driver has no sandbox of its own
     # (as the Codex driver's tool has), so a restriction asked for would be silently unhonoured:
     # refuse it instead.
     for asked, what in (

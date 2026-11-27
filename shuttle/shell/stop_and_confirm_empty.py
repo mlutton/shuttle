@@ -1,6 +1,6 @@
-"""Step 9, stop everything and confirm the boundary is empty, and read why it ended.
+"""Step 9, stop everything and confirm the scope is empty, and read why it ended.
 
-The boundary is stopped by name whatever ended the wait; stopping what is already gone does
+The scope is stopped by name whatever ended the wait; stopping what is already gone does
 nothing. Empty is seen from the scope's own state, not assumed. The scope's reason for ending
 refines the cause of the wait: the limit is a time limit only when the scope says it timed out.
 """

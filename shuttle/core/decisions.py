@@ -410,7 +410,7 @@ def _text(value: object) -> bool:
 
 
 def _usable_time_limit(value: object) -> bool:
-    """A number the boundary's own timer can take (shuttle.core.boundary)."""
+    """A number the scope's own timer can take (shuttle.core.boundary)."""
     return boundary.usable_time_limit(value)
 
 
