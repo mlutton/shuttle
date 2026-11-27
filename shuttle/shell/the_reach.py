@@ -21,6 +21,17 @@ def resolver_file(world: Operations) -> str | None:
     return None
 
 
+def account_folders(world: Operations) -> tuple[str, str | None]:
+    """The user's runtime folder (the box hides it, with the systemd and D-Bus sockets in it)
+    and home folder, resolved, as the system gives them for this user. Never from the caller's
+    environment: a caller that misnames a variable must not be able to switch a refusal off."""
+    home = world.identity.home_folder()
+    return (
+        world.boundary.resolve(world.identity.runtime_folder()),
+        world.boundary.resolve(home) if home else None,
+    )
+
+
 def shown(world: Operations, raw: Mapping[str, Any]) -> boundary.Shown | None:
     """The paths the document's reach shows, each resolved as the box binds it; None when the
     document names no place (the input check refuses it)."""

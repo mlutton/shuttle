@@ -48,10 +48,21 @@ def gather(
         "network": network,
         "changes_allowed": changes,
     }
-    program: boundary.ProgramFacts = {"found_at": found, "resolves_to": None, "shown": None}
+    program: boundary.ProgramFacts = {
+        "found_at": found,
+        "folder_leads_to": None,
+        "resolves_to": None,
+        "shown": None,
+        "records": None,
+        "runtime": None,
+        "home": None,
+    }
     if found is not None and inputs_accepted:
+        program["folder_leads_to"] = world.boundary.resolve(boundary.folder_of(found))
         program["resolves_to"] = world.boundary.resolve(found)
         program["shown"] = the_reach.shown(world, raw)
+        program["records"] = world.boundary.resolve(raw["records_location"])
+        program["runtime"], program["home"] = the_reach.account_folders(world)
     return driver_facts, program
 
 

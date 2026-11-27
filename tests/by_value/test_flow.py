@@ -204,10 +204,22 @@ class WhatIsPrinted(unittest.TestCase):
 TOOL = {"name": "command", "settings": {"command": "tool", "arguments": []}}
 
 
-NOT_FOUND = {"found_at": None, "resolves_to": None, "shown": None}
+NOT_FOUND = {
+    "found_at": None,
+    "folder_leads_to": None,
+    "resolves_to": None,
+    "shown": None,
+    "records": None,
+    "runtime": None,
+    "home": None,
+}
 IN_USR = {
     "found_at": "/usr/bin/tool",
+    "folder_leads_to": "/usr/bin",
     "resolves_to": "/usr/bin/tool",
+    "records": "/records",
+    "runtime": None,
+    "home": None,
     "shown": {
         "place": "/p",
         "references": [],

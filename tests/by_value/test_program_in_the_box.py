@@ -12,7 +12,7 @@ import os
 import sys
 import unittest
 
-from shuttle.core import boundary, decisions, fixed
+from shuttle.core import boundary, decisions, fixed, refusals
 from shuttle.shell import check_form
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,8 +27,20 @@ SHOWN: boundary.Shown = {
 }
 
 
-def facts(found_at, resolves_to=None, shown=SHOWN):
-    return {"found_at": found_at, "resolves_to": resolves_to or found_at, "shown": shown}
+RECORDS, RUNTIME, HOME = "/records", "/run/user/1000", "/home/someone"
+
+
+def facts(found_at, resolves_to=None, shown=SHOWN, folder_leads_to=None):
+    """The facts for a program found at `found_at`; the folder is a plain one unless said."""
+    return {
+        "found_at": found_at,
+        "folder_leads_to": folder_leads_to or boundary.folder_of(found_at),
+        "resolves_to": resolves_to or found_at,
+        "shown": shown,
+        "records": RECORDS,
+        "runtime": RUNTIME,
+        "home": HOME,
+    }
 
 
 class WhereTheProgramIs(unittest.TestCase):
@@ -77,8 +89,55 @@ class WhereTheProgramIs(unittest.TestCase):
     def test_a_link_between_two_shown_places_is_accepted(self):
         self.assertIsNone(boundary.hidden_program(facts("/usr/bin/tool", "/opt/tool/real")))
 
+    def test_a_spelling_with_extra_leading_slashes_gets_the_answer_of_the_plain_one(self):
+        self.assertIsNone(boundary.hidden_program(facts("//bin/sh", "/usr/bin/dash")))
+        self.assertIsNone(boundary.hidden_program(facts("//usr//bin/env")))
+        self.assertIsNone(boundary.hidden_program(facts("///work/place/tool")))
+        reason, _ = boundary.hidden_program(facts("//opt/other/tool"))
+        self.assertEqual(reason, "program_not_visible")
+
+    def test_a_folder_the_listing_refuses_is_never_told_to_be_listed(self):
+        for folder in (RECORDS, f"{RECORDS}/sub", HOME, "/tmp", RUNTIME, "/", "/dev", "/proc"):
+            with self.subTest(folder):
+                _, line = boundary.hidden_program(facts(f"{folder.rstrip('/')}/tool"))
+                self.assertIn("cannot be listed", line)
+                self.assertNotIn("list ", line.replace("cannot be listed", ""))
+                self.assertIsNotNone(refusals.listing_problem(folder, RECORDS, RUNTIME, HOME))
+
+    def test_the_line_says_to_list_exactly_the_folders_the_listing_accepts(self):
+        for path in (
+            "/home/someone/.local/bin/tool",
+            "/opt/other/tool",
+            "/tmp/fresh/tool",
+            "/work/place-two/tool",
+            f"{HOME}/tool",
+            f"{RECORDS}/tool",
+            "/tmp/tool",
+        ):
+            with self.subTest(path):
+                _, line = boundary.hidden_program(facts(path))
+                folder = boundary.folder_of(path)
+                refused = refusals.listing_problem(folder, RECORDS, RUNTIME, HOME) is not None
+                self.assertEqual("cannot be listed" in line, refused)
+                self.assertEqual(f"list {folder!r} under reach.visible" in line, not refused)
+
+    def test_a_path_through_a_link_in_its_folder_is_refused_and_the_line_names_the_real_path(self):
+        link = {"folder_leads_to": "/opt/inst/1.2/bin", "resolves_to": "/opt/inst/1.2/bin/tool"}
+        found = "/opt/inst/latest/bin/tool"
+        listed = {**SHOWN, "visible": ["/opt/inst/1.2/bin"]}
+        reason, line = boundary.hidden_program({**facts(found, shown=listed), **link})
+        self.assertEqual(reason, "program_not_visible")
+        self.assertIn(f"name {link['resolves_to']!r} as the command", line)
+        self.assertNotIn("list ", line)  # the real folder is listed already: no loop
+        _, line = boundary.hidden_program({**facts(found), **link})
+        self.assertIn(f"name {link['resolves_to']!r} as the command", line)
+        self.assertIn("list '/opt/inst/1.2/bin' under reach.visible", line)
+        # what the line says to do, done: the real path in a listed folder is accepted
+        done = facts(link["resolves_to"], shown=listed)
+        self.assertIsNone(boundary.hidden_program(done))
+
     def test_a_program_that_was_not_found_is_not_this_checks_to_refuse(self):
-        nothing = {"found_at": None, "resolves_to": None, "shown": SHOWN}
+        nothing = {**facts("/x"), "found_at": None, "resolves_to": None, "folder_leads_to": None}
         self.assertIsNone(boundary.hidden_program(nothing))
         self.assertIsNone(boundary.hidden_program(facts("/opt/other/tool", shown=None)))
 
@@ -145,7 +204,7 @@ class ForEveryDriver(unittest.TestCase):
                 )
 
     def test_a_program_not_found_is_still_not_installed_for_each_driver(self):
-        nothing = {"found_at": None, "resolves_to": None, "shown": None}
+        nothing = {**facts("/x"), "found_at": None, "resolves_to": None, "shown": None}
         for executor in (self.COMMAND, self.CODEX_TOOL):
             with self.subTest(executor["name"]):
                 found = {**self.FOUND, "tool_found": False}

@@ -258,6 +258,16 @@ def _visible_problem(
     return None
 
 
+def listing_problem(
+    folder: str, records: str | None, runtime: str | None, home: str | None
+) -> Found | None:
+    """The refusal a listing of `folder` (a resolved folder that is there) would get from the
+    reach check for what it touches, or None: the same tests, so a line that tells a caller to list
+    a folder and the check cannot disagree."""
+    look: VisibleLook = {"exists": True, "folder": True, "resolved": folder}
+    return _visible_problem(folder, look, records, runtime, home)
+
+
 def check_reach(
     reach: object,
     looked: Mapping[str, VisibleLook],

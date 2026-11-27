@@ -115,13 +115,19 @@ class Shown(TypedDict):
 
 class ProgramFacts(TypedDict):
     """What the shell found of the program a run needs, for `hidden_program`. `found_at` is where
-    the caller's machine finds it (the absolute path of the name, a link not followed) and
-    `resolves_to` the file that path leads to; both None when it is not found. `shown` is None
-    when the document names no place to build it from; that document is refused before a launch."""
+    the caller's machine finds it (the absolute path of the name, a link not followed),
+    `folder_leads_to` the folder of that path with links resolved and `resolves_to` the file the
+    path leads to; all None when it is not found. `shown` is None when the document names no place
+    to build it from (that document is refused before a launch). `records`, `runtime` and `home`
+    are the resolved folders a listing may not touch (see `refusals.listing_problem`)."""
 
     found_at: str | None
+    folder_leads_to: str | None
     resolves_to: str | None
     shown: Shown | None
+    records: str | None
+    runtime: str | None
+    home: str | None
 
 
 class Reach(Shown):
@@ -224,8 +230,14 @@ def shown_paths(shown: Shown) -> list[str]:
     ]
 
 
-def _folder_of(path: str) -> str:
+def folder_of(path: str) -> str:
     return path.rsplit("/", 1)[0] or "/"
+
+
+def _same_file_spelling(path: str) -> str:
+    """A path without its extra leading slashes: the kernel reads `//bin` as `/bin`, and the box
+    binds `/bin`, while text comparison would not."""
+    return "/" + path.lstrip("/") if path.startswith("/") else path
 
 
 def hidden_program(program: ProgramFacts) -> tuple[str, str] | None:
@@ -233,32 +245,54 @@ def hidden_program(program: ProgramFacts) -> tuple[str, str] | None:
     found, else None; a program not found is not this check's to refuse.
 
     The box shows the file only when it shows both the path the machine found it at and the file
-    that path leads to: a link in a hidden folder is not there, and a link in a shown folder that
-    leads into a hidden one leads nowhere. The first path that is not shown names its folder (for
-    a link, the folder of the file it leads to). Only that file is looked at, never an interpreter
-    a script names or a library a program loads.
+    that path leads to: a link in a hidden folder is not there, a link in a shown folder that
+    leads into a hidden one leads nowhere, and a path that goes through a link in its folder is not
+    a path the box has (it binds the real folder). Only that file is looked at, never an
+    interpreter a script names or a library a program loads. A line never tells the caller to list
+    a folder the reach check would refuse, nor to do what leaves the caller with the same refusal.
     """
     found, leads_to, shown = program["found_at"], program["resolves_to"], program["shown"]
-    if found is None or leads_to is None or shown is None:
+    folder_real = program["folder_leads_to"]
+    if found is None or leads_to is None or shown is None or folder_real is None:
         return None
+    found, leads_to = _same_file_spelling(found), _same_file_spelling(leads_to)
     showing = shown_paths(shown)
 
     def is_shown(path: str) -> bool:
         return any(_inside(path, holder) for holder in showing)
 
-    if not is_shown(found):
-        folder = _folder_of(found)
-        where = f"the program {found!r} is in the folder {folder!r}"
+    def make_visible(folder: str) -> str:
+        if refusals.listing_problem(
+            folder, program["records"], program["runtime"], program["home"]
+        ):
+            return (
+                f"the folder {folder!r} cannot be listed under reach.visible (it is or holds "
+                "what the box keeps hidden), so the program has to be in another folder"
+            )
+        return f"list {folder!r} under reach.visible to make it visible"
+
+    folder = folder_of(found)
+    if not is_shown(found) and folder_real == folder:
+        advice = f"the program {found!r} is in the folder {folder!r}, which the box does not show; "
+        line = advice + make_visible(folder)
+    elif not is_shown(found):
+        real_folder = folder_of(leads_to)
+        needs = "" if is_shown(leads_to) else f"; {make_visible(real_folder)}"
+        line = (
+            f"the program {found!r} is found through a link in its folder, and the box has no "
+            f"such path; it has the file only at its real path {leads_to!r}; name {leads_to!r} "
+            f"as the command (or, for a command found through PATH, put {real_folder!r} in "
+            f"PATH in place of {folder!r}){needs}"
+        )
     elif not is_shown(leads_to):
-        folder = _folder_of(leads_to)
-        where = f"the program {found!r} is a link to {leads_to!r}, in the folder {folder!r}"
+        real_folder = folder_of(leads_to)
+        line = (
+            f"the program {found!r} is a link to {leads_to!r}, in the folder {real_folder!r}, "
+            f"which the box does not show; {make_visible(real_folder)}"
+        )
     else:
         return None
-    return (
-        "program_not_visible",
-        f"{where}, which the box does not show to the executor; list {folder!r} under "
-        "reach.visible to make it visible",
-    )
+    return "program_not_visible", line
 
 
 def _resolver_bind(reach: Reach) -> list[str]:
