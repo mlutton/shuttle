@@ -25,6 +25,7 @@ GRACE_SECONDS = 3
 
 SCOPE_PREFIX = "shuttle-run-"
 GATE_SCOPE_PREFIX = "shuttle-gate-"
+FREEZE_SCOPE_PREFIX = "shuttle-freeze-"
 PROPERTIES = ("LoadState", "ActiveState", "Result")
 
 # The variables the shell needs to reach the user's systemd. The executor does not get them
@@ -86,6 +87,7 @@ def launch_argv(
     environment_names: Sequence[str],
     protected_paths: Sequence[str],
     report_fd: int,
+    working_directory: str | None = None,
 ) -> list[str]:
     """The command that starts `argv` in the boundary.
 
@@ -94,6 +96,7 @@ def launch_argv(
     it. The variables the shell needed to reach systemd are taken out of the executor's
     environment unless the caller named them. Bubblewrap's status report goes to the descriptor
     `report_fd`, which says whether the executor was ever started (see `executor_started`).
+    The executor starts in `working_directory` when one is given.
     """
     left_out = [v for v in BUS_VARIABLES if v not in environment_names]
     return [
@@ -123,6 +126,7 @@ def launch_argv(
                 "--proc",
                 "/proc",
                 *[part for variable in left_out for part in ("--unsetenv", variable)],
+                *(["--chdir", working_directory] if working_directory is not None else []),
                 "--",
                 *argv,
             ]
@@ -222,9 +226,14 @@ def gate_scope_name(request_id: str, index: int) -> str:
     return f"{GATE_SCOPE_PREFIX}{request_id}-{index}"
 
 
-def gate_argv(name: str, limit_seconds: float, argv: Sequence[str], report_fd: int) -> list[str]:
-    """The command that starts the gate `argv` in a scope of its own with its limit on the scope
-    and the grace between asking and killing; `report_fd` is where it says it started."""
+def freeze_scope_name(request_id: str) -> str:
+    """The scope the closing freeze runs in: the request id makes it the run's own."""
+    return FREEZE_SCOPE_PREFIX + request_id
+
+
+def scoped_argv(name: str, limit_seconds: float, argv: Sequence[str]) -> list[str]:
+    """The command that starts `argv` in a scope of its own, named `name`, with the limit as the
+    scope's maximum runtime and the grace between asking and killing."""
     return [
         "systemd-run",
         "--user",
@@ -236,8 +245,14 @@ def gate_argv(name: str, limit_seconds: float, argv: Sequence[str], report_fd: i
         "-p",
         f"TimeoutStopSec={GRACE_SECONDS}s",
         "--",
-        *for_the_scope_tool(["sh", "-c", GATE_SCRIPT, "sh", str(report_fd), *argv]),
+        *for_the_scope_tool(argv),
     ]
+
+
+def gate_argv(name: str, limit_seconds: float, argv: Sequence[str], report_fd: int) -> list[str]:
+    """The command that starts the gate `argv` in a scope of its own with its limit on the scope
+    and the grace between asking and killing; `report_fd` is where it says it started."""
+    return scoped_argv(name, limit_seconds, ["sh", "-c", GATE_SCRIPT, "sh", str(report_fd), *argv])
 
 
 def gate_started(report: str) -> bool:

@@ -99,6 +99,11 @@ class StepResult(TypedDict, total=False):
     stand_in: str
     process: Any  # the handle the process operations made; nothing else looks inside
     ok: bool
+    fingerprint: str  # a freeze: the commit that stands for the place's files
+    files_added: int
+    files_changed: int
+    files_deleted: int
+    problem: str  # a real step that failed says what was not done and why
     everything_stopped: bool
     stop_reason: str
     stop_asker: str
@@ -377,6 +382,39 @@ class IdentityOperations(NamedTuple):
     process_number: Callable[[], int]  # this process's number, as the system gives it
 
 
+class PlaceFacts(TypedDict):
+    """What looking at a place found. A place that is not there, or not a git checkout, has no
+    commit, nothing unclean and nothing nested."""
+
+    exists: bool  # a folder is there
+    is_checkout: bool  # the folder is the top of a git working copy
+    head: str | None  # the commit the checkout is at; None when it has none
+    unclean: list[str]  # names git reports as changed, or new and not ignored
+    nested: list[str]  # folders, below the top, that hold a git repository of their own
+    filtered: list[str]  # tracked paths with a `filter` attribute; when any, git looked no further
+
+
+class FreezeAnswer(NamedTuple):
+    """How the freeze's command ended: its exit status (negative: ended by that signal) and what
+    it wrote to standard output."""
+
+    status: int
+    output: bytes
+
+
+class GitOperations(NamedTuple):
+    """The place's repository. Every call is made with exactly the environment it is given (so
+    nothing of the caller's git configuration is read), reads its input from nowhere and never
+    asks a question."""
+
+    look_at_place: Callable[
+        [str, Mapping[str, str]], PlaceFacts
+    ]  # (place, environment); looks only, changes nothing there, not even the index; OSError when git cannot answer
+    freeze: Callable[
+        [Sequence[str], Mapping[str, str]], FreezeAnswer
+    ]  # (command, environment): run the freeze's command to its end; OSError when it cannot be started
+
+
 class Operations(NamedTuple):
     """The world, as one set of operations."""
 
@@ -387,3 +425,4 @@ class Operations(NamedTuple):
     signals: SignalOperations
     environment: EnvironmentOperations
     identity: IdentityOperations
+    git: GitOperations

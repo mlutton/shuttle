@@ -15,12 +15,15 @@ import sys
 import tempfile
 import unittest
 
+from shuttle.core import boundary, place
 from shuttle.world import real
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, TESTS)
 
 contract = importlib.import_module("rehearsal.contract")
+real_place = importlib.import_module("rehearsal.real_place")
+the_boundary = importlib.import_module("rehearsal.the_boundary")
 
 REPORTS_STREAMS = (
     "import os, sys\n"
@@ -114,6 +117,76 @@ class RealHarness:
 
     def environment(self):
         return {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+
+    # ------------------------------------------------------------ a git checkout, for real
+
+    def checkout(self, files=None, folder_name=None):
+        folder = self.folder()
+        where = os.path.join(folder, folder_name) if folder_name else folder
+        return where, real_place.make_checkout(where, files or {"README": "x\n"})
+
+    def edit(self, where, name, text):
+        real_place.write(where, name, text)
+
+    def remove(self, where, name):
+        os.remove(os.path.join(where, name))
+
+    def can_hold(self, where, name):
+        try:
+            self.edit(where, name, "")
+            self.remove(where, name)
+        except (OSError, ValueError):
+            return False
+        return True
+
+    def nested_repository(self, where, name):
+        folder = os.path.join(where, name)
+        os.makedirs(folder, exist_ok=True)
+        real_place.git(folder, "init", "-q")
+
+    def filter_attribute(self, where, name):
+        real_place.write(where, ".gitattributes", f"{name} filter=anything\n")
+        real_place.commit_everything(where)
+
+    def commit_everything(self, where):
+        return real_place.commit_everything(where)
+
+    def everything_in(self, where):
+        found = {}
+        for folder, _, names in os.walk(where):
+            for name in names:
+                path = os.path.join(folder, name)
+                with open(path, "rb") as f:
+                    found[os.path.relpath(path, where)] = f.read()
+        return found
+
+    def needs_the_freeze(self):
+        the_boundary.require(self.case)  # the freeze runs in a scope of its own
+
+    def freeze_environment(self):
+        environment = place.git_environment(os.environ["PATH"])
+        for name in boundary.BUS_VARIABLES:
+            if name in os.environ:
+                environment[name] = os.environ[name]
+        return environment
+
+    def references(self, where):
+        listing = real_place.git(
+            where, "for-each-ref", "refs/shuttle", "--format=%(refname) %(objectname)"
+        )
+        return [tuple(line.split(" ")) for line in listing.splitlines()]
+
+    def parent_of(self, where, commit):
+        return real_place.git(where, "rev-parse", f"{commit}^")
+
+    def files_of(self, where, commit):
+        done = subprocess.run(
+            ["git", "-C", where, "ls-tree", "-r", "--name-only", "-z", commit],
+            env=real_place.environment(),
+            capture_output=True,
+            check=True,
+        )
+        return [os.fsdecode(name) for name in done.stdout.split(b"\0") if name]
 
     def have_previous_handler(self, handler):
         for number in (getattr(signal, name) for name in contract.HANDLED_SIGNALS):

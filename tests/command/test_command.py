@@ -18,6 +18,7 @@ from shuttle.core import fixed
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 flat = importlib.import_module("rehearsal.receipts").flat
 the_boundary = importlib.import_module("rehearsal.the_boundary")
+real_place = importlib.import_module("rehearsal.real_place")
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,6 +39,8 @@ class CommandSeam(unittest.TestCase):
         self.root = self._tmp.name
         self.records = os.path.join(self.root, "records")
         os.mkdir(self.records)
+        self.place = os.path.join(self.root, "place")
+        real_place.make_checkout(self.place)
         self.script = os.path.join(self.root, "script.py")
         with open(self.script, "w") as f:
             f.write(ENDS_BY_ITSELF)
@@ -48,6 +51,7 @@ class CommandSeam(unittest.TestCase):
             "format_version": 1,
             "request_id": request_id,
             "records_location": self.records,
+            "place": self.place,
             "thread": "thread-1",
             "round": 1,
             "kind": "plain",
@@ -172,9 +176,6 @@ class CommandSeam(unittest.TestCase):
         self.run_command(self.document())
         receipt = self.read("req-1.outcome.json")["receipt"]
         for group, field in [
-            ("execution", "fingerprint_before"),
-            ("execution", "fingerprint_after"),
-            ("execution", "changed_nothing"),
             ("execution", "delivered"),
             ("execution", "teardown_failure"),
             ("execution", "peak_memory_bytes"),

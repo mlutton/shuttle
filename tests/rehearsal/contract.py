@@ -18,6 +18,7 @@ import os
 import re
 import sys
 
+from shuttle.core import boundary, place
 from shuttle.core.shapes import NotARegularFile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,12 +30,19 @@ NAMES = importlib.import_module("hostile.names_table").NAMES
 UNMODELLED = (
     "the environment a started child really sees",
     "what a started child really does beyond the behaviour declared for it",
+    "the git configuration, ignore rules, hooks and identity a real git would read or use "
+    "(the simulated freeze only counts files; the real half's own cases show the commit's "
+    "identity, that nothing of the caller's is read, and a file that cannot be read)",
 )
 
 HOLDABLE_NAMES = [row for row in NAMES if row["holdable"] and not row["path"]]
 HANDLED_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGALRM")
 TEXT = "line one\nline two \u00e9 \u2713\n"
 
+
+# A folder name with what a command line or a unit file treats specially: a dash, spaces, a
+# dollar, a braced name, a percent, a backslash and a newline.
+AWKWARD_FOLDER = "-p a$$b ${X} $HOME %h %n\\\nz"
 
 TRIES = 200
 TRY_SECONDS = 0.05
@@ -388,6 +396,192 @@ class ContractCases:
         process = self.start("exits_at_once")
         self.assertTrue(self.ended(process))
         self.assertEqual(self.world.processes.read_report(process), "")
+
+    # ------------------------------------------------------------------ git: looking
+
+    def look(self, where):
+        environment = place.git_environment(self.harness.environment()["PATH"])
+        return self.world.git.look_at_place(where, environment)
+
+    def test_a_folder_that_is_not_there_has_no_facts_to_find(self):
+        found = self.look(f"{self.harness.folder()}/absent")
+        self.assertEqual(
+            found,
+            {
+                "exists": False,
+                "is_checkout": False,
+                "head": None,
+                "unclean": [],
+                "nested": [],
+                "filtered": [],
+            },
+        )
+
+    def test_a_folder_that_is_not_a_checkout_exists_and_nothing_more(self):
+        found = self.look(self.harness.folder())
+        self.assertEqual(
+            found,
+            {
+                "exists": True,
+                "is_checkout": False,
+                "head": None,
+                "unclean": [],
+                "nested": [],
+                "filtered": [],
+            },
+        )
+
+    def test_a_folder_inside_a_checkout_is_not_a_checkout_of_its_own(self):
+        top, _ = self.harness.checkout({"inner/file": "x\n"})
+        found = self.look(f"{top}/inner")
+        self.assertEqual(
+            (found["exists"], found["is_checkout"], found["head"]), (True, False, None)
+        )
+
+    def test_a_clean_checkout_gives_its_commit_and_nothing_unclean_or_nested(self):
+        where, head = self.harness.checkout({"a": "1\n", "dir/b": "2\n"})
+        self.assertEqual(
+            self.look(where),
+            {
+                "exists": True,
+                "is_checkout": True,
+                "head": head,
+                "unclean": [],
+                "nested": [],
+                "filtered": [],
+            },
+        )
+
+    def test_a_new_a_changed_and_a_removed_file_are_each_unclean_and_named(self):
+        where, _ = self.harness.checkout({"kept": "1\n", "changed": "1\n", "gone": "1\n"})
+        self.harness.edit(where, "new", "n\n")
+        self.harness.edit(where, "changed", "2\n")
+        self.harness.remove(where, "gone")
+        self.assertEqual(sorted(self.look(where)["unclean"]), ["changed", "gone", "new"])
+
+    def test_every_name_the_filesystem_holds_comes_back_whole_as_unclean(self):
+        where, _ = self.harness.checkout({"seed": "x\n"})
+        names = [row["name"] for row in HOLDABLE_NAMES if self.harness.can_hold(where, row["name"])]
+        self.assertGreater(len(names), 20)
+        for name in names:
+            self.harness.edit(where, name, "n\n")
+        self.assertEqual(sorted(self.look(where)["unclean"]), sorted(names))
+
+    def test_a_checkout_whose_own_path_is_awkward_is_looked_at_whole(self):
+        where, head = self.harness.checkout({"a": "1\n"}, folder_name=AWKWARD_FOLDER)
+        found = self.look(where)
+        self.assertEqual((found["exists"], found["is_checkout"], found["head"]), (True, True, head))
+
+    def test_a_repository_inside_the_place_is_nested_and_is_not_entered(self):
+        where, _ = self.harness.checkout({"a": "1\n"})
+        self.harness.nested_repository(where, "deep/inner")
+        self.harness.nested_repository(where, "deep/inner/deeper")
+        found = self.look(where)
+        self.assertEqual(found["nested"], ["deep/inner"])
+
+    def test_a_tracked_file_with_a_filter_attribute_is_named_and_nothing_else_is_looked_at(self):
+        where, _ = self.harness.checkout({"a": "1\n", "data.big": "d\n"})
+        self.harness.filter_attribute(where, "data.big")
+        self.harness.edit(where, "new", "n\n")  # unclean, but not what is found
+        found = self.look(where)
+        self.assertEqual((found["filtered"], found["unclean"]), (["data.big"], []))
+
+    def test_looking_changes_nothing_in_the_checkout_not_even_its_index(self):
+        where, _ = self.harness.checkout({"a": "1\n", "b": "2\n"})
+        self.harness.edit(where, "a", "changed\n")  # git would like to refresh its index now
+        self.harness.edit(where, "new", "n\n")
+        before = self.harness.everything_in(where)
+        self.look(where)
+        self.look(where)
+        self.assertEqual(self.harness.everything_in(where), before)
+
+    # --------------------------------------------------------------- git: freezing
+
+    def freeze(self, where, opening, request_id="contract-1"):
+        harness = self.harness
+        command = place.freeze_argv(
+            boundary.freeze_scope_name(request_id), 60, where, opening, request_id
+        )
+        return self.world.git.freeze(command, harness.freeze_environment())
+
+    def frozen(self, where, opening):
+        """(commit, added, changed, deleted) the freeze printed, or the failure."""
+        answer = self.freeze(where, opening)
+        self.assertEqual(answer.status, 0, answer)
+        parsed = place.parse_freeze_output(answer.output)
+        self.assertIsNotNone(parsed, answer)
+        return parsed
+
+    def test_files_that_are_as_they_were_freeze_to_the_opening_commit_itself_and_make_no_reference(
+        self,
+    ):
+        self.harness.needs_the_freeze()
+        where, head = self.harness.checkout({"a": "1\n", "b": "2\n"})
+        self.assertEqual(self.frozen(where, head), (head, 0, 0, 0))
+        self.assertEqual(self.harness.references(where), [])
+
+    def test_a_new_a_changed_and_a_removed_file_are_counted_and_frozen_to_a_commit_on_a_reference_of_its_own(
+        self,
+    ):
+        self.harness.needs_the_freeze()
+        where, head = self.harness.checkout({"kept": "1\n", "changed": "1\n", "gone": "1\n"})
+        self.harness.edit(where, "new one", "n\n")
+        self.harness.edit(where, "new two", "n\n")
+        self.harness.edit(where, "changed", "2\n")
+        self.harness.remove(where, "gone")
+        commit, added, changed, deleted = self.frozen(where, head)
+        self.assertEqual((added, changed, deleted), (2, 1, 1))
+        self.assertNotEqual(commit, head)
+        self.assertEqual(
+            self.harness.references(where), [("refs/shuttle/freeze/contract-1", commit)]
+        )
+        self.assertEqual(self.harness.parent_of(where, commit), head)
+        self.assertEqual(
+            sorted(self.harness.files_of(where, commit)), ["changed", "kept", "new one", "new two"]
+        )
+
+    def test_the_same_files_freeze_to_the_same_commit_whatever_the_history_says(self):
+        self.harness.needs_the_freeze()
+        where, head = self.harness.checkout({"a": "1\n"})
+        self.harness.edit(where, "b", "2\n")
+        first = self.frozen(where, head)
+        self.harness.commit_everything(where)  # the places own history moves
+        again = self.frozen(where, head)
+        self.assertEqual(first, again)
+
+    def test_every_name_the_filesystem_holds_is_counted_once_whole_and_frozen(self):
+        self.harness.needs_the_freeze()
+        where, head = self.harness.checkout({"seed": "x\n"})
+        names = [row["name"] for row in HOLDABLE_NAMES if self.harness.can_hold(where, row["name"])]
+        for name in names:
+            self.harness.edit(where, name, "n\n")
+        commit, added, _, _ = self.frozen(where, head)
+        self.assertEqual(added, len(names))
+        self.assertEqual(sorted(self.harness.files_of(where, commit)), sorted([*names, "seed"]))
+
+    def test_a_freeze_of_a_place_that_is_not_a_checkout_or_not_there_fails(self):
+        self.harness.needs_the_freeze()
+        where, head = self.harness.checkout({"a": "1\n"})
+        for gone in (self.harness.folder(), f"{self.harness.folder()}/absent"):
+            with self.subTest(gone):
+                answer = self.freeze(gone, head)
+                self.assertNotEqual(answer.status, 0)
+                self.assertIsNone(place.parse_freeze_output(answer.output))
+
+    def test_a_freeze_with_an_opening_commit_the_place_does_not_have_fails(self):
+        self.harness.needs_the_freeze()
+        where, _ = self.harness.checkout({"a": "1\n"})
+        answer = self.freeze(where, "f" * 40)
+        self.assertNotEqual(answer.status, 0)
+        self.assertIsNone(place.parse_freeze_output(answer.output))
+
+    def test_a_freeze_whose_command_cannot_be_started_raises_os_error(self):
+        self.assertRaisesExactly(
+            FileNotFoundError,
+            self.world.git.freeze,
+            [f"{self.harness.folder()}/no-such-program"],
+            {},
+        )
 
     # ------------------------------------------------------------------ clock
 

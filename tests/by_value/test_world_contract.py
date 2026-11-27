@@ -8,6 +8,8 @@ import os
 import sys
 import unittest
 
+from shuttle.core import place
+
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, TESTS)
 
@@ -73,6 +75,49 @@ class SimulatedHarness:
 
     def environment(self):
         return {"PATH": "/bin"}
+
+    # ------------------------------------------------------- a git checkout, simulated
+
+    def checkout(self, files=None, folder_name=None):
+        folder = self.folder()
+        where = f"{folder}/{folder_name}" if folder_name else folder
+        return where, self.world.make_place(where, files or {"README": "x\n"})
+
+    def edit(self, where, name, text):
+        self.world.put_file(f"{where}/{name}", text)
+
+    def remove(self, where, name):
+        del self.world.files[f"{where}/{name}"]
+
+    def can_hold(self, where, name):
+        return True
+
+    def nested_repository(self, where, name):
+        self.world.places[where]["nested"].append(name)
+
+    def filter_attribute(self, where, name):
+        self.world.places[where]["filtered"].append(name)
+
+    def commit_everything(self, where):
+        return self.world.commit_everything(where)
+
+    def everything_in(self, where):
+        return {name: bytes(data) for name, data in self.world.files.items()}
+
+    def needs_the_freeze(self):
+        pass
+
+    def freeze_environment(self):
+        return place.git_environment("/bin")
+
+    def references(self, where):
+        return sorted(self.world.refs.items())
+
+    def parent_of(self, where, commit):
+        return self.world.commits[commit]["parent"]
+
+    def files_of(self, where, commit):
+        return list(self.world.commits[commit]["files"])
 
     def have_previous_handler(self, handler):
         self.world.have_previous_handler(handler)

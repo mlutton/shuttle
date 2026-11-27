@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 
+import rehearsal.real_place as real_place
 import rehearsal.the_boundary as the_boundary
 
 # The one place the limits of a real command live. A test whose input has no end (a device, a
@@ -38,7 +39,7 @@ class RealRun(unittest.TestCase):
         self.records = os.path.join(self.root, "records")
         self.place = os.path.join(self.root, "place")
         os.mkdir(self.records)
-        os.mkdir(self.place)
+        real_place.make_checkout(self.place)
 
     def script(self, name, text):
         path = os.path.join(self.root, name)
@@ -56,6 +57,7 @@ class RealRun(unittest.TestCase):
             "format_version": 1,
             "request_id": request_id,
             "records_location": self.records,
+            "place": self.place,
             "thread": "t",
             "round": 1,
             "kind": "plain",
@@ -77,17 +79,18 @@ class RealRun(unittest.TestCase):
         assert why, "a raised limit needs its reason"
         self.limits[which] = size
 
-    def start(self, doc, path_first=None):
+    def start(self, doc, path_first=None, variables=None):
         """The real command, started; the caller waits for it with `communicate`. With
-        `path_first`, that folder comes first on the command's PATH. The command and what it starts
-        run under `self.limits` (DEFAULT_LIMITS unless the test raised one)."""
+        `path_first`, that folder comes first on the command's PATH; `variables` are added to its
+        environment. The command and what it starts run under `self.limits` (DEFAULT_LIMITS unless the
+        test raised one)."""
         path = os.path.join(self.root, f"{doc['request_id']}.input.json")
         with open(path, "w") as f:
             json.dump(doc, f)
         proc = subprocess.Popen(
             [sys.executable, "-m", "shuttle", "run", path],
             cwd=REPO,
-            env=self.environment(path_first),
+            env={**self.environment(path_first), **(variables or {})},
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -108,12 +111,16 @@ class RealRun(unittest.TestCase):
         if proc.poll() is None:
             proc.kill()
             proc.communicate()
-        for name in (f"shuttle-run-{request_id}", f"shuttle-gate-{request_id}-0"):
+        for name in (
+            f"shuttle-run-{request_id}",
+            f"shuttle-gate-{request_id}-0",
+            f"shuttle-freeze-{request_id}",
+        ):
             subprocess.run(["systemctl", "--user", "stop", f"{name}.scope"], capture_output=True)
 
-    def run_to_the_end(self, doc, path_first=None):
+    def run_to_the_end(self, doc, path_first=None, variables=None):
         """Run the command to its end: (exit code, standard output lines, standard error)."""
-        proc = self.start(doc, path_first)
+        proc = self.start(doc, path_first, variables)
         stdout, stderr = proc.communicate(timeout=120)
         return proc.returncode, stdout.splitlines(), stderr
 

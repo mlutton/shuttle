@@ -11,6 +11,7 @@ from shuttle.world.boundary import BOUNDARY
 from shuttle.world.clock import CLOCK
 from shuttle.world.environment import ENVIRONMENT
 from shuttle.world.files import FILES
+from shuttle.world.git import GIT
 from shuttle.world.identity import IDENTITY
 from shuttle.world.processes import PROCESSES
 from shuttle.world.signals import SIGNALS
@@ -23,6 +24,7 @@ OPERATIONS = Operations(
     signals=SIGNALS,
     environment=ENVIRONMENT,
     identity=IDENTITY,
+    git=GIT,
 )
 
 

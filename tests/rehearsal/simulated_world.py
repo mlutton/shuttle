@@ -23,11 +23,14 @@ import os
 import signal
 
 from shuttle.core import boundary
+from shuttle.core import place as place_decisions
 from shuttle.core.shapes import (
     BoundaryOperations,
     ClockOperations,
     EnvironmentOperations,
     FileOperations,
+    FreezeAnswer,
+    GitOperations,
     IdentityOperations,
     NotARegularFile,
     Operations,
@@ -85,6 +88,10 @@ class SimulatedWorld:
         self._reports = 0
         self._handlers = []
         self._ids = 0
+        self.the_freeze = None  # None, "fails" (git ends with an error) or "times_out" (the limit)
+        self.refs = {}  # reference -> commit, as the freeze made them
+        self.commits = {}  # commit -> {"files": name to bytes, "parent": commit or None}
+        self.places = {}  # place -> {"head": commit, "committed": {name: bytes}, "nested": [names]}
         self.operations = Operations(
             files=FileOperations(
                 read=self._read,
@@ -115,6 +122,7 @@ class SimulatedWorld:
                 new_id=self._new_id,
                 process_number=self._process_number,
             ),
+            git=GitOperations(look_at_place=self._look_at_place, freeze=self._freeze),
         )
 
     # ------------------------------------------------------------ setting the scene
@@ -140,6 +148,38 @@ class SimulatedWorld:
         ):
             path, data = _shipped(name)
             self.files[path] = bytearray(data)
+
+    def make_place(self, path, files=None, nested=()):
+        """A linked working copy at `path` whose commit holds `files` (name to text or bytes),
+        all of them in the folder as committed. `nested` names folders that hold a repository."""
+        self.make_folder(path)
+        committed = {}
+        for name, text in (files or {}).items():
+            data = text if isinstance(text, bytes) else text.encode("utf-8")
+            self.files[f"{path}/{name}"] = bytearray(data)
+            self.make_folder(f"{path}/{name}".rpartition("/")[0])
+            committed[name] = data
+        head = self._commit(committed, None)
+        self.places[path] = {
+            "head": head,
+            "committed": committed,
+            "nested": list(nested),
+            "filtered": [],
+        }
+        return head
+
+    def _commit(self, files, parent):
+        """Make a commit of `files` (name to bytes) and keep what it holds."""
+        commit = hashlib.sha1(repr((parent, sorted(files.items()))).encode()).hexdigest()
+        self.commits[commit] = {"files": dict(files), "parent": parent}
+        return commit
+
+    def commit_everything(self, path):
+        """The place's own history moves: its files as they are now are committed on its branch."""
+        held = self.places[path]
+        held["committed"] = self._in_place(path)
+        held["head"] = self._commit(held["committed"], held["head"])
+        return held["head"]
 
     def put_a_name_that_leads_nowhere(self, path):
         self.dangling.add(path)
@@ -443,6 +483,86 @@ class SimulatedWorld:
     def _resolve(self, path):
         self._enter("boundary.resolve", path)
         return path
+
+    def _in_place(self, place):
+        """The files of a place as they are now: name to bytes."""
+        prefix = place + "/"
+        return {
+            name[len(prefix) :]: bytes(data)
+            for name, data in self.files.items()
+            if name.startswith(prefix)
+        }
+
+    def _look_at_place(self, place, environment):
+        self._enter("git.look_at_place", place, dict(environment))
+        nothing = {
+            "is_checkout": False,
+            "head": None,
+            "unclean": [],
+            "nested": [],
+            "filtered": [],
+        }
+        if place not in self.folders:
+            return {"exists": False, **nothing}
+        held = self.places.get(place)
+        if held is None:
+            return {"exists": True, **nothing}
+        if held.get("filtered"):
+            return {
+                **nothing,
+                "exists": True,
+                "is_checkout": True,
+                "head": held["head"],
+                "filtered": sorted(held["filtered"]),
+            }
+        now, committed = self._in_place(place), held["committed"]
+        unclean = sorted(
+            name for name in {*now, *committed} if now.get(name) != committed.get(name)
+        )
+        return {
+            "exists": True,
+            "is_checkout": True,
+            "head": held["head"],
+            "unclean": unclean,
+            "nested": [  # a repository inside another is not entered
+                name
+                for name in held["nested"]
+                if not any(name.startswith(other + "/") for other in held["nested"])
+            ],
+            "filtered": [],
+        }
+
+    def _freeze(self, command, environment):
+        """Run the freeze's command: the scope's tool around the freeze script. The files of the
+        place now are what is frozen; what the real script prints is printed."""
+        self._enter("git.freeze", list(command), dict(environment))
+        if not command or command[0] != "systemd-run":
+            raise FileNotFoundError(command[0] if command else "")
+        unit = next(p.split("=", 1)[1] for p in command if p.startswith("--unit=")) + ".scope"
+        inside = [p.replace("$$", "$") for p in list(command)[list(command).index("--") + 1 :]]
+        assert inside[:3] == ["sh", "-c", place_decisions.FREEZE_SCRIPT], inside
+        place, opening = inside[4], inside[5]
+        if self.the_freeze == "times_out":
+            self.units[unit] = dict(_TIMED_OUT)
+            return FreezeAnswer(-signal.SIGTERM, b"")
+        held, was = self.places.get(place), self.commits.get(opening)
+        if self.the_freeze == "fails" or held is None or was is None:
+            return FreezeAnswer(128, b"")
+        now, committed = self._in_place(place), was["files"]
+        if now == committed:
+            commit = opening
+        else:
+            commit = self._commit(now, opening)
+            self.refs[inside[6]] = commit
+        counts = (
+            len([n for n in now if n not in committed]),
+            len([n for n in now if n in committed and now[n] != committed[n]]),
+            len([n for n in committed if n not in now]),
+        )
+        text = (
+            f"commit {commit}\nadded {counts[0]}\nchanged {counts[1]}\ndeleted {counts[2]}\ndone\n"
+        )
+        return FreezeAnswer(0, text.encode())
 
     def _now(self):
         self._enter("clock.now")
