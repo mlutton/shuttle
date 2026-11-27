@@ -3,8 +3,8 @@
 One fixed, versioned text: where and how to write the statement, where each reference is found,
 that a reference wins over a file of the same name in the place, and that the executor cannot
 commit in the place. The words are fixed; only the facts (the location, the references, the
-fields of the schema) are filled in. A kind that expects no statement gets no notice at all and
-its instruction goes unchanged. The place is not named: the notice says "the place" and nothing
+fields of the schema) are filled in. A kind that expects no statement gets the notice without its
+statement part (the references and the no-commit parts are for every kind). The place is not named: the notice says "the place" and nothing
 depends on where it is.
 """
 
@@ -37,19 +37,24 @@ def _field_lines(fields: Sequence[Mapping[str, Any]], indent: str) -> list[str]:
 
 
 def notice(
-    statement_location: str,
+    statement_location: str | None,
     schema: Mapping[str, Any],
     references: Sequence[Mapping[str, Any]],
 ) -> str:
-    """The notice's text. `references` are the document's, each with a name and a path."""
-    lines = [
-        f"Shuttle notice, version {fixed.NOTICE_VERSION}",
-        "",
-        f"Write your statement as one JSON file at this exact path: {statement_location}",
-        "It must be one JSON object with exactly these fields, and no others:",
-        *_field_lines(schema["fields"], "  "),
-        "Execution keeps the file exactly as you wrote it and never changes or completes it.",
-    ]
+    """The notice's text. `references` are the document's, each with a name and a path.
+
+    The statement part is there when a statement location is given (the kind expects one); the
+    parts about references and about commits are always there.
+    """
+    lines = [f"Shuttle notice, version {fixed.NOTICE_VERSION}"]
+    if statement_location is not None:
+        lines += [
+            "",
+            f"Write your statement as one JSON file at this exact path: {statement_location}",
+            "It must be one JSON object with exactly these fields, and no others:",
+            *_field_lines(schema["fields"], "  "),
+            "Execution keeps the file exactly as you wrote it and never changes or completes it.",
+        ]
     if references:
         lines += ["", "References are read-only for you. Each is found at this path:"]
         lines += [f"- {reference['name']}: {reference['path']}" for reference in references]
@@ -64,10 +69,9 @@ def with_notice(
     statement_location: str | None,
     schema: Mapping[str, Any],
     references: Sequence[Mapping[str, Any]],
-) -> str | None:
-    """The instruction the executor is given: the caller's, then the notice when the kind
-    expects a statement. A kind that expects none gets the instruction unchanged."""
-    if not expects_statement or statement_location is None:
-        return instruction
-    text = notice(statement_location, schema, references)
+) -> str:
+    """The instruction the executor is given: the caller's, then the notice. A kind that expects
+    no statement gets the notice without its statement part; with no instruction either, the
+    notice alone."""
+    text = notice(statement_location if expects_statement else None, schema, references)
     return text if instruction is None else instruction + "\n\n" + text

@@ -158,7 +158,8 @@ class TheKeptStatement(unittest.TestCase):
     ):
         world = scenes.scene(document())
         writes(world, UNTIDY)
-        del world.files[statement_schema.SCHEMA_FILE]
+        # gone after the executor started: the notice was built from it, the judging cannot be
+        world.on_call("processes.start", lambda: world.files.pop(statement_schema.SCHEMA_FILE))
         scenes.run_in(world)
         got = pairs(world)
         self.assertEqual(got["statement_state"], {"state": "cannot tell", "value": None})

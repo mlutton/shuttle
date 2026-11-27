@@ -49,11 +49,22 @@ def _kind_checks(world: Operations, raw: Document) -> list[Found | None]:
     ]
 
 
+def _expects_a_statement(world: Operations, raw: Document) -> bool:
+    """Whether the kind expects a statement; False when the kinds cannot be read (the kind
+    check says so)."""
+    try:
+        return kinds.read_kinds(world).get(raw["kind"], False)
+    except OSError:
+        return False
+
+
 def run_input_checks(world: Operations, raw: Document) -> list[Found | None]:
     references = raw.get("references", [])
     return [
         *_kind_checks(world, raw),
-        refusals.check_instruction(raw.get("instruction"), raw.get("instruction_hash")),
+        refusals.check_instruction(
+            raw.get("instruction"), raw.get("instruction_hash"), _expects_a_statement(world, raw)
+        ),
         refusals.check_references(references, _found_references(world, references)),
         refusals.check_reach(raw.get("reach")),
         place.check_place(raw.get("place"), the_place.look(world, raw)),

@@ -294,6 +294,8 @@ def step_runs(step: str, facts: Mapping[str, object]) -> bool:
         return "header_source" not in facts
     if step == "claim_request_id":
         return facts.get("header_source") is not None
+    if step == "tear_down":  # the run area is removed whatever the ending, once set-up was tried
+        return facts.get("header_source") is not None and "setup" in facts
     if facts.get("header_source") is None or _failed_before_launch(facts):
         return False
     # Nothing is frozen or delivered unless the stop is confirmed: until then something may still

@@ -111,7 +111,7 @@ class SetupRequest(TypedDict, total=False):
 class SetupStep(TypedDict, total=False):
     """What the shell does for one request, with every path whole."""
 
-    do: str  # "copy", "share", "write" or "writable"
+    do: str  # "folder", "copy", "share", "write" or "writable"
     source: str
     target: str
     leave_out: list[str]  # for a copy: names relative to the source

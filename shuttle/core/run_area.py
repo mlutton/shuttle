@@ -186,6 +186,9 @@ def _one(
         steps.append({"do": "writable", "target": target})
         return None
     made[name] = action
+    above = name.rpartition("/")[0]
+    if above:
+        steps.append({"do": "folder", "target": _inside(area, above)})
     if action == "write":
         steps.append({"do": "write", "target": target, "text": request["text"]})
     elif action == "share":
