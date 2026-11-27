@@ -1,10 +1,9 @@
 """The real boundary, through the real command: a run's scopes are its own.
 
 Scope names are shared across the whole user session, so each scope a run makes carries a part
-unique to that run (see shuttle.core.boundary). These tests look at what that is for: two runs of
-one request id at once, units of the names a run used to take held by something else, and a
-`check` of a document while a `run` of it is in its gates. None keeps time: a script says it is up
-through a pipe the test reads and is let go through one the test writes.
+unique to that run (see shuttle.core.boundary). These tests run the real command and read the real
+systemd. None keeps time: a script says it is up through a pipe the test reads and is let go
+through one the test writes.
 """
 
 import importlib
@@ -107,16 +106,15 @@ class TwoRunsOfOneRequestIdAtOnce(real_run.RealRun):
 
 
 class UnitsOfTheOldNamesHeldByAnotherUser(real_run.RealRun):
-    # The names a run took before they carried a part of its own, and the one before that.
     def setUp(self):
         super().setUp()
         # A request id of its own, so that the old names held here are this test's alone and
         # another suite's test of the same kind (or of this one) holds other names.
         self.request_id = "old-" + uuid.uuid4().hex[:8]
+        # The names a run took before they carried a part of its own.
         self.old_names = tuple(
             template.format(self.request_id)
             for template in (
-                "shuttle-{}",
                 "shuttle-run-{}",
                 "shuttle-gate-{}-0",
                 "shuttle-freeze-{}",

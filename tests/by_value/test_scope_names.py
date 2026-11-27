@@ -65,7 +65,7 @@ class TheNamesAreMadeOfTheRequestAndTheRunsPart(unittest.TestCase):
             for name, function in inspect.getmembers(module, inspect.isfunction)
             if name.endswith("scope_name") and function.__module__ == module.__name__
         ]
-        self.assertGreaterEqual(len(found), 3)  # the executor's, the gate's and the freeze's
+        self.assertGreaterEqual(len(found), 3)
         for function in found:
             with self.subTest(function=function.__name__):
                 parameters = inspect.signature(function).parameters

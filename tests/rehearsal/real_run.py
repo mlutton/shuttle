@@ -85,8 +85,9 @@ class RealRun(unittest.TestCase):
     def start(self, doc, path_first=None, variables=None, form="run", root=None):
         """The real command, started; the caller waits for it with `communicate`. With
         `path_first`, that folder comes first on the command's PATH; `variables` are added to its
-        environment. The command and what it starts run under `self.limits` (DEFAULT_LIMITS unless the
-        test raised one)."""
+        environment; `form` is the command's name (`run` unless given) and `root` the folder the
+        input document is written in (`self.root` unless given). The command and what it starts
+        run under `self.limits` (DEFAULT_LIMITS unless the test raised one)."""
         path = os.path.join(root or self.root, f"{doc['request_id']}.input.json")
         with open(path, "w") as f:
             json.dump(doc, f)

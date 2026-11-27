@@ -63,15 +63,15 @@ def limit_microseconds(seconds: float) -> int:
 def scope_name(request_id: str, run_part: str) -> str:
     """The executor's scope name: the request id, so a person listing units can match it to its
     request, then the run's own part, so no other run asks systemd for the same name. The part is
-    the id of the run's request record (read back with `run_part_of`); the request id's characters and a
-    32-digit hex part are all a unit name may hold, and together they fit the 255 it may be long."""
+    the id of the run's request record (read back with `run_part_of`); the two together must fit
+    the 255 characters systemd allows a unit name."""
     return f"{SCOPE_PREFIX}{request_id}-{run_part}"
 
 
 def run_part_of(request_record: Mapping[str, object]) -> str:
     """The run's own part of its scope names, from its request record: the id in the record's
     header. A later command that finds a run's scopes reads it here and builds the names with
-    the functions above."""
+    `scope_name`, `gate_scope_name` and `freeze_scope_name`."""
     header = request_record["header"]
     if not isinstance(header, Mapping) or not isinstance(header.get("record_id"), str):
         raise ValueError("the request record has no record id")
