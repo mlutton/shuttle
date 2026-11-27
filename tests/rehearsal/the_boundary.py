@@ -9,7 +9,10 @@ import functools
 import os
 import shutil
 import subprocess
+import tempfile
 import unittest
+
+from shuttle.core import boundary
 
 PROGRAMS = ("systemd-run", "systemctl", "bwrap")
 
@@ -21,29 +24,40 @@ def absent_reason() -> str | None:
         if shutil.which(program) is None:
             return f"{program} is not installed"
     try:
-        done = subprocess.run(
-            [
-                "systemd-run",
-                "--user",
-                "--scope",
-                "--quiet",
-                "--",
-                "bwrap",
-                "--unshare-pid",
-                "--die-with-parent",
-                "--bind",
-                "/",
-                "/",
-                "--dev",
-                "/dev",
-                "--proc",
-                "/proc",
-                "true",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        with tempfile.TemporaryDirectory() as folder:
+            area = os.path.realpath(folder)
+            for name in ("home", "tmp", "place"):
+                os.mkdir(os.path.join(area, name))
+            reach: boundary.Reach = {
+                "place": os.path.join(area, "place"),
+                "area": area,
+                "home": os.path.join(area, "home"),
+                "tmp": os.path.join(area, "tmp"),
+                "references": [],
+                "visible": [],
+                "records": os.path.join(area, "records"),
+            }
+            # The box the runs use, so a machine that cannot make it is seen to lack it.
+            done = subprocess.run(
+                [
+                    "systemd-run",
+                    "--user",
+                    "--scope",
+                    "--quiet",
+                    "--",
+                    "bwrap",
+                    "--unshare-pid",
+                    "--die-with-parent",
+                    *boundary.box_arguments(reach),
+                    "--chdir",
+                    reach["place"],
+                    "--",
+                    "/usr/bin/true",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
     except (OSError, subprocess.SubprocessError) as error:
         return f"the boundary could not be started ({type(error).__name__})"
     if done.returncode != 0:

@@ -139,14 +139,14 @@ class Observed(TypedDict):
 # How a driver's tool hands over its statement: it writes a file at the statement path in the run area, or its
 # final message is the statement.
 StatementArrival = Literal["file", "reply"]
-SetupAction = Literal["copy", "share", "leave_out", "write", "writable", "variable"]
-SetupStepKind = Literal["folder", "copy", "share", "write", "writable"]
+SetupAction = Literal["copy", "leave_out", "write", "writable", "variable"]
+SetupStepKind = Literal["folder", "copy", "write", "writable"]
 
 
 class SetupRequest(TypedDict, total=False):
     """One thing a driver asks of the run area (shuttle.core.run_area). `action` says which; the
     other fields are those that action reads: `name` (the path made, or acted on, inside the
-    area), `source` (the absolute path a copy or share comes from), `text` (a written file's),
+    area), `source` (the absolute path a copy comes from), `text` (a written file's),
     and for a variable, `variable` with either `value` or `in_run_area` (the name whose path is
     the value). A copy may be `optional`."""
 
@@ -395,6 +395,9 @@ class FileOperations(NamedTuple):
     # its last line as it is; an empty file gives none. Raises, when called, as `read` does
     read_lines: Callable[[str, int], Iterator[tuple[bytes, bool]]]
     exists: Callable[[str], bool]  # a name is there, even if it leads nowhere
+    # The name is a folder, or a link that leads to one; looks, never opens or lists. False for
+    # a name that is not there, for a file and for a link that leads nowhere
+    is_folder: Callable[[str], bool]
     write_new: Callable[[str, str], None]  # create, write, flush to disk; FileExistsError if there
     link: Callable[[str, str], None]  # (existing name, new name); FileExistsError if new is there
     copy: Callable[
@@ -412,8 +415,7 @@ class FileOperations(NamedTuple):
         [str], bool
     ]  # a folder a new name can be made in; looks, writes nothing
     # The run area (shuttle.core.run_area). None of these reads a file's content except
-    # `copy_path`, which copies the bytes without looking at them, and none follows a link
-    # except `share_by_link`, which makes one.
+    # `copy_path`, which copies the bytes without looking at them, and none follows a link.
     make_temporary_folder: Callable[
         [str], str
     ]  # (name prefix): a new, empty folder only its owner can enter, in the system's temporary place; the path, absolute. OSError
@@ -428,10 +430,6 @@ class FileOperations(NamedTuple):
     # ("a/b" leaves out that file or folder). FileExistsError if new is there, FileNotFoundError if
     # existing is not or the folder above new is not, NotARegularFile if existing itself is a link,
     # a pipe, a device or a socket. Nothing is left under the new name when it raises
-    share_by_link: Callable[
-        [str, str], None
-    ]  # (existing, new): a symbolic link at new leading to existing, which is looked at (not
-    # opened) and must be there: FileNotFoundError otherwise; FileExistsError if new is there
     make_writable: Callable[
         [str], None
     ]  # the owner may write a regular file, and a folder with everything below it; a link is
@@ -528,6 +526,14 @@ class PlaceFacts(TypedDict):
     unclean: list[str]  # names git reports as changed, or new and not ignored
     nested: list[str]  # folders, below the top, that hold a git repository of their own
     filtered: list[str]  # tracked paths with a `filter` attribute; when any, git looked no further
+
+
+class VisibleLook(TypedDict):
+    """What looking at one folder the document lists as visible found."""
+
+    exists: bool  # a name is there
+    folder: bool  # it is a folder, or a link to one
+    resolved: str  # its path with links and `..` resolved, as the box would bind it
 
 
 class FreezeAnswer(NamedTuple):

@@ -49,7 +49,7 @@ def _executor_status(state: RunState) -> None:
 def step(state: RunState) -> None:
     world, facts = state["world"], state["facts"]
     properties = stop_boundary(world, state["boundary_name"])
-    empty = boundary.is_empty(properties)
+    empty = boundary.scope_is_empty(properties)
     facts["stop"] = "confirmed" if empty else "not_confirmed"
     if not empty:
         state["problems"]["stop_not_confirmed"] = (

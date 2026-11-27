@@ -22,6 +22,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from shuttle.core import pairs
+from shuttle.core.run_area import HOME_NAME
 from shuttle.core.shapes import (
     DriverFacts,
     ExecutorDriverGroup,
@@ -46,8 +47,9 @@ PROGRAM = "codex"
 _SETTINGS = ("model", "effort")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}")
 _EFFORT = re.compile(r"[a-z]{1,16}")
-# Where the tool leaves its own files, below the home it is given in the run area.
-_HOME = "home"
+# Where the tool keeps its own files: its default place below the executor's home, which the box
+# points HOME at (shuttle.core.run_area), so the login copied in goes with the run area.
+_HOME = f"{HOME_NAME}/.codex"
 _CONFIG = "config.toml"
 _LOGIN = "auth.json"
 
@@ -62,10 +64,10 @@ DECLARATIONS: dict[str, list[str]] = {
         "servers the settings file names",
     ],
     "needs_setup": [
-        "a tool home in the run area",
+        "a tool home in the executor's own home folder, in the run area",
         "the settings file copied in",
-        "the login shared by a link",
-        "folders for temporary files, caches and saved output",
+        "the login copied in; the tool may replace the copy, and the original is never changed",
+        "a folder for saved output",
     ],
 }
 
@@ -133,8 +135,9 @@ def _keep(name: str) -> SetupRequest:
 
 
 def setup_requests(settings: Settings, environment: Mapping[str, str]) -> list[SetupRequest]:
-    """A tool home inside the run area that names only what the tool needs of the caller's: its
-    history, sessions and caches are left behind because they are never named."""
+    """A tool home inside the executor's home that names only what the tool needs of the
+    caller's: its history, sessions and caches are left behind because they are never named. Its
+    temporary and cache folders are the executor's own `/tmp` and home."""
     home = _tool_home(environment)
     if home is None:
         return []
@@ -145,13 +148,12 @@ def setup_requests(settings: Settings, environment: Mapping[str, str]) -> list[S
             "source": f"{home}/{_CONFIG}",
             "optional": True,  # the tool starts without one, as it does in an empty tool home
         },
-        {"action": "share", "name": f"{_HOME}/{_LOGIN}", "source": f"{home}/{_LOGIN}"},
-        _keep("tmp"),
-        _keep("cache"),
+        # A copy, not a link: the box hides the caller's own folders, and the tool saves a
+        # refreshed login by writing a file beside it and renaming over it, which needs a
+        # writable folder of its own. Nothing is copied back.
+        {"action": "copy", "name": f"{_HOME}/{_LOGIN}", "source": f"{home}/{_LOGIN}"},
         _keep("out"),
         {"action": "variable", "variable": "CODEX_HOME", "in_run_area": _HOME},
-        {"action": "variable", "variable": "TMPDIR", "in_run_area": "tmp"},
-        {"action": "variable", "variable": "XDG_CACHE_HOME", "in_run_area": "cache"},
     ]
 
 

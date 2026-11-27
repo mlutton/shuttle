@@ -1,4 +1,5 @@
-"""The input checks that need facts from the world: kinds, references, the statement location.
+"""The input checks that need facts from the world: kinds, references, the statement location,
+the reach.
 
 Each fact is gathered here and handed to a pure check in shuttle.core.refusals; this module decides
 nothing. `run_input_checks` returns every check's answer, in order, for the run (which records the
@@ -10,7 +11,7 @@ from typing import Any
 
 from shuttle.core import place, refusals
 from shuttle.core.refusals import Found
-from shuttle.core.shapes import Document, Operations
+from shuttle.core.shapes import Document, Operations, VisibleLook
 from shuttle.shell import kinds, the_place
 
 
@@ -64,6 +65,20 @@ def _expects_a_statement(world: Operations, raw: Document) -> bool:
         return False
 
 
+def _look_at_visible(world: Operations, raw: Document) -> dict[str, VisibleLook]:
+    """Each folder the reach lists as visible that has a path to look at: whether it is there,
+    whether it is a folder, and where it resolves to."""
+    found: dict[str, VisibleLook] = {}
+    for path in refusals.visible_paths(raw.get("reach")):
+        if path.startswith("/") and "\0" not in path:
+            found[path] = {
+                "exists": world.files.exists(path),
+                "folder": world.files.is_folder(path),
+                "resolved": world.boundary.resolve(path),
+            }
+    return found
+
+
 def run_input_checks(world: Operations, raw: Document) -> list[Found | None]:
     references = raw.get("references", [])
     return [
@@ -72,6 +87,10 @@ def run_input_checks(world: Operations, raw: Document) -> list[Found | None]:
             raw.get("instruction"), raw.get("instruction_hash"), _expects_a_statement(world, raw)
         ),
         refusals.check_references(references, _found_references(world, references)),
-        refusals.check_reach(raw.get("reach")),
+        refusals.check_reach(
+            raw.get("reach"),
+            _look_at_visible(world, raw),
+            world.boundary.resolve(raw["records_location"]),
+        ),
         place.check_place(raw.get("place"), the_place.look(world, raw)),
     ]

@@ -2,8 +2,8 @@
 
 The folder is made new, empty and private. The driver's requests (shuttle.core.run_area) are
 turned into a plan by the core and carried out here, in order, through the world's operations:
-every path the plan names is inside the area, except the sources it copies from or links to, which
-are only read (a share is a link, never opened). The folder is remembered in the state as soon as
+every path the plan names is inside the area, except the sources it copies from, which are only
+read. The folder is remembered in the state as soon as
 it exists, so the tear-down finds it however this step ends. A refused plan or a failed action
 fails the step with one line saying which.
 """
@@ -25,8 +25,6 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
             if step.get("optional") and not files.exists(step["source"]):
                 return  # the request said a missing source is no error
             files.copy_path(step["source"], step["target"], step["leave_out"])
-        case "share":
-            files.share_by_link(step["source"], step["target"])
         case "write":
             files.write_new(step["target"], step["text"])
         case "writable":

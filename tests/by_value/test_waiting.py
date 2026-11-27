@@ -69,7 +69,7 @@ class WhyTheBoundaryEnded(unittest.TestCase):
             (None, False),
         ):
             with self.subTest(properties=properties):
-                self.assertEqual(boundary.is_empty(properties), expected)
+                self.assertEqual(boundary.scope_is_empty(properties), expected)
 
 
 class FromTheCauseAndTheBoundaryToAnEnding(unittest.TestCase):
