@@ -5,6 +5,7 @@ passes or fails the stage it is told to, so these tests do not run the real suit
 """
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -17,7 +18,7 @@ INTERPRETER = os.path.join(REPO, "checks", "interpreter.sh")
 FIX_FAILED = "fix: failed; ruff could not finish (its output is on standard error)"
 
 STAND_IN = """#!/bin/sh
-# Stand-in for python3. FAIL_STAGE is lint, format, types or tests; MISSING is ruff, mypy or coverage.
+# Stand-in for python3. FAIL_STAGE is lint, format, types, tests or real; MISSING is ruff, mypy or coverage.
 case "$*" in
   "-m ruff --version")  [ "$MISSING" = ruff ] && { echo "No module named ruff" >&2; exit 1; }; exit 0 ;;
   "-m mypy --version")  [ "$MISSING" = mypy ] && { echo "No module named mypy" >&2; exit 1; }; exit 0 ;;
@@ -25,7 +26,9 @@ case "$*" in
   "-m ruff check"*)     stage=lint ;;
   "-m ruff format"*)    stage=format ;;
   "-m mypy"*)           stage=types ;;
-  "-m unittest"*)       stage=tests ;;
+  "-m unittest discover -s tests/by_value"*)  stage=tests ;;
+  "-m unittest discover -s tests/command"*)   stage=real ;;
+  "-m unittest discover -s tests/boundary"*)  stage=real ;;
   *fixmode.py)          echo "fix: stand-in"; exit "${FIX_EXIT:-0}" ;;
   *) echo "unexpected call: $*" >&2; exit 99 ;;
 esac
@@ -61,11 +64,18 @@ class CheckScriptTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.splitlines(),
-            ["lint: passed", "format: passed", "types: passed", "tests: passed", "check: passed"],
+            [
+                "lint: passed",
+                "format: passed",
+                "types: passed",
+                "tests: passed",
+                "real: passed",
+                "check: passed",
+            ],
         )
 
     def test_a_failing_stage_exits_1_and_the_last_line_names_it(self):
-        for stage in ("lint", "format", "types", "tests"):
+        for stage in ("lint", "format", "types", "tests", "real"):
             with self.subTest(stage=stage):
                 result = self.check(FAIL_STAGE=stage)
                 self.assertEqual(result.returncode, 1)
@@ -89,6 +99,37 @@ class CheckScriptTest(unittest.TestCase):
     def test_a_tests_stage_that_fails_for_another_reason_does_not_say_timed_out(self):
         result = self.check(FAIL_STAGE="tests", FAIL_CODE="3")
         self.assertEqual(self.last_line(result), "check: failed: tests")
+
+    def test_a_real_stage_ended_by_its_budget_says_it_timed_out(self):
+        result = self.check(FAIL_STAGE="real", FAIL_CODE="124")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            self.last_line(result), "check: failed: real (timed out after 120 seconds)"
+        )
+
+    def test_a_real_stage_that_fails_for_another_reason_does_not_say_timed_out(self):
+        result = self.check(FAIL_STAGE="real", FAIL_CODE="3")
+        self.assertEqual(self.last_line(result), "check: failed: real")
+
+    def test_every_folder_of_tests_is_run_by_exactly_one_stage(self):
+        with open(SCRIPT) as f:
+            script = f.read()
+        run = [
+            folder
+            for line in script.splitlines()
+            if not line.lstrip().startswith("#")
+            for folder in re.findall(r"unittest discover -s (\S+)", line)
+        ]
+        holding = sorted(
+            os.path.join("tests", name)
+            for name in os.listdir(os.path.join(REPO, "tests"))
+            if os.path.isdir(os.path.join(REPO, "tests", name))
+            and any(
+                file.startswith("test") and file.endswith(".py")
+                for file in os.listdir(os.path.join(REPO, "tests", name))
+            )
+        )
+        self.assertEqual(sorted(run), holding)
 
     def test_a_failing_stage_stops_the_later_stages(self):
         result = self.check(FAIL_STAGE="lint")
