@@ -38,9 +38,13 @@ def ask_gate(world: Operations, gate: Document, environment: dict[str, str], nam
 
 
 def run_gates(
-    world: Operations, request_id: str, gates: list[Document]
+    world: Operations, request_id: str, run_part: str, gates: list[Document]
 ) -> tuple[Found | None, StepResult]:
     """Ask every gate in order, stopping at the first that does not say yes.
+
+    Every scope is named from the request id and `run_part`, the run's own part (a run that
+    writes a request record gives the record's id; the check form, which writes none, a fresh
+    one), so a gate's scope is never one that another run, or a check of the same document, makes.
 
     Returns the refusal (or None) and the step's result: the time the gates took.
     """
@@ -54,7 +58,7 @@ def run_gates(
     started = world.clock.now()
     answers: list[tuple[str, str]] = []
     for index, gate in enumerate(gates):
-        name = boundary.gate_scope_name(request_id, index)
+        name = boundary.gate_scope_name(request_id, run_part, index)
         answers.append((gate["name"], ask_gate(world, gate, environment, name)))
         if answers[-1][1] != "yes":
             break

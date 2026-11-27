@@ -18,7 +18,7 @@ def step(state: RunState) -> None:
     if source is None:
         raise RuntimeError("no header source: the document was not read")
     opening = state["stand_ins"]["opening_fingerprint"]
-    scope = boundary.freeze_scope_name(source["request_id"])
+    scope = boundary.freeze_scope_name(source["request_id"], state["run_part"])
     started = world.clock.now()
     environment = place.git_environment(world.environment.read_variable("PATH"))
     for variable in boundary.BUS_VARIABLES:  # to reach the user's systemd

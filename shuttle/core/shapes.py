@@ -268,6 +268,7 @@ class RunState(TypedDict, total=False):
     started_at: str
     ended_at: str
     clock_start: float
+    run_part: str
     boundary_name: str
     boundary_process: Any
     executor_duration: float
