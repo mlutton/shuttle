@@ -11,9 +11,9 @@
 #   real    python -m unittest discover, over tests/command and then tests/boundary: the tests
 #           that start real processes, under REAL_SECONDS (below), for the two folders together.
 #           It stops at the first folder that fails, so a failure in tests/command means
-#           tests/boundary did not run. The real-process tests are bounded in time by that
-#           budget; the tests that hand the command an input without an end run under the
-#           resource limits of tests/rehearsal/real_run.py.
+#           tests/boundary did not run. The stage also runs under a file-size limit and an
+#           address-space limit (below), which every process it starts inherits; the harness
+#           of tests/rehearsal/real_run.py sets tighter ones for the command it starts.
 # The budgets, each written once below the header: TESTS_SECONDS keeps the logic tests fast;
 # REAL_SECONDS ends a real-process test that never returns, and does not police speed.
 # Every folder under tests/ that holds tests is in exactly one of the two (a test pins it);
@@ -27,6 +27,7 @@
 #   check: failed: tests (timed out after 20 seconds)
 #   check: failed: real (timed out after 120 seconds)
 #   check: could not run: <tool> is not installed (ruff, mypy or, for the tests, coverage); install the tools with: <command>
+#   check: could not run: the real stage's <file-size|address-space> limit cannot be set, because this shell's own limit is lower; raise it (ulimit -f or -v) or start a shell without it
 #
 # ./checks/all.sh --fix applies what ruff can change mechanically and says what changed:
 #   ruff check --fix --no-unsafe-fixes, then ruff format (checks/fixmode.py does the work).
@@ -46,7 +47,8 @@
 #   0  every stage passed; or, with --fix, it finished (whether or not it changed anything)
 #   1  a stage failed (the last line names it); or, with --fix, ruff could not finish
 #      (a file it could not parse or write, or ruff ending abnormally)
-#   2  the check could not run: a tool is missing (the last line names it and the command)
+#   2  the check could not run: a tool is missing, or a limit of the real stage cannot be set
+#      (the last line names it and what to do)
 #   3  the argument was not recognised (one line on standard error names the two forms)
 #
 # PYTHON names the interpreter that has the tools. By default checks/interpreter.sh picks this
@@ -54,6 +56,12 @@
 
 TESTS_SECONDS=20
 REAL_SECONDS=120
+# Limits of the real stage, set once so no test has to ask: a time limit does not stop a test
+# that reads a device without end from filling memory (the machine's out-of-memory killer ended a
+# whole session that way). They sit above what any test raises a harness limit to. `ulimit -f`
+# counts 512-byte blocks and `-v` kilobytes in sh.
+REAL_FILE_BLOCKS=262144
+REAL_ADDRESS_KB=3145728
 
 mode=check
 [ "$#" -eq 1 ] && [ "$1" = --fix ] && mode=fix
@@ -100,6 +108,17 @@ if [ "$mode" = fix ]; then
     exit "$code"
 fi
 
+# A limit this shell may not raise would end the real stage as if a test had failed; no test ran.
+unsettable="the real stage's %s limit cannot be set, because this shell's own limit is lower; raise it (ulimit %s) or start a shell without it"
+(ulimit -f "$REAL_FILE_BLOCKS") 2>/dev/null || {
+    printf "check: could not run: $unsettable\n" "file-size" "-f"
+    exit 2
+}
+(ulimit -v "$REAL_ADDRESS_KB") 2>/dev/null || {
+    printf "check: could not run: $unsettable\n" "address-space" "-v"
+    exit 2
+}
+
 output=$(mktemp) || exit 2
 trap 'rm -f "$output"' EXIT
 
@@ -137,6 +156,6 @@ stage types 0 "$PYTHON" -m mypy
 # never returns reaches it. The two folders run in one command, so the one budget covers both.
 stage tests "$TESTS_SECONDS" timeout "$TESTS_SECONDS" "$PYTHON" -m unittest discover -s tests/by_value -t tests
 stage real "$REAL_SECONDS" timeout "$REAL_SECONDS" sh -c \
-    '"$0" -m unittest discover -s tests/command -t tests && "$0" -m unittest discover -s tests/boundary -t tests' \
-    "$PYTHON"
+    'ulimit -f "$1" && ulimit -v "$2" && "$0" -m unittest discover -s tests/command -t tests && "$0" -m unittest discover -s tests/boundary -t tests' \
+    "$PYTHON" "$REAL_FILE_BLOCKS" "$REAL_ADDRESS_KB"
 echo "check: passed"

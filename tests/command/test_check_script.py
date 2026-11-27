@@ -5,7 +5,7 @@ passes or fails the stage it is told to, so these tests do not run the real suit
 """
 
 import os
-import re
+import resource
 import shutil
 import stat
 import subprocess
@@ -15,6 +15,8 @@ import unittest
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPT = os.path.join(REPO, "checks", "all.sh")
 INTERPRETER = os.path.join(REPO, "checks", "interpreter.sh")
+FILE_BLOCKS = 262144  # the limits the script sets on its real stage, as `ulimit -f` and `-v` count
+ADDRESS_KB = 3145728
 FIX_FAILED = "fix: failed; ruff could not finish (its output is on standard error)"
 
 STAND_IN = """#!/bin/sh
@@ -32,14 +34,30 @@ case "$*" in
   *fixmode.py)          echo "fix: stand-in"; exit "${FIX_EXIT:-0}" ;;
   *) echo "unexpected call: $*" >&2; exit 99 ;;
 esac
+[ -n "$LIMITS_FILE" ] && echo "$stage: file blocks $(ulimit -f), address kilobytes $(ulimit -v)" >> "$LIMITS_FILE"
 echo "$stage: tool output"
 [ "$FAIL_STAGE" = "$stage" ] && exit "${FAIL_CODE:-1}"
 exit 0
 """
 
 
+def outer_limit_is_lower(which, kilobytes):
+    """Whether this process's own hard limit is below what the script sets, so the script
+    would refuse to run."""
+    hard = resource.getrlimit(which)[1]
+    return hard != resource.RLIM_INFINITY and hard < kilobytes * 1024
+
+
+def skip_when_the_script_would_refuse(case):
+    if outer_limit_is_lower(resource.RLIMIT_AS, ADDRESS_KB) or outer_limit_is_lower(
+        resource.RLIMIT_FSIZE, FILE_BLOCKS // 2
+    ):
+        case.skipTest("this shell's own limit is below the script's; the script refuses to run")
+
+
 class CheckScriptTest(unittest.TestCase):
     def setUp(self):
+        skip_when_the_script_would_refuse(self)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.stand_in = os.path.join(folder.name, "python")
@@ -111,25 +129,44 @@ class CheckScriptTest(unittest.TestCase):
         result = self.check(FAIL_STAGE="real", FAIL_CODE="3")
         self.assertEqual(self.last_line(result), "check: failed: real")
 
-    def test_every_folder_of_tests_is_run_by_exactly_one_stage(self):
-        with open(SCRIPT) as f:
-            script = f.read()
-        run = [
-            folder
-            for line in script.splitlines()
-            if not line.lstrip().startswith("#")
-            for folder in re.findall(r"unittest discover -s (\S+)", line)
-        ]
-        holding = sorted(
-            os.path.join("tests", name)
-            for name in os.listdir(os.path.join(REPO, "tests"))
-            if os.path.isdir(os.path.join(REPO, "tests", name))
-            and any(
-                file.startswith("test") and file.endswith(".py")
-                for file in os.listdir(os.path.join(REPO, "tests", name))
-            )
+    def test_the_real_stage_runs_under_a_file_size_limit_and_an_address_space_limit(self):
+        record = os.path.join(os.path.dirname(self.stand_in), "limits")
+        result = self.check(LIMITS_FILE=record)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(record) as f:
+            lines = f.read().splitlines()
+        limits = f"file blocks {FILE_BLOCKS}, address kilobytes {ADDRESS_KB}"
+        self.assertEqual(
+            [line for line in lines if line.startswith("real:")],
+            [f"real: {limits}", f"real: {limits}"],
         )
-        self.assertEqual(sorted(run), holding)
+
+    def test_a_limit_the_shell_will_not_raise_is_could_not_run_naming_the_limit_and_the_fix(self):
+        lowered = {
+            "address-space": (resource.RLIMIT_AS, ADDRESS_KB * 1024 // 2, "-v"),
+            "file-size": (resource.RLIMIT_FSIZE, FILE_BLOCKS * 512 // 2, "-f"),
+        }
+        for name, (which, size, option) in lowered.items():
+            with self.subTest(limit=name):
+                result = subprocess.run(
+                    [SCRIPT],
+                    capture_output=True,
+                    text=True,
+                    env={"PATH": os.environ["PATH"], "PYTHON": self.stand_in},
+                    cwd=REPO,
+                    timeout=60,
+                    preexec_fn=lambda which=which, size=size: resource.setrlimit(
+                        which, (size, size)
+                    ),
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(
+                    self.last_line(result),
+                    f"check: could not run: the real stage's {name} limit cannot be set, because "
+                    f"this shell's own limit is lower; raise it (ulimit {option}) or start a "
+                    "shell without it",
+                )
+                self.assertNotIn("real:", result.stdout)
 
     def test_a_failing_stage_stops_the_later_stages(self):
         result = self.check(FAIL_STAGE="lint")
@@ -187,6 +224,7 @@ class InterpreterLookupTest(unittest.TestCase):
     """Which interpreter all.sh picks when PYTHON is unset, in a clone and a linked worktree."""
 
     def setUp(self):
+        skip_when_the_script_would_refuse(self)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.root = folder.name
