@@ -122,11 +122,53 @@ class ThePlan(unittest.TestCase):
                 {"action": "variable", "variable": "A", "in_run_area": ".."}
             ],
         }
+        kept = run_area.INSTRUCTION_NAME
+        for name in (kept, kept + "/z", kept + "/a/b"):
+            for action in (
+                copy(name),
+                {"action": "share", "name": name, "source": "/l"},
+                {"action": "write", "name": name, "text": ""},
+                {"action": "writable", "name": name},
+                {"action": "leave_out", "name": name},
+                {"action": "variable", "variable": "A", "in_run_area": name},
+            ):
+                table[f"the kept name or below ({name}, {action['action']})"] = [action]
+        for variable in (
+            "XDG_RUNTIME_DIR",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "LD_PRELOAD",
+            "LD_",
+            "LD_X",
+        ):
+            table[f"the variable {variable}"] = [
+                {"action": "variable", "variable": variable, "value": "x"}
+            ]
+        table["a variable's path no request makes"] = [
+            copy("a"),
+            {"action": "variable", "variable": "A", "in_run_area": "b"},
+        ]
+        table["a variable's path that is a prefix of a name, not a folder above it"] = [
+            copy("ab"),
+            {"action": "variable", "variable": "A", "in_run_area": "a"},
+        ]
         for label, requests in table.items():
             with self.subTest(label):
                 got = run_area.plan(AREA, requests)
                 self.assertTrue(got["problem"], label)
                 self.assertEqual((got["steps"], got["variables"]), ([], {}))
+
+    def test_a_variable_may_name_what_a_request_makes_or_a_folder_above_it(self):
+        for name in ("h", "h/inside", "config", "config/generated.toml"):
+            with self.subTest(name):
+                got = run_area.plan(
+                    AREA,
+                    [
+                        copy("h"),
+                        {"action": "write", "name": "config/generated.toml", "text": ""},
+                        {"action": "variable", "variable": "A", "in_run_area": name},
+                    ],
+                )
+                self.assertIsNone(got["problem"])
 
     def test_a_name_below_a_copy_may_be_written_shared_or_made_writable(self):
         got = run_area.plan(
@@ -191,11 +233,21 @@ class TheSteps(unittest.TestCase):
         self.assertNotIn("run_area", self.state)
         self.assertEqual(self.world.text_of("/src/login"), "LOGIN-STAND-IN")
 
-    def test_a_refused_plan_fails_the_step_with_a_line_and_leaves_the_area_to_the_tear_down(self):
+    def test_a_refused_plan_fails_the_step_with_a_line_before_anything_is_made(self):
         got = set_up_run_area.set_up(self.state, [copy("../x")])
         self.assertEqual(got, {"ok": False})
         self.assertIn("not a name inside the run area", self.state["problems"]["setup"])
-        self.assertIn("run_area", self.state)
+        self.assertEqual(self.world.calls("files.make_temporary_folder"), [])
+        self.assertNotIn("run_area", self.state)
+
+    def test_a_name_below_the_kept_instruction_name_ends_a_run_as_a_refused_setup_with_no_area(
+        self,
+    ):
+        name = run_area.INSTRUCTION_NAME + "/z"
+        got = set_up_run_area.set_up(self.state, [{"action": "write", "name": name, "text": "t"}])
+        self.assertEqual(got, {"ok": False})
+        self.assertIn("kept for the instruction", self.state["problems"]["setup"])
+        self.assertEqual(self.world.calls("files.make_temporary_folder"), [])
 
     def test_an_action_that_fails_fails_the_step_naming_its_number_and_the_error_only(self):
         self.world.will_raise("files.copy_path", PermissionError("secret detail"))

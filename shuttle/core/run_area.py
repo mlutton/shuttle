@@ -17,7 +17,7 @@ import re
 from collections.abc import Sequence
 from typing import cast
 
-from shuttle.core import fixed
+from shuttle.core import boundary, fixed
 from shuttle.core.shapes import SetupPlan, SetupRequest, SetupStep
 
 # The folder the run area is made in, by this name followed by what the system adds.
@@ -28,8 +28,10 @@ INSTRUCTION_NAME = "shuttle-instruction.txt"
 _PART = r"(?!\.{1,2}(?:/|$))[A-Za-z0-9._-]+"
 _NAME = re.compile(f"{_PART}(?:/{_PART})*")
 _ACTIONS = ("copy", "share", "leave_out", "write", "writable", "variable")
-# The variables the shell itself owns.
-_OWN_VARIABLES = ("PATH",)
+# The variables the shell and the boundary handle themselves, and the prefix of those that change
+# how a program starts (the dynamic loader's): no request may pass one.
+_OWN_VARIABLES = ("PATH", *boundary.BUS_VARIABLES)
+_LOADER_PREFIX = "LD_"
 
 
 def valid_name(name: object) -> bool:
@@ -58,9 +60,11 @@ def _name_problem(index: int, request: SetupRequest, field: str = "name") -> str
             f"setup request {index + 1} ({request['action']}): {field} is not a name inside the "
             "run area (letters, digits, '.', '_' and '-', parts joined by '/', no '.' or '..' part)"
         )
-    if request.get(field) == INSTRUCTION_NAME:
+    name = str(request.get(field))
+    if name == INSTRUCTION_NAME or _under(name, INSTRUCTION_NAME):
         return (
-            f"setup request {index + 1}: the name {INSTRUCTION_NAME!r} is kept for the instruction"
+            f"setup request {index + 1}: the name {INSTRUCTION_NAME!r} and anything below it are "
+            "kept for the instruction"
         )
     return None
 
@@ -90,6 +94,7 @@ def _variable_problem(index: int, request: SetupRequest) -> str | None:
         or not name
         or any(c not in fixed.ID_CHARACTERS for c in name)
         or name in _OWN_VARIABLES
+        or name.startswith(_LOADER_PREFIX)
     ):
         return f"setup request {index + 1} (variable): the variable's name is not usable"
     if ("value" in request) == ("in_run_area" in request):
@@ -157,9 +162,31 @@ def plan(area: str, requests: Sequence[SetupRequest]) -> SetupPlan:
         if problem:
             return _refused(problem)
     problem = _leave_out_problem(leave_out, [n for n, how in made.items() if how == "copy"])
+    problem = problem or _variable_path_problem(requests, made)
     return (
         _refused(problem) if problem else {"steps": steps, "variables": variables, "problem": None}
     )
+
+
+def _is_made(name: str, made: dict[str, str]) -> bool:
+    """Whether a request makes this name: it is one, or is below a copy, or is a folder above one."""
+    return any(
+        name == n or _under(n, name) or (how == "copy" and _under(name, n))
+        for n, how in made.items()
+    )
+
+
+def _variable_path_problem(requests: Sequence[SetupRequest], made: dict[str, str]) -> str | None:
+    for request in requests:
+        name = request.get("in_run_area")
+        if name is not None and not _is_made(name, made):
+            return f"variable {request['variable']!r} names {name!r}, which no request makes"
+    return None
+
+
+def refusal(requests: Sequence[SetupRequest]) -> str | None:
+    """Why the requests are refused, or None: the plan's own answer, needing no run area yet."""
+    return plan("/area", requests)["problem"]
 
 
 def _one(

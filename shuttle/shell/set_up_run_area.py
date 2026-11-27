@@ -34,13 +34,14 @@ def _carry_out(world: Operations, step: SetupStep) -> None:
 
 def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
     world = state["world"]
+    problem = run_area.refusal(requests)
+    if problem:  # refused before anything is made
+        state["problems"]["setup"] = f"{problem}; nothing was made and nothing was launched"
+        return {"ok": False}
     area = world.files.make_temporary_folder(run_area.AREA_PREFIX)
     state["run_area"] = area
     state["setup_variables"] = {}
     plan = run_area.plan(area, requests)
-    if plan["problem"]:
-        state["problems"]["setup"] = f"{plan['problem']}; nothing was launched"
-        return {"ok": False}
     for number, step in enumerate(plan["steps"], 1):
         try:
             _carry_out(world, step)
