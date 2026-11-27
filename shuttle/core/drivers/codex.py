@@ -109,6 +109,12 @@ def check(settings: Settings, facts: DriverFacts) -> tuple[str, str] | None:
         return "missing_setting", "network is not in the document: say 'on' or 'off'"
     if facts["changes_allowed"] is None:
         return "missing_setting", "changes_to_place is not in the document: say 'allowed' or 'not'"
+    if facts["network"] and not facts["changes_allowed"]:
+        return (
+            "unknown_setting",
+            "this driver cannot offer the network without changes to the place (its read-only "
+            "sandbox has no network setting): set network off, or changes_to_place allowed",
+        )
     if not facts["tool_found"]:
         return (
             "tool_not_installed",
@@ -158,9 +164,11 @@ def output_files(run_area: str) -> OutputFiles:
 def launch(settings: Settings, context: LaunchContext) -> LaunchSpec:
     """`exec` mode with the event stream on standard output and the final message in a file.
 
-    The two standard settings become the tool's own sandbox: changes allowed or not is its
-    workspace-write or read-only mode, network on or off is its sandbox's network setting. The
-    sandbox is always on.
+    Changes to the place allowed is the tool's workspace-write sandbox, not allowed its read-only
+    one; the sandbox is always on. The network is a setting of the workspace-write sandbox only,
+    so network on with changes not allowed is refused by `check` (and the launch is never asked
+    for it); with changes allowed the network is that setting, true or false. To be confirmed on
+    the first real run.
     """
     files = output_files(context["run_area"])
     argv = [PROGRAM, "exec", "-C", context["place"], "-m", settings["model"]]

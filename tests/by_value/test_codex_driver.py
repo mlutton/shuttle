@@ -81,6 +81,11 @@ class TheCheck(unittest.TestCase):
                 {**FOUND, "changes_allowed": None},
                 "missing_setting",
             ),
+            "the network on with no changes to the place": (
+                SETTINGS,
+                {**FOUND, "network": True, "changes_allowed": False},
+                "unknown_setting",
+            ),
             "a missing tool": (SETTINGS, {**FOUND, "tool_found": False}, "tool_not_installed"),
             "a missing login": (SETTINGS, {**FOUND, "login_found": False}, "no_login"),
         }
@@ -91,6 +96,16 @@ class TheCheck(unittest.TestCase):
                 self.assertEqual(got[0], reason)
                 self.assertIn(reason, fixed.REASONS_BY_ENDING["could_not_start"])
                 self.assertTrue(got[1])
+
+    def test_the_refusal_of_network_without_changes_says_why(self):
+        got = codex.check(SETTINGS, {**FOUND, "network": True, "changes_allowed": False})
+        self.assertIn("cannot offer the network without changes to the place", got[1])
+
+    def test_the_other_three_combinations_of_the_standard_settings_pass(self):
+        for network, changes in ((False, True), (True, True), (False, False)):
+            with self.subTest(network=network, changes=changes):
+                facts = {**FOUND, "network": network, "changes_allowed": changes}
+                self.assertIsNone(codex.check(SETTINGS, facts))
 
     def test_good_settings_pass_with_or_without_an_effort(self):
         self.assertIsNone(codex.check(SETTINGS, FOUND))
