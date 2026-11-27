@@ -200,17 +200,31 @@ def _payload(record: list[dict[str, Any]] | None, kind: str) -> dict[str, Any] |
     return None
 
 
+def _count(held: object) -> int | None:
+    """A token count the tool gave: a whole number that is not negative; anything else is not one."""
+    return held if isinstance(held, int) and not isinstance(held, bool) and held >= 0 else None
+
+
 def _tokens(events: list[dict[str, Any]] | None) -> tuple[Pair, Pair, Pair]:
-    """Tokens in, out and cached, summed over the turns the stream finished."""
+    """Tokens in, out and cached, summed over the turns the stream finished.
+
+    No finished turn is "none" (the run did not get that far, and the tool gives no usage then).
+    A count a finished turn does not give as a number is "cannot tell", never zero.
+    """
     if events is None:
         return pairs.cannot_tell(), pairs.cannot_tell(), pairs.cannot_tell()
-    usages = [e["usage"] for e in events if e.get("type") == "turn.completed"]
-    usages = [u for u in usages if isinstance(u, dict)]
-    if not usages:  # a run that did not finish a turn reports no usage
+    turns = [e for e in events if e.get("type") == "turn.completed"]
+    if not turns:
         return pairs.none(), pairs.none(), pairs.none()
+    usages: list[dict[str, Any]] = [
+        t["usage"] if isinstance(t.get("usage"), dict) else {} for t in turns
+    ]
 
     def total(name: str) -> Pair:
-        return pairs.value(sum(_number(u.get(name)) or 0 for u in usages))
+        counts = [_count(u.get(name)) for u in usages]
+        if any(c is None for c in counts):
+            return pairs.cannot_tell()
+        return pairs.value(sum(c for c in counts if c is not None))
 
     return total("input_tokens"), total("output_tokens"), total("cached_input_tokens")
 
@@ -246,16 +260,18 @@ def _is_question(message: str | None) -> Pair:
 
 def observe(settings: Settings, saved: SavedOutput) -> Observed:
     """The driver group from the saved event stream, last message and session record, and the
-    last message as the statement. A file that could not be read, or a field it lacks, is "cannot
-    tell"; a stream that ran but holds no usage (a run that ended before its turn did) is "none".
+    last message as the statement. A file that could not be read, or a field it lacks (a count
+    that is not a number, a start with no id), is "cannot tell"; "none" is for a stream that ran
+    and holds no finished turn or no start at all.
 
     Time is not here: the tool writes none, and the run's own clock measures it.
     """
     events, record = _lines(saved["events"]), _lines(saved["session_record"])
     started = None if events is None else _first(events, "thread.started")
     session = pairs.cannot_tell() if events is None else pairs.none()
-    if started and isinstance(started.get("thread_id"), str) and started["thread_id"]:
-        session = pairs.value(started["thread_id"])
+    if started:  # a start that gives no usable id is a field the tool lacks
+        held = started.get("thread_id")
+        session = pairs.value(held) if isinstance(held, str) and held else pairs.cannot_tell()
     done = None if events is None else sum(1 for e in events if e.get("type") == "item.completed")
     unknown = pairs.cannot_tell()
     tokens_in, tokens_out, tokens_cached = _tokens(events)

@@ -267,6 +267,109 @@ class Observing(unittest.TestCase):
         self.assertIsNone(codex.observe(SETTINGS, empty)["statement_text"])
 
 
+def turn(usage):
+    return json.dumps({"type": "turn.completed", "usage": usage})
+
+
+def from_events(*lines):
+    text = "".join(line + "\n" for line in lines)
+    return codex.observe(SETTINGS, {"events": text, "last_message": None, "session_record": None})[
+        "group"
+    ]
+
+
+class TheCountsAndTheSessionIdAreNeverInvented(unittest.TestCase):
+    """A count the output lacks is "cannot tell", never zero; "none" is only for a stream that
+    looked and held no finished turn at all."""
+
+    CANNOT = ("cannot tell", None)
+
+    def test_each_shape_of_usage_gives_each_count_its_own_state(self):
+        full = {"input_tokens": 5, "cached_input_tokens": 2, "output_tokens": 3}
+        cases = {
+            "all present": ([turn(full)], ("value", 5), ("value", 3), ("value", 2)),
+            "two turns are summed": (
+                [turn(full), turn(full)],
+                ("value", 10),
+                ("value", 6),
+                ("value", 4),
+            ),
+            "one count missing": (
+                [turn({"input_tokens": 5, "output_tokens": 3})],
+                ("value", 5),
+                ("value", 3),
+                self.CANNOT,
+            ),
+            "an empty object": ([turn({})], self.CANNOT, self.CANNOT, self.CANNOT),
+            "a text where a number belongs": (
+                [turn({**full, "input_tokens": "5"})],
+                self.CANNOT,
+                ("value", 3),
+                ("value", 2),
+            ),
+            "a truth value where a number belongs": (
+                [turn({**full, "output_tokens": True})],
+                ("value", 5),
+                self.CANNOT,
+                ("value", 2),
+            ),
+            "a negative number": (
+                [turn({**full, "input_tokens": -1})],
+                self.CANNOT,
+                ("value", 3),
+                ("value", 2),
+            ),
+            "a usage that is not an object": (
+                [turn("many")],
+                self.CANNOT,
+                self.CANNOT,
+                self.CANNOT,
+            ),
+            "no usage key": (
+                ['{"type": "turn.completed"}'],
+                self.CANNOT,
+                self.CANNOT,
+                self.CANNOT,
+            ),
+            "one turn good and one lacking a count": (
+                [turn(full), turn({"input_tokens": 1, "output_tokens": 1})],
+                ("value", 6),
+                ("value", 4),
+                self.CANNOT,
+            ),
+            "no turn finished": (
+                ['{"type": "turn.started"}'],
+                ("none", None),
+                ("none", None),
+                ("none", None),
+            ),
+        }
+        for label, (lines, tokens_in, tokens_out, tokens_cached) in cases.items():
+            with self.subTest(label):
+                got = from_events(*lines)
+                self.assertEqual(state_of(got["tokens_in"]), tokens_in)
+                self.assertEqual(state_of(got["tokens_out"]), tokens_out)
+                self.assertEqual(state_of(got["tokens_cached"]), tokens_cached)
+
+    def test_the_session_id_is_none_without_a_start_and_cannot_tell_without_an_id(self):
+        cases = {
+            "an id": (
+                '{"type": "thread.started", "thread_id": "thread-0009"}',
+                ("value", "thread-0009"),
+            ),
+            "a start with no id": ('{"type": "thread.started"}', self.CANNOT),
+            "a start with an id that is not text": (
+                '{"type": "thread.started", "thread_id": 7}',
+                self.CANNOT,
+            ),
+            "a start with a blank id": ('{"type": "thread.started", "thread_id": ""}', self.CANNOT),
+            "no start": ('{"type": "turn.started"}', ("none", None)),
+        }
+        for label, (line, expected) in cases.items():
+            with self.subTest(label):
+                self.assertEqual(state_of(from_events(line)["session_id"]), expected)
+
+
 class AQuestionAsTheLastMessage(unittest.TestCase):
     def test_it_is_a_statement_of_the_wrong_shape_and_the_run_ended_by_itself(self):
         observed = codex.observe(
