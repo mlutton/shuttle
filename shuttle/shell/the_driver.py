@@ -29,12 +29,17 @@ def caller_variables(world: Operations, driver: Driver) -> dict[str, str]:
     return found
 
 
+def find_program(world: Operations, raw: Mapping[str, Any]) -> str | None:
+    """Where the caller's machine finds the program the driver needs, or None."""
+    return world.processes.find_program(of(raw).program(raw["executor"]["settings"]))
+
+
 def facts(world: Operations, raw: Mapping[str, Any]) -> DriverFacts:
     driver = of(raw)
     login = driver.login_path(caller_variables(world, driver))
     network, changes = decisions.standard_settings(raw)
     return {
-        "tool_found": world.processes.find_program(driver.program(raw["executor"]["settings"])),
+        "tool_found": find_program(world, raw) is not None,
         "login_found": login is not None and world.files.exists(login),
         "network": network,
         "changes_allowed": changes,

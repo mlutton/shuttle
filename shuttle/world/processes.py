@@ -21,8 +21,9 @@ class _Child(subprocess.Popen[bytes]):
     report_text: str | None = None
 
 
-def find_program(command: str) -> bool:
-    return shutil.which(command) is not None
+def find_program(command: str) -> str | None:
+    found = shutil.which(command)
+    return None if found is None else os.path.abspath(found)
 
 
 def open_report() -> int:
