@@ -32,14 +32,19 @@ def open_report() -> int:
 
 
 def start(
-    argv: Sequence[str], environment: Mapping[str, str], report: int | None = None
+    argv: Sequence[str],
+    environment: Mapping[str, str],
+    report: int | None = None,
+    input_from: str | None = None,
 ) -> subprocess.Popen[bytes]:
     held = _opened.pop(report) if report is not None else None
+    given = None
     try:
+        given = open(input_from, "rb") if input_from is not None else None  # noqa: SIM115
         child = _Child(
             list(argv),
             env=dict(environment),
-            stdin=subprocess.DEVNULL,
+            stdin=given if given is not None else subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             pass_fds=(held[1],) if held else (),
@@ -49,6 +54,8 @@ def start(
             os.close(held[0])
         raise
     finally:
+        if given is not None:
+            given.close()
         if held:
             os.close(held[1])  # only the child holds the write end now
     if held:

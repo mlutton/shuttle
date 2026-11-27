@@ -49,6 +49,7 @@ class _Child:
         self.unit = unit
         self.returncode = None
         self.report = ""
+        self.input = b""  # what it was given on its standard input
 
 
 _GONE = {"LoadState": "not-found", "ActiveState": "inactive", "Result": "success"}
@@ -88,6 +89,8 @@ class SimulatedWorld:
         self._reports = 0
         self._handlers = []
         self._ids = 0
+        self._temporary = 0
+        self.read_only = set()  # names the owner may not write
         self.the_freeze = None  # None, "fails" (git ends with an error) or "times_out" (the limit)
         self.refs = {}  # reference -> commit, as the freeze made them
         self.commits = {}  # commit -> {"files": name to bytes, "parent": commit or None}
@@ -102,6 +105,12 @@ class SimulatedWorld:
                 hash=self._hash,
                 remove=self._remove,
                 usable_folder=self._usable_folder,
+                make_temporary_folder=self._make_temporary_folder,
+                make_folders=self._make_folders,
+                copy_path=self._copy_path,
+                share_by_link=self._share_by_link,
+                make_writable=self._make_writable,
+                remove_tree=self._remove_tree,
             ),
             processes=ProcessOperations(
                 find_program=self._find_program,
@@ -390,6 +399,75 @@ class SimulatedWorld:
             raise FileNotFoundError(path)
         del self.files[path]
 
+    def _make_temporary_folder(self, prefix):
+        self._enter("files.make_temporary_folder", prefix)
+        self._temporary += 1
+        return self.make_folder(f"/tmp/{prefix}{self._temporary:06d}")
+
+    def _make_folders(self, path):
+        self._enter("files.make_folders", path)
+        if path in self.files or path in self.links or path in self.special:
+            raise FileExistsError(path)
+        self.make_folder(path)
+
+    def _below(self, path):
+        """Every name held strictly below a folder, of any kind."""
+        prefix = path + "/"
+        held = [*self.files, *self.folders, *self.links, *self.dangling, *self.special]
+        return sorted({name for name in held if name.startswith(prefix)})
+
+    def _copy_path(self, existing, new, left_out):
+        self._enter("files.copy_path", existing, new, tuple(left_out))
+        kind, _ = self._look(existing, False)
+        if kind == "link" or kind == "special":
+            raise NotARegularFile(existing)
+        if not self._parent_exists(new):
+            raise FileNotFoundError(existing)
+        if self._taken(new):
+            raise FileExistsError(new)
+        if kind == "file":
+            self.files[new] = bytearray(self.files[existing])
+            return
+        left = [f"{existing}/{name}" for name in left_out]
+        self.folders.add(new)
+        for name in self._below(existing):
+            if any(name == gone or name.startswith(gone + "/") for gone in left):
+                continue
+            target = new + name[len(existing) :]
+            if name in self.files:
+                self.files[target] = bytearray(self.files[name])
+            elif name in self.folders:
+                self.folders.add(target)
+
+    def _share_by_link(self, existing, new):
+        self._enter("files.share_by_link", existing, new)
+        if not self._taken(existing) or existing in self.dangling:
+            raise FileNotFoundError(existing)
+        if not self._parent_exists(new):
+            raise FileNotFoundError(new)
+        if self._taken(new):
+            raise FileExistsError(new)
+        self.links[new] = existing
+
+    def _make_writable(self, path):
+        self._enter("files.make_writable", path)
+        kind, _ = self._look(path, False)
+        if kind == "link":
+            raise NotARegularFile(path)
+        self.read_only -= {path, *self._below(path)}
+
+    def _remove_tree(self, path):
+        self._enter("files.remove_tree", path)
+        kind, _ = self._look(path, False)
+        if kind != "folder":
+            raise NotADirectoryError(path)
+        for name in [*self._below(path), path]:
+            self.files.pop(name, None)
+            self.folders.discard(name)
+            self.links.pop(name, None)
+            self.dangling.discard(name)
+            self.special.discard(name)
+
     def _find_program(self, command):
         self._enter("processes.find_program", command)
         return command in self.programs
@@ -412,8 +490,9 @@ class SimulatedWorld:
             return inside[inside.index("--") + 1 :], unit, False
         return inside, unit, False
 
-    def _start(self, argv, environment, report=None):
-        self._enter("processes.start", list(argv), dict(environment))
+    def _start(self, argv, environment, report=None, input_from=None):
+        self._enter("processes.start", list(argv), dict(environment), input_from)
+        given = b"" if input_from is None else self.files[self._regular(input_from, True)]
         if any("\0" in part for part in argv):
             raise ValueError("embedded null byte")
         executor, unit, gate = self._what_runs(argv)
@@ -424,6 +503,7 @@ class SimulatedWorld:
             self.files[name] = bytearray(b"1")
         self.started.append((list(argv), dict(environment)))
         child = _Child(executor, behaviour, unit)
+        child.input = bytes(given)
         if not behaviour["hangs"]:
             child.returncode = behaviour["exit_code"]
         if report is not None:

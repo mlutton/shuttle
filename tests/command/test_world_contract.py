@@ -71,8 +71,36 @@ class RealHarness:
                 "import os, sys; os.write(int(sys.argv[1]), b'hello\\n')",
                 str(fd),
             ],
+            "copies_its_input": [
+                python,
+                "-c",
+                "import sys; open(sys.argv[1], 'wb').write(sys.stdin.buffer.read())",
+                report,
+            ],
             "not_a_program": [os.path.join(self.root, "no-such-program")],
         }[kind]
+
+    def what_the_child_read(self):
+        with open(self.last_report, "rb") as f:
+            return f.read()
+
+    def everything_below(self, folder):
+        found = []
+        for where, names, files in os.walk(folder):
+            for name in [*names, *files]:
+                path = os.path.join(where, name)
+                kind = "@" if os.path.islink(path) else "/" if os.path.isdir(path) else ""
+                found.append(os.path.relpath(path, folder) + kind)
+        return sorted(found)
+
+    def is_a_link(self, path):
+        return os.path.islink(path)
+
+    def make_read_only(self, path):
+        os.chmod(path, os.stat(path).st_mode & ~0o222)
+
+    def is_writable(self, path):
+        return bool(os.stat(path).st_mode & 0o200)
 
     def streams_the_child_saw(self):
         return tuple(self.reported().split())
