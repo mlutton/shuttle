@@ -1,16 +1,13 @@
 """The run area: the run's own folder, and the plan for what a driver asks to be set up in it.
 
-A driver says, as data, what its tool needs: a path copied in (some of what is below it left
-out), a path shared in place by a link (the tool reads and writes the original, so nothing is
-copied and nothing is read here), a variable passed, a path made writable, a file written from
-text. This module turns those requests into a plan of whole paths, or says why they are refused;
-the shell acts on the plan through the world's operations. Nothing here touches the world.
+A driver says what its tool needs, as data. This module turns those requests into a plan of
+whole paths, or says why they are refused; the shell acts on the plan through the world's
+operations. Nothing here touches the world.
 
-Every name in the run area is relative to the area, made of letters, digits, `.`, `_` and `-`
-in parts joined by `/`, and never `.` or `..` as a part, so nothing a request names can be
-outside the area. A source, outside the area, is any absolute path: it is only handed on, never
-split or quoted. A name that sits under a shared name is refused (a write there would land in
-the original); so is a name made twice.
+Why the refusals are what they are: a name is plain and relative so nothing a request names can
+be outside the area; a source is only handed on, never split or quoted; a shared path is linked,
+never copied or read, so a name under it is refused, since a write there would land in the
+original.
 """
 
 import re
