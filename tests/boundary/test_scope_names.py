@@ -108,7 +108,20 @@ class TwoRunsOfOneRequestIdAtOnce(real_run.RealRun):
 
 class UnitsOfTheOldNamesHeldByAnotherUser(real_run.RealRun):
     # The names a run took before they carried a part of its own, and the one before that.
-    OLD_NAMES = ("shuttle-r-1", "shuttle-run-r-1", "shuttle-gate-r-1-0", "shuttle-freeze-r-1")
+    def setUp(self):
+        super().setUp()
+        # A request id of its own, so that the old names held here are this test's alone and
+        # another suite's test of the same kind (or of this one) holds other names.
+        self.request_id = "old-" + uuid.uuid4().hex[:8]
+        self.old_names = tuple(
+            template.format(self.request_id)
+            for template in (
+                "shuttle-{}",
+                "shuttle-run-{}",
+                "shuttle-gate-{}-0",
+                "shuttle-freeze-{}",
+            )
+        )
 
     def hold(self, name, how):
         """A unit of `name`, made by this test and not by a run: running, or failed (made by
@@ -144,13 +157,13 @@ class UnitsOfTheOldNamesHeldByAnotherUser(real_run.RealRun):
         return done.stdout.strip()
 
     def assert_the_run_ends_as_it_would_alone_and_the_units_are_left(self, how, still):
-        holders = {name: self.hold(name, how) for name in self.OLD_NAMES}
+        holders = {name: self.hold(name, how) for name in self.old_names}
         script = self.script("ends.py", "raise SystemExit(0)")
-        doc = self.document(script)
+        doc = self.document(script, request_id=self.request_id)
         doc["gates"] = [{"name": "g", "command": "/bin/true", "arguments": [], "limit_seconds": 60}]
         code, lines, err = self.run_to_the_end(doc)
         self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
-        ending = flat(self.outcome()["receipt"])["ending"]
+        ending = flat(self.outcome(self.request_id)["receipt"])["ending"]
         self.assertEqual(
             (ending["ending"], ending["reason"], ending["failed_step"]),
             ("ended_by_itself", "none", "none"),
