@@ -48,12 +48,16 @@ def outer_limit_is_lower(which, kilobytes):
     return hard != resource.RLIM_INFINITY and hard < kilobytes * 1024
 
 
+def skip_when_the_script_would_refuse(case):
+    if outer_limit_is_lower(resource.RLIMIT_AS, ADDRESS_KB) or outer_limit_is_lower(
+        resource.RLIMIT_FSIZE, FILE_BLOCKS // 2
+    ):
+        case.skipTest("this shell's own limit is below the script's; the script refuses to run")
+
+
 class CheckScriptTest(unittest.TestCase):
     def setUp(self):
-        if outer_limit_is_lower(resource.RLIMIT_AS, ADDRESS_KB) or outer_limit_is_lower(
-            resource.RLIMIT_FSIZE, FILE_BLOCKS // 2
-        ):
-            self.skipTest("this shell's own limit is below the script's; the script refuses to run")
+        skip_when_the_script_would_refuse(self)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.stand_in = os.path.join(folder.name, "python")
@@ -220,6 +224,7 @@ class InterpreterLookupTest(unittest.TestCase):
     """Which interpreter all.sh picks when PYTHON is unset, in a clone and a linked worktree."""
 
     def setUp(self):
+        skip_when_the_script_would_refuse(self)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.root = folder.name
