@@ -12,10 +12,12 @@ import io
 import os
 import sys
 import types
+import typing
 import unittest
 
 from shuttle.core import decisions, run_area
 from shuttle.core.drivers import command, table
+from shuttle.core.shapes import SetupAction
 from shuttle.shell import check_form
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -106,6 +108,26 @@ class WhetherTheReplyBecomesTheStatement(unittest.TestCase):
                 self.assertEqual(
                     decisions.copy_reply_to_statement(arrives, location, taken, given), expected
                 )
+
+
+class EveryNameHasItsEntry(unittest.TestCase):
+    """The type checker does not catch a name with no table entry; these do."""
+
+    def test_the_setup_actions_table_has_an_entry_for_each_member_of_the_type_and_no_other(self):
+        self.assertEqual(set(run_area.ACTIONS), set(typing.get_args(SetupAction)))
+
+    def test_the_drivers_table_has_an_entry_for_each_driver_module_and_no_other(self):
+        folder = os.path.join(
+            os.path.dirname(os.path.dirname(SAVED)), "..", "shuttle", "core", "drivers"
+        )
+        modules = {
+            name[:-3]
+            for name in os.listdir(folder)
+            if name.endswith(".py") and name not in ("__init__.py", "interface.py", "table.py")
+        }
+        self.assertEqual(set(table.DRIVERS), modules)
+        for name, driver in table.DRIVERS.items():
+            self.assertEqual(driver.__name__.rpartition(".")[2], name)
 
 
 class NothingOutsideTheTableNamesADriver(unittest.TestCase):

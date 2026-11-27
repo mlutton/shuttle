@@ -72,9 +72,9 @@ def _name_problem(index: int, request: SetupRequest, field: str = "name") -> str
 class _Action:
     """What one setup action is: how its request is checked, and what it becomes.
 
-    `role` is how the flow treats it: "makes" a path (a name made once, never under a shared
-    one), "edits" a path an earlier request made, "passes" a variable, or "leaves_out" a name
-    from the copies.
+    `role` picks the rule between requests the flow applies to it: a path made is made once and
+    never under a shared one; a path edited was made by an earlier request; a variable is passed
+    once; a name left out applies to every copy that holds it.
     """
 
     role: Literal["makes", "edits", "passes", "leaves_out"]
@@ -207,7 +207,10 @@ class _Variable(_Action):
         return {request["variable"]: value}
 
 
-# From an action's name to what it is. A new action is one block above and one entry here.
+# From an action's name to its block. A new action also needs its name in `SetupAction` and its
+# fields in `SetupRequest` (shapes.py), a step kind and a case in the shell's `match` only if it
+# does something no step does, and a role only if it follows a rule no role has. A test fails
+# for a name in `SetupAction` with no entry here.
 ACTIONS: dict[SetupAction, _Action] = {
     "copy": _Copy(),
     "share": _Share(),
@@ -223,7 +226,6 @@ def _shape_problem(index: int, request: object) -> str | None:
     action = request.get("action") if isinstance(request, dict) else None
     if not isinstance(action, str) or action not in ACTIONS:
         return f"setup request {index + 1} is not one of: {', '.join(ACTIONS)}"
-    # The action is known; its block looks at the fields one by one.
     return ACTIONS[cast(SetupAction, action)].shape_problem(index, cast(SetupRequest, request))
 
 

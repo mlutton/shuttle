@@ -1,8 +1,8 @@
 """The executor driver a document names, and what the shell gathers for it.
 
 The only module of the shell that reaches the table of drivers: every step asks here, so no step
-names a driver. What is gathered is looked at, never opened: whether the program is found, and
-whether the login's name is there.
+names a driver. What is gathered is looked at, never opened: whether the program is found,
+whether the login's name is there, and whether each source the driver's setup needs is there.
 """
 
 from collections.abc import Iterator, Mapping

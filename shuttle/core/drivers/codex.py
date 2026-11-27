@@ -133,9 +133,11 @@ def _keep(name: str) -> SetupRequest:
 
 
 def setup_requests(settings: Settings, environment: Mapping[str, str]) -> list[SetupRequest]:
-    """A tool home inside the run area holding the settings file (copied) and the login (shared
-    by a link, never copied or opened). Nothing else of the caller's tool home is taken: its
-    history, sessions and caches are left behind because they are never named."""
+    """A tool home inside the run area holding the settings file (copied, when there is one) and
+    the login (shared by a link, never copied or opened), folders for temporary files, caches
+    and saved output, and the variables that point the tool at them. Nothing else of the
+    caller's tool home is taken: its history, sessions and caches are left behind because they
+    are never named."""
     home = _tool_home(environment)
     if home is None:
         return []
@@ -186,7 +188,8 @@ def launch(settings: Settings, context: LaunchContext) -> LaunchSpec:
 
 # ---------------------------------------------------------------------------- observing
 
-# The events whose fields a number or an id is read from; a cut line of any other kind is no loss.
+# The events a number or an id is read from. A cut line of another kind that its first bytes name
+# is no loss; one whose kind they do not name may have been one of these.
 _READ_FROM = ("turn.completed", "thread.started")
 _KIND = re.compile(rb'\{\s*"type"\s*:\s*"([A-Za-z0-9_.]+)"')
 _COUNTS = {
