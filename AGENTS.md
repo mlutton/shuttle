@@ -17,3 +17,4 @@
 - writing code that takes a file name or judges an import: the hostile-case tables in `tests/hostile/`
 - you need to know what the checks do: `README.md`
 - naming what a run starts, reaches or leaves behind: `GLOSSARY.md`
+- why something is the way it is: `docs/decisions/`
