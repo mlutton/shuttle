@@ -36,7 +36,12 @@ INSTRUCTION_NAME = "shuttle-instruction.txt"
 # Where the executor writes its statement, in place of the document's own statement location. No
 # request may name it.
 STATEMENT_NAME = "shuttle-statement.json"
-_KEPT_NAMES = (INSTRUCTION_NAME, STATEMENT_NAME)
+# Where the command driver writes the executor's standard output and standard error, and where the
+# Codex driver writes its standard error (its standard output is its event stream file). No
+# request may name either.
+STANDARD_OUTPUT_NAME = "shuttle-standard-output"
+STANDARD_ERROR_NAME = "shuttle-standard-error"
+_KEPT_NAMES = (INSTRUCTION_NAME, STATEMENT_NAME, STANDARD_OUTPUT_NAME, STANDARD_ERROR_NAME)
 # The executor's home and its temporary folder, made in every area before any request is carried
 # out. They are made here, never by a request, so the box can bind them whatever a driver asks.
 HOME_NAME = "home"
@@ -92,6 +97,14 @@ def statement_path(area: str) -> str:
     return _inside(area, STATEMENT_NAME)
 
 
+def standard_output_path(area: str) -> str:
+    return _inside(area, STANDARD_OUTPUT_NAME)
+
+
+def standard_error_path(area: str) -> str:
+    return _inside(area, STANDARD_ERROR_NAME)
+
+
 def _refused(why: str) -> SetupPlan:
     return {"steps": [], "variables": {}, "problem": why}
 
@@ -107,7 +120,7 @@ def _name_problem(index: int, request: SetupRequest, field: str = "name") -> str
         if name == kept or _under(name, kept):
             return (
                 f"setup request {index + 1}: the name {kept!r} and anything below it are "
-                "kept for the instruction and the statement"
+                "kept for the instruction, the statement and the executor's output"
             )
     return None
 

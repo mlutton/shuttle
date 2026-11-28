@@ -82,6 +82,11 @@ class RealHarness:
                 report,
             ],
             "prints_hello": [python, "-c", "print('hello')"],
+            "prints_to_error": [
+                python,
+                "-c",
+                "import sys; print('oops', file=sys.stderr)",
+            ],
             "not_a_program": [os.path.join(self.root, "no-such-program")],
         }[kind]
 
@@ -97,6 +102,9 @@ class RealHarness:
                 kind = "@" if os.path.islink(path) else "/" if os.path.isdir(path) else ""
                 found.append(os.path.relpath(path, folder) + kind)
         return sorted(found)
+
+    def mode_of(self, path):
+        return os.stat(path).st_mode & 0o777
 
     def is_a_link(self, path):
         return os.path.islink(path)

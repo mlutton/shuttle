@@ -294,7 +294,9 @@ def step_runs(step: str, facts: Mapping[str, object]) -> bool:
     """Whether a step runs, given the facts so far.
 
     The last step always runs. The first runs once, until a header is formed. After a refusal only the claim of the request id
-    (when a header exists) and the last step run. A stop that is not confirmed
+    (when a header exists), the tear-down (once set-up was tried) and the last step run; after
+    `program_not_started` the step that moves kept files runs too, since the box was started and its
+    own output is in the executor's files. A stop that is not confirmed
     takes no closing freeze and delivers nothing.
     """
     if step == "write_outcome_record":
@@ -307,6 +309,9 @@ def step_runs(step: str, facts: Mapping[str, object]) -> bool:
         return facts.get("header_source") is not None
     if step == "tear_down":  # the run area is removed whatever the ending, once set-up was tried
         return facts.get("header_source") is not None and "setup" in facts
+    if step == "move_kept_files" and facts.get("launch") == "program_not_started":
+        # The box was started, and what it printed in complaint is in the executor's files.
+        return facts.get("header_source") is not None and facts.get("setup") == "ok"
     if facts.get("header_source") is None or _failed_before_launch(facts):
         return False
     # Nothing is frozen or delivered unless the stop is confirmed: until then something may still
@@ -845,6 +850,9 @@ def _execution_group_of(value: Pair) -> ExecutionGroup:
         "peak_memory_bytes": value,
         "processor_time_seconds": value,
         "session_file_kept_at": value,
+        "standard_output_kept": value,
+        "standard_error_kept": value,
+        "final_message_kept": value,
         "teardown_failure": value,
         "stop_reason": value,
         "stop_asker": value,
@@ -950,6 +958,9 @@ def _assemble(decision: Mapping[str, object], facts: ReceiptFacts) -> Receipt:
         if launched
         else unlooked,
         "session_file_kept_at": _from_step(steps.get("kept_files"), "session_file"),
+        "standard_output_kept": _from_step(steps.get("kept_files"), "standard_output_kept"),
+        "standard_error_kept": _from_step(steps.get("kept_files"), "standard_error_kept"),
+        "final_message_kept": _from_step(steps.get("kept_files"), "final_message_kept"),
         "teardown_failure": _from_step(steps.get("teardown"), "failure"),
         "stop_reason": _from_step(steps.get("stop_confirmation"), "stop_reason"),
         "stop_asker": _from_step(steps.get("stop_confirmation"), "stop_asker"),

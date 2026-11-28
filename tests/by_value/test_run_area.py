@@ -133,7 +133,12 @@ class ThePlan(unittest.TestCase):
                 {"action": "variable", "variable": "A", "in_run_area": ".."}
             ],
         }
-        kept_names = (run_area.INSTRUCTION_NAME, run_area.STATEMENT_NAME)
+        kept_names = (
+            run_area.INSTRUCTION_NAME,
+            run_area.STATEMENT_NAME,
+            run_area.STANDARD_OUTPUT_NAME,
+            run_area.STANDARD_ERROR_NAME,
+        )
         for name in (n + tail for n in kept_names for tail in ("", "/z", "/a/b")):
             for action in (
                 copy(name),

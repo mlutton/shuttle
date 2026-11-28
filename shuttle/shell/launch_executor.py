@@ -87,8 +87,14 @@ def step(state: RunState) -> None:
     )
     state["started_at"] = world.clock.timestamp()
     state["clock_start"] = world.clock.now()
+    files = the_driver.of(raw).output_files(state["run_area"])
     state["boundary_process"] = world.processes.start(
-        argv, environment, report, instruction_file, spec.get("output_to")
+        argv,
+        environment,
+        report,
+        instruction_file,
+        files.get("standard_output"),
+        files.get("standard_error"),
     )
     state["boundary_name"] = name
     # Peak memory and processor time are not read from the boundary yet.

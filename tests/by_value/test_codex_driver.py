@@ -142,7 +142,14 @@ class TheLaunchCommand(unittest.TestCase):
         self.assertEqual(argv[argv.index("-m") + 1], "example-model")
         self.assertIn("--json", argv)
         self.assertEqual(argv[argv.index("-o") + 1], f"{AREA}/out/last-message.txt")
-        self.assertEqual(codex.launch(SETTINGS, context())["output_to"], f"{AREA}/out/events.jsonl")
+        self.assertNotIn("output_to", codex.launch(SETTINGS, context()))  # `output_files` says
+
+    def test_the_event_stream_is_its_standard_output_and_its_errors_go_to_the_areas_own_file(self):
+        files = codex.output_files(AREA)
+        self.assertEqual(files["standard_output"], f"{AREA}/out/events.jsonl")
+        self.assertEqual(files["events"], files["standard_output"])
+        self.assertEqual(files["last_message"], f"{AREA}/out/last-message.txt")
+        self.assertEqual(files["standard_error"], run_area.standard_error_path(AREA))
 
     def test_the_two_standard_settings_become_the_tools_own_sandbox(self):
         for network, changes, mode, net in (

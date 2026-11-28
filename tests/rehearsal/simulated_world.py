@@ -97,6 +97,7 @@ class SimulatedWorld:
         self.locked_elsewhere = set()  # lock files another process holds
         self.foreign = set()  # names another user owns
         self.read_only = set()  # names the owner may not write
+        self.modes = {}  # the permission bits of a file made owner-only; any other file is 0o644
         self.memory_cap = (
             "held"  # what a trial scope's cgroup shows: "held", "ignored" or "unreadable"
         )
@@ -112,6 +113,7 @@ class SimulatedWorld:
                 write_new=self._write_new,
                 link=self._link,
                 copy=self._copy,
+                copy_private=self._copy_private,
                 hash=self._hash,
                 remove=self._remove,
                 usable_folder=self._usable_folder,
@@ -260,6 +262,7 @@ class SimulatedWorld:
         fails_to_start=False,
         report=None,
         output="",
+        error="",
         writes=None,
         cannot_exec=False,
         oom_kills=False,
@@ -283,7 +286,7 @@ class SimulatedWorld:
         a non-zero `exit_code` it saw the program killed first and ended as that number. `report` is the text a child writes
         to the report it was given.
         `output` is the text it writes to its standard output when that is a file it was given
-        (`output_to`); `writes` maps names to the text of files it makes as it starts."""
+        (`output_to`), `error` the same for its standard error (`error_to`); `writes` maps names to the text of files it makes as it starts."""
         assert not cannot_exec or (
             exit_code == 0 and not (hangs or times_out or oom_kills or survives_stop)
         ), "cannot_exec says nothing else: the program never runs, so no exit code and no hang"
@@ -298,6 +301,7 @@ class SimulatedWorld:
             "cannot_exec": cannot_exec,
             "report": report,
             "output": output,
+            "error": error,
             "writes": dict(writes or {}),
         }
 
@@ -456,6 +460,19 @@ class SimulatedWorld:
             raise FileExistsError(new)
         self.files[new] = bytearray(self.files[source])  # its own bytes, not a shared name
 
+    def _copy_private(self, existing, new):
+        self._enter("files.copy_private", existing, new)
+        source = self._regular(existing, False)
+        if not self._parent_exists(new):
+            raise FileNotFoundError(existing)
+        if self._taken(new):
+            raise FileExistsError(new)
+        self.files[new] = bytearray(self.files[source])
+        self.modes[new] = 0o600
+
+    def mode_of(self, path):
+        return self.modes.get(path, 0o644)
+
     def _hash(self, path):
         self._enter("files.hash", path)
         return hashlib.sha256(bytes(self.files[self._regular(path, True)])).hexdigest()
@@ -613,14 +630,15 @@ class SimulatedWorld:
             return inside[inside.index("--") + 1 :], unit, False
         return inside, unit, False
 
-    def _check_output_name(self, output_to):
-        if output_to is not None:
-            if self._taken(output_to):
-                raise FileExistsError(output_to)
-            if not self._parent_exists(output_to):
-                raise FileNotFoundError(output_to)
+    def _check_output_name(self, output_to, error_to=None):
+        for name in (output_to, error_to):
+            if name is not None:
+                if self._taken(name) or (name == error_to == output_to):
+                    raise FileExistsError(name)
+                if not self._parent_exists(name):
+                    raise FileNotFoundError(name)
 
-    def _make_files(self, behaviour, output_to):
+    def _make_files(self, behaviour, output_to, error_to=None):
         """What a child leaves as it starts: the files it creates and its standard output."""
         for name in behaviour["creates"]:
             self.files[name] = bytearray(b"1")
@@ -628,18 +646,22 @@ class SimulatedWorld:
             self.files[name] = bytearray(text.encode("utf-8"))
         if output_to is not None:
             self.files[output_to] = bytearray(behaviour["output"].encode("utf-8"))
+        if error_to is not None:
+            self.files[error_to] = bytearray(behaviour["error"].encode("utf-8"))
 
-    def _start(self, argv, environment, report=None, input_from=None, output_to=None):
+    def _start(
+        self, argv, environment, report=None, input_from=None, output_to=None, error_to=None
+    ):
         self._enter("processes.start", list(argv), dict(environment), input_from)
         given = b"" if input_from is None else self.files[self._regular(input_from, True)]
-        self._check_output_name(output_to)
+        self._check_output_name(output_to, error_to)
         if any("\0" in part for part in argv):
             raise ValueError("embedded null byte")
         executor, unit, gate = self._what_runs(argv)
         if not executor or executor[0] not in self.programs:
             raise FileNotFoundError(executor[0] if executor else "")
         behaviour = self.programs[executor[0]]
-        self._make_files(behaviour, output_to)
+        self._make_files(behaviour, output_to, error_to)
         self.started.append((list(argv), dict(environment)))
         child = _Child(executor, behaviour, unit)
         child.input = bytes(given)

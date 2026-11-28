@@ -302,7 +302,13 @@ class CommandSeam(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
-            sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"]
+            sorted(os.listdir(self.records)),
+            [
+                "req-1.outcome.json",
+                "req-1.request.json",
+                "req-1.standard-error.kept",
+                "req-1.standard-output.kept",
+            ],
         )
 
     def test_a_document_nested_deeper_than_some_pythons_can_write_as_json_gets_both_records_written_and_parseable(
@@ -351,7 +357,13 @@ class CommandSeam(unittest.TestCase):
         loser = next(out_err for out_err, code in results if code == 1)
         self.assertIn("already used", loser[1])
         self.assertEqual(
-            sorted(os.listdir(self.records)), ["req-1.outcome.json", "req-1.request.json"]
+            sorted(os.listdir(self.records)),
+            [
+                "req-1.outcome.json",
+                "req-1.request.json",
+                "req-1.standard-error.kept",
+                "req-1.standard-output.kept",
+            ],
         )
         self.assertEqual(self.read("req-1.request.json")["header"]["request_id"], "req-1")
         self.assertEqual(

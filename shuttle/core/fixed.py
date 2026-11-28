@@ -8,7 +8,7 @@ from typing import Final
 # Two version numbers, each checked on its own. The input document carries one (its key is
 # `format_version`); the records carry the other (the header's `record_version`).
 INPUT_VERSION = 1
-RECORD_VERSION = 4
+RECORD_VERSION = 5
 # The version of the notice execution adds to the instruction of a kind that expects a statement
 # (shuttle.core.notice). It changes whenever the notice's fixed words do.
 NOTICE_VERSION = 1
@@ -194,6 +194,9 @@ RECEIPT_GROUPS = {
         "peak_memory_bytes",
         "processor_time_seconds",
         "session_file_kept_at",
+        "standard_output_kept",
+        "standard_error_kept",
+        "final_message_kept",
         "teardown_failure",
         "stop_reason",
         "stop_asker",

@@ -257,6 +257,36 @@ class ContractCases:
                 self.assertRaisesExactly(NotARegularFile, self.world.files.copy, path, new)
                 self.assertFalse(self.world.files.exists(new))
 
+    def test_a_private_copy_is_a_copy_that_only_its_owner_can_read_or_write(self):
+        first, second = self.fresh("first"), self.fresh("second")
+        text = "no final newline, crlf\r\n, trailing spaces   "
+        self.world.files.write_new(first, text)
+        self.world.files.copy_private(first, second)
+        self.assertEqual(self.world.files.read(second), text.encode("utf-8"))
+        self.assertEqual(self.harness.mode_of(second), 0o600)
+        self.world.files.remove(first)
+        self.assertEqual(self.world.files.read(second), text.encode("utf-8"))
+
+    def test_a_private_copy_refuses_as_a_copy_does_and_makes_nothing(self):
+        first, second, folder = self.fresh("first"), self.fresh("second"), self.harness.folder()
+        self.world.files.write_new(first, "one")
+        self.world.files.write_new(second, "two")
+        self.assertRaisesExactly(FileExistsError, self.world.files.copy_private, first, second)
+        self.assertEqual(self.world.files.read(second), b"two")
+        for error, existing, new in (
+            (FileNotFoundError, f"{folder}/absent", f"{folder}/new"),
+            (FileNotFoundError, first, f"{self.fresh('absent')}/new"),
+            (IsADirectoryError, folder, f"{folder}/new"),
+        ):
+            with self.subTest(error=error.__name__):
+                self.assertRaisesExactly(error, self.world.files.copy_private, existing, new)
+                self.assertFalse(self.world.files.exists(new))
+        for label, path in self.not_regular_things():
+            with self.subTest(label):
+                new = self.fresh("new")
+                self.assertRaisesExactly(NotARegularFile, self.world.files.copy_private, path, new)
+                self.assertFalse(self.world.files.exists(new))
+
     def test_reading_or_hashing_a_pipe_or_a_device_raises_not_a_regular_file(self):
         things = dict(self.not_regular_things())
         for label in ("a named pipe", "a device", "a link to a device", "a link to a named pipe"):
@@ -779,6 +809,45 @@ class ContractCases:
                     None,
                     name,
                 )
+        self.assertEqual(self.world.files.read(taken), b"kept")
+
+    def test_a_child_started_with_an_error_name_writes_its_standard_error_there(self):
+        output, error = self.fresh("output"), self.fresh("error")
+        process = self.world.processes.start(
+            self.harness.argv("prints_to_error"),
+            self.harness.environment(),
+            None,
+            None,
+            output,
+            error,
+        )
+        self.addCleanup(self.harness.end, process)
+        self.assertTrue(self.ended(process))
+        self.assertEqual(self.world.files.read(error), b"oops\n")
+        self.assertEqual(self.world.files.read(output), b"")
+
+    def test_starting_with_an_error_name_that_is_taken_or_has_no_folder_raises_and_starts_nothing(
+        self,
+    ):
+        taken, output = self.fresh("taken"), self.fresh("output")
+        self.world.files.write_new(taken, "kept")
+        for name, error in (
+            (taken, FileExistsError),
+            (f"{self.fresh('absent')}/in", FileNotFoundError),
+            (output, FileExistsError),  # the same name as the standard output's
+        ):
+            with self.subTest(name):
+                self.assertRaisesExactly(
+                    error,
+                    self.world.processes.start,
+                    self.harness.argv("prints_to_error"),
+                    self.harness.environment(),
+                    None,
+                    None,
+                    output,
+                    name,
+                )
+                self.assertFalse(self.world.files.exists(output))  # nothing made is left
         self.assertEqual(self.world.files.read(taken), b"kept")
 
     def test_a_child_started_without_a_report_descriptor_has_an_empty_report(self):

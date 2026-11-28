@@ -25,6 +25,7 @@ CALLS = {
     "files.write_new": ("/f", "text"),
     "files.link": ("/f", "/g"),
     "files.copy": ("/f", "/h"),
+    "files.copy_private": ("/f", "/h"),
     "files.hash": ("/f",),
     "files.remove": ("/f",),
     "files.usable_folder": ("/f",),

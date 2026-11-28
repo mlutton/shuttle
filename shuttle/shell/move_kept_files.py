@@ -1,4 +1,5 @@
-"""Step 13, move kept files: the statement the executor left, kept exactly as written.
+"""Step 13, move kept files: the statement the executor left, and the executor's own output, each
+kept exactly as written.
 
 The executor writes its statement at one fixed path inside the run area (never at the document's
 statement location, which it is not told), and this is the one place that moves it out. Only a
@@ -10,19 +11,37 @@ claim is passed on as the word the statement holds. The kept copy is then copied
 statement location, where nothing is replaced: a name taken there since the start is left as it is
 and does not change what was kept or judged. It is written into the folder the location's parent
 resolved to when the run began, and only when the stop is confirmed and the parent still resolves
-there; otherwise nowhere (a parent the executor swapped for a link is not followed). Only the statement is kept so far; the
-session file and the list of changed files belong to later steps.
+there; otherwise nowhere (a parent the executor swapped for a link is not followed). The session
+file and the list of changed files belong to later steps.
+
+The executor's standard output and standard error, and the final message its driver's tool left, are
+each copied unedited to a name beside the statement's (shuttle.core.evidence), made readable and
+writable by the owner only, and the copy is what is hashed. Each is looked at on its own, and
+a failure in one never changes another, the statement or the run's ending: a file that is not there
+reads "none" only where it was never to be there (the driver has no such file, or the tool did not
+write its final message); a standard output or standard error file that is gone, anything but a
+regular file in its place (never followed), and a file that could not be moved or hashed read "cannot tell". Nothing is scrubbed. The step runs
+before the tear-down, which removes the files it copies from, and for every ending in which the
+executor was started, and for `program_not_started`, where the box was started and could not run
+the program.
 
 A result key left out reads as "cannot tell" in the receipt; an empty text reads as "none".
 """
 
 import contextlib
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
-from shuttle.core import decisions, run_area, statement
-from shuttle.core.shapes import HeaderSource, NotARegularFile, Operations, RunState, StepResult
-from shuttle.shell import statement_schema
+from shuttle.core import decisions, evidence, run_area, statement
+from shuttle.core.shapes import (
+    HeaderSource,
+    NotARegularFile,
+    Operations,
+    OutputFiles,
+    RunState,
+    StepResult,
+)
+from shuttle.shell import statement_schema, the_driver
 
 # Looked, and there is nothing. A plain command has no session file of its own to keep.
 NOTHING: StepResult = {
@@ -81,6 +100,36 @@ def keep_statement(
     return held
 
 
+def keep_output_file(
+    world: Operations, source: HeaderSource, kind: str, name: str | None
+) -> dict[str, dict[str, str] | str]:
+    """The result for one kept file of the executor's output, as its field's key alone. `name` is
+    where the tool left it, None when the driver has no such file. What the look at the name
+    means is `evidence.what_to_do`'s. A key left out reads "cannot tell", an empty text "none"."""
+    field = evidence.field_name(kind)
+    try:
+        look = world.files.look_at(name)[0] if name is not None else "missing"
+        todo = evidence.what_to_do(kind, name is not None, look)
+        if todo != "copy" or name is None:
+            return {field: ""} if todo == "none" else {}
+        kept = decisions.join_path(
+            source["records_location"], evidence.kept_name(source["request_id"], kind)
+        )
+        world.files.copy_private(name, kept)
+        return {field: {"kept_at": kept, "hash": world.files.hash(kept)}}
+    except Exception:  # a failure to keep evidence never changes the run's ending
+        return {}
+
+
+def keep_output(world: Operations, source: HeaderSource, files: OutputFiles) -> StepResult:
+    """The results of keeping the standard output, the standard error and the final message."""
+    named = cast("Mapping[str, str]", files)
+    kept: dict[str, dict[str, str] | str] = {}
+    for kind in evidence.KINDS:
+        kept.update(keep_output_file(world, source, kind, named.get(evidence.SOURCE_KEYS[kind])))
+    return cast(StepResult, kept)
+
+
 def step(state: RunState) -> None:
     source = state["facts"].get("header_source")
     if source is None:
@@ -96,6 +145,6 @@ def step(state: RunState) -> None:
         now = world.boundary.resolve(statement.location_parent(wanted)) if start else None
         return statement.location_copy_target(wanted, start, now, facts.get("stop") == "confirmed")
 
-    state["stand_ins"]["kept_files"] = keep_statement(
-        world, source, inner, location if area else None, copy_to
-    )
+    statement_result = keep_statement(world, source, inner, location if area else None, copy_to)
+    files = the_driver.of(state["raw"]).output_files(area) if area else {}
+    state["stand_ins"]["kept_files"] = {**statement_result, **keep_output(world, source, files)}

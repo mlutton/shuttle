@@ -62,7 +62,9 @@ class Driver(Protocol):
         ...
 
     def output_files(self, run_area: str) -> OutputFiles:
-        """Where the tool leaves what `observe` reads, inside the run area."""
+        """Where the tool leaves what `observe` reads and what the run keeps, inside the run area:
+        its standard output and standard error (the run makes these files, so the tool is started
+        with them), and its final message when it has one (the tool is told this name)."""
         ...
 
     def observe(self, settings: Settings, saved: SavedOutput) -> Observed:

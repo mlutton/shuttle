@@ -89,7 +89,6 @@ Settings = dict[str, Any]
 
 class LaunchSpec(TypedDict):
     argv: list[str]
-    output_to: NotRequired[str]  # a file made new for the child's standard output, in the run area
 
 
 class DriverFacts(TypedDict):
@@ -111,10 +110,16 @@ class LaunchContext(TypedDict):
 
 
 class OutputFiles(TypedDict, total=False):
-    """Where a driver's tool leaves what the shell hands back to `observe`, whole paths."""
+    """Where a driver's tool leaves what the run uses, whole paths: `events` and `last_message` are
+    what the shell hands back to `observe`; every key is what the run keeps (the final message
+    under `last_message`)."""
 
     events: str
     last_message: str
+    # Where the tool's standard output and standard error are written. A tool whose standard output
+    # is the event stream gives the same name under `events` and `standard_output`.
+    standard_output: str
+    standard_error: str
 
 
 # One line of a saved file, as `FileOperations.read_lines` gives it: the bytes, and whether the
@@ -200,6 +205,11 @@ class StepResult(TypedDict, total=False):
     statement_location: str
     claim: str
     session_file: str
+    # each kept file of the executor's output (shuttle.core.evidence): {"kept_at", "hash"}, "" for
+    # none; a key left out reads "cannot tell"
+    standard_output_kept: dict[str, str] | str
+    standard_error_kept: dict[str, str] | str
+    final_message_kept: dict[str, str] | str
     failure: str  # a tear-down that failed says how; "" reads "none"
 
 
@@ -270,6 +280,9 @@ class ExecutionGroup(TypedDict):
     peak_memory_bytes: Pair
     processor_time_seconds: Pair
     session_file_kept_at: Pair
+    standard_output_kept: Pair
+    standard_error_kept: Pair
+    final_message_kept: Pair
     teardown_failure: Pair
     stop_reason: Pair
     stop_asker: Pair
@@ -411,6 +424,10 @@ class FileOperations(NamedTuple):
     # NotARegularFile if existing is a link (to anything, a missing name too), a pipe, a device
     # or a socket: a link is never followed and nothing waits on what is there. At most the
     # size seen when it opened is copied. Nothing is left under the new name when it raises
+
+    # `copy_private`, (existing name, new name): `copy` in every way, the new file made no wider
+    # than readable and writable by its owner only (the process's umask can narrow that).
+    copy_private: Callable[[str, str], None]
     hash: Callable[
         [str], str
     ]  # the sha256 of the file's bytes, as 64 lower-case hex digits; raises as read
@@ -491,6 +508,7 @@ class Starter(Protocol):
         report: int | None = None,
         input_from: str | None = None,
         output_to: str | None = None,
+        error_to: str | None = None,
     ) -> Process: ...
 
 
@@ -505,7 +523,8 @@ class ProcessOperations(NamedTuple):
     # opened before anything starts: FileNotFoundError and nothing started when it is not there.
     # `output_to` is a name made new for the child's standard output (None: the null device):
     # FileExistsError, or FileNotFoundError when the folder above it is not there, and nothing
-    # started. OSError, ValueError
+    # started. `error_to` is the same for its standard error (None: the null device); the two
+    # names may not be one. OSError, ValueError
     start: Starter
     poll: Callable[[Process], int | None]  # None while running; negative: ended by that signal
     wait: Callable[
