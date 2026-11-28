@@ -38,6 +38,8 @@ class RealCommand(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = self._tmp.name
+        self.temporary = os.path.join(self.root, "temporary")
+        os.mkdir(self.temporary)
         self.records = os.path.join(self.root, "records")
         os.mkdir(self.records)
         self.place = os.path.join(self.root, "place")
@@ -86,6 +88,11 @@ class RealCommand(unittest.TestCase):
             "limit_seconds": 20,
         }
 
+    def with_own_temporary(self, env=None):
+        """`env` (the test's own environment when None) with a temporary folder of this test's
+        own, so no run makes or removes anything in the machine's."""
+        return {**(os.environ if env is None else env), "TMPDIR": self.temporary}
+
     def command(self, form, doc, name="input.json", env=None):
         path = os.path.join(self.root, name)
         with open(path, "w") as f:
@@ -96,7 +103,7 @@ class RealCommand(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=60,
-            env=env,
+            env=self.with_own_temporary(env),
         )
         return done, done.stdout.splitlines()
 

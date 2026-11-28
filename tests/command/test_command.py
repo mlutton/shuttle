@@ -45,6 +45,8 @@ class CommandSeam(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = self._tmp.name
+        self.temporary = os.path.join(self.root, "temporary")
+        os.mkdir(self.temporary)
         self.records = os.path.join(self.root, "records")
         os.mkdir(self.records)
         self.place = os.path.join(self.root, "place")
@@ -80,6 +82,11 @@ class CommandSeam(unittest.TestCase):
         doc.update(extra)
         return doc
 
+    def with_own_temporary(self, env=None):
+        """`env` (the test's own environment when None) with a temporary folder of this test's
+        own, so no run makes or removes anything in the machine's."""
+        return {**(os.environ if env is None else env), "TMPDIR": self.temporary}
+
     def run_command(self, doc, name="input.json", argv=None, env=None):
         path = os.path.join(self.root, name)
         with open(path, "w") as f:
@@ -93,7 +100,7 @@ class CommandSeam(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=60,
-            env=env,
+            env=self.with_own_temporary(env),
         )
         return done, done.stdout.splitlines()
 
@@ -272,6 +279,7 @@ class CommandSeam(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=60,
+            env=self.with_own_temporary(),
             preexec_fn=limit,
         )
         self.assertNotEqual(done.returncode, 0)
@@ -289,6 +297,7 @@ class CommandSeam(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=60,
+            env=self.with_own_temporary(),
             preexec_fn=limit,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -329,6 +338,7 @@ class CommandSeam(unittest.TestCase):
             subprocess.Popen(
                 [sys.executable, "-m", "shuttle", "run", p],
                 cwd=REPO,
+                env=self.with_own_temporary(),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -368,7 +378,7 @@ class CommandSeam(unittest.TestCase):
         return subprocess.Popen(
             [sys.executable, "-m", "shuttle", "run", path],
             cwd=REPO,
-            env=env,
+            env=self.with_own_temporary(env),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
