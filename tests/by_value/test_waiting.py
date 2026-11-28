@@ -72,7 +72,7 @@ class WhyTheBoundaryEnded(unittest.TestCase):
             with self.subTest(properties=properties):
                 self.assertEqual(boundary.why_ended(properties), expected)
 
-    def test_a_scope_ended_by_the_machines_memory_reads_as_over_its_cap_only_when_it_had_a_cap(
+    def test_an_oom_kill_result_reads_as_over_its_cap_only_on_a_scope_that_had_a_cap(
         self,
     ):
         killed = {"LoadState": "loaded", "ActiveState": "failed", "Result": "oom-kill"}
@@ -459,7 +459,7 @@ class TheWaitAndStopStepsGiveTheseFacts(unittest.TestCase):
         self.assertEqual(len(world.calls("boundary.stop")), 1)
         self.assertEqual(state["facts"]["wait"], "exited")
 
-    def test_a_run_with_no_cap_reads_the_scope_once_after_the_stop_as_it_always_did(self):
+    def test_a_run_with_no_cap_reads_the_scope_once_after_the_stop(self):
         world = simulated.SimulatedWorld()
         state = a_state(world)
         wait_for_the_end.step(state)

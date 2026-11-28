@@ -64,7 +64,7 @@ class TheCapIsAPositiveWholeNumberOfBytes(unittest.TestCase):
             (1, True),
             (CAP, True),
             (2**62, True),
-            (2**62 + 1, False),  # the scope reads 2**63 - 1 and more as no cap at all
+            (2**62 + 1, False),  # above the top, which is kept below where the scope reads no cap
             (2**63 - 1, False),
             (2**64 - 1, False),
             (10**400, False),
@@ -178,7 +178,7 @@ class ACapOnAMachineThatCannotHoldItIsRefused(unittest.TestCase):
                     self.assertEqual(each.calls("boundary.try_memory_cap"), [])
                     self.assertEqual(each.started, [])
 
-    def test_a_document_without_a_cap_never_asks_the_machine_and_runs_as_it_did(self):
+    def test_a_document_without_a_cap_never_asks_the_machine(self):
         world = scenes.scene()
         world.memory_cap = "unreadable"  # a machine that could not cap is no matter
         scenes.run_in(world)
@@ -187,7 +187,7 @@ class ACapOnAMachineThatCannotHoldItIsRefused(unittest.TestCase):
         _, shown, _ = checked(scenes.scene())
         self.assertIn("check: no refusal found", shown)
 
-    def test_a_machine_that_can_cap_is_asked_once_a_run_with_the_trial_numbers(self):
+    def test_a_machine_that_can_cap_is_asked_once_with_the_trial_numbers(self):
         world = scenes.scene(scenes.document(memory_limit_bytes=CAP))
         scenes.run_in(world)
         self.assertEqual(
@@ -206,7 +206,7 @@ class TheCapGoesToTheScope(unittest.TestCase):
         self.assertEqual(before_the_box[-4:], ["-p", f"MemoryMax={CAP}", "-p", "MemorySwapMax=0"])
         self.assertNotIn("MemoryMax", " ".join(argv[argv.index("--") :]))
 
-    def test_no_cap_leaves_the_command_as_it_was(self):
+    def test_no_cap_adds_nothing_to_the_command(self):
         plain = boundary.launch_argv("n", 1, ["t"], [], REACH, 3)
         self.assertEqual(self.argv(None), plain)
         self.assertFalse(any("Memory" in part for part in plain))
@@ -230,7 +230,7 @@ class TheCapGoesToTheScope(unittest.TestCase):
 
 
 class WhatEndedTheScopeDecidesTheEnding(unittest.TestCase):
-    """The scope's own result is the evidence; bubblewrap's report is the same whether the cap
+    """The scope's own result is the evidence; bubblewrap's report can be the same whether the cap
     ended the program or the program was never run."""
 
     def run_it(self, doc=None, **program):
@@ -260,7 +260,10 @@ class WhatEndedTheScopeDecidesTheEnding(unittest.TestCase):
                 world = self.run_it(scenes.document(memory_limit_bytes=cap), oom_kills=True)
                 line = flat(scenes.outcome(world)["receipt"])["ending"]["reason_text"]
                 self.assertEqual(line, boundary.memory_limit_line(cap))
-                self.assertIn(f"exceeding the memory cap of {cap} bytes", line)
+                self.assertIn(f"under the memory cap of {cap} bytes", line)
+                self.assertIn("memory_limit_bytes", line)
+                self.assertIn("a shortage on the whole machine", line)
+                self.assertIn("memory-backed", line)
                 self.assertNotIn("\n", line)
 
     def test_the_closing_freeze_and_the_place_are_the_same_as_for_a_time_limit(self):
@@ -300,7 +303,7 @@ class WhatEndedTheScopeDecidesTheEnding(unittest.TestCase):
                 saw = flat(scenes.outcome(world)["receipt"])["execution"]
                 self.assertEqual(saw["exit_code"], code)
 
-    def test_a_scope_ended_by_the_machines_memory_with_no_cap_ends_as_it_does_at_the_base(self):
+    def test_a_scope_the_kernel_ended_with_no_cap_ends_by_itself_not_as_memory_limit(self):
         world = self.run_it(scenes.document(), oom_kills=True)
         self.assertEqual(ending_of(world), ("ended_by_itself", "none", "none"))
 

@@ -1,8 +1,9 @@
 """The boundary: decisions about the scope and the box the executor runs in, and about the scopes
 a gate and the closing freeze run in (they have no box), as pure functions.
 
-The scope is a systemd user scope. It owns the time limit (its maximum runtime) and the grace
-between asking and killing (its stop timeout); it ends everything inside when either runs out,
+The scope is a systemd user scope. It owns the time limit (its maximum runtime), the optional memory
+cap and the grace between asking and killing (its stop timeout); it ends everything inside when
+the time limit or the cap is passed or the grace runs out,
 and the reason it ended can be read afterwards from its properties. The box is bubblewrap, started
 inside the scope: it applies the executor's reach, which is hidden unless declared. Only what the
 box binds in is there; the system folders and `/etc` are read-only, the run area is writable, and
@@ -28,7 +29,7 @@ SHORTEST_LIMIT_SECONDS = 1e-6
 LONGEST_LIMIT_SECONDS = 10**9
 
 # The memory cap's bounds, in bytes. The scope takes a whole number of bytes (the kernel rounds it
-# down to a page, so a cap under one page is a cap of nothing). From 2**63 - 1 up the scope reads the
+# down to a page, so a cap under one page is a cap nothing can run under). From 2**63 - 1 up the scope reads the
 # number as "no cap at all", which would be a cap in name only, so the longest is far below that.
 SHORTEST_MEMORY_LIMIT_BYTES = 1
 LONGEST_MEMORY_LIMIT_BYTES = 2**62
@@ -62,8 +63,8 @@ CANNOT_TELL = "cannot_tell"
 
 # A scope that is gone, or failed, has nothing left in it.
 _SETTLED = ("inactive", "failed")
-# What a scope that ended for any cause but its time limit reads as: it ended by itself, or by
-# something other than execution.
+# What a scope that ended for any cause but its time limit, or an `oom-kill` with a cap
+# (`why_ended`), reads as: it ended by itself, or by something other than execution.
 _ENDED_RESULTS = ("success", "signal", "oom-kill", "exit-code", "core-dump")
 
 
@@ -80,7 +81,7 @@ def usable_time_limit(seconds: object) -> bool:
 
 def usable_memory_limit(value: object) -> bool:
     """A whole number of bytes the scope can hold as a cap: at least one, at most the longest. A
-    truth value is not a number, and a number with a fraction is not whole."""
+    truth value is not a number, and a float, even a whole one, is not an int."""
     return type(value) is int and SHORTEST_MEMORY_LIMIT_BYTES <= value <= LONGEST_MEMORY_LIMIT_BYTES
 
 
@@ -537,7 +538,7 @@ def launch_failed(cause: str, report: str) -> bool:
     bubblewrap never reported the executor forked.
 
     That reads the same whether a tool was missing, `systemd-run` could not make the scope or
-    `bwrap` could not make the box. A time limit, a signal, or a cause that cannot be told is
+    `bwrap` could not make the box. A time limit, a memory limit, a signal, or a cause that cannot be told is
     not read as a failed launch: the timer may end the scope before it reports, and a failed
     launch is never a guess.
     """
@@ -547,7 +548,7 @@ def launch_failed(cause: str, report: str) -> bool:
 # How many times a capped run's scope is read, one read straight after another, before it is
 # stopped: the manager that is told of the kernel's kill ends the scope as `oom-kill`, and a stop
 # that arrives first ends it as a success. Bounded, so a scope that really is still running (a
-# stray process) is stopped after a few tens of reads, as it always was.
+# stray process) is stopped after the reads, never waited on.
 SETTLE_READS = 50
 
 # What bubblewrap itself ends with when it fails: its own error exit, never the program's.
@@ -574,12 +575,17 @@ def program_not_started(cause: str, report: str, returncode: int | None) -> bool
 
 
 def memory_limit_line(limit_bytes: int | None) -> str:
-    """The one line for the caller when the scope ended the run for exceeding its memory cap: the
-    cap as the document gave it, in bytes."""
+    """The one line for the caller when the scope's result was the kernel ending a process under a
+    memory cap: the cap as the document gave it, in bytes. Exceeding the cap does this, and so
+    does a shortage on the whole machine during a capped run, which the scope's result does not
+    tell apart, so the line says both. A missing number is only a safeguard: the ending exists
+    only for a run that had a cap."""
     held = "the memory cap" if limit_bytes is None else f"the memory cap of {limit_bytes} bytes"
     return (
-        f"the run was ended for exceeding {held} the document set in memory_limit_bytes; the cap "
-        "holds memory and swap together, and files written to memory-backed storage count"
+        f"the run was ended when the kernel ended a process in it under {held} "
+        "(memory_limit_bytes in the document), which exceeding the cap does and a shortage on the "
+        "whole machine during a capped run does too; the cap holds memory and swap together, and "
+        "files written to memory-backed storage count"
     )
 
 

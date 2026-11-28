@@ -3,9 +3,10 @@
 A document that names `memory_limit_bytes` runs in a scope held to that memory and no swap. A
 program that goes over it is ended by the scope and the run ends `memory_limit`; the same program
 with no cap, or a program that stays under the cap, ends as its own exit. The programs allocate
-little (tens of megabytes held, at most 200 MB tried, in steps) and the harness's limits apply to
-them. A machine that cannot cap memory for a user scope skips the tests that need a cap held
-(`the_boundary.require_memory_cap`), and the test of the refusal runs there instead.
+little (in steps, a few times past the cap) and the harness's limits apply to them. A machine
+that cannot cap memory for a user scope skips the tests that need a cap held
+(`the_boundary.require_memory_cap`); the test of the refusal runs on every machine with the
+boundary.
 """
 
 import importlib
@@ -95,7 +96,7 @@ class AMemoryCapEndsARunThatGrowsWithoutBound(real_run.RealRun):
             ("none", "cannot tell"),
         )
 
-    def test_the_closing_freeze_and_the_place_are_as_for_a_time_limit(self):
+    def test_the_closing_freeze_holds_what_the_program_wrote_before_it_was_ended(self):
         doc, *_ = self.allocating(CAP)
         head = real_place.git(self.place, "rev-parse", "HEAD")
         code, lines, err = self.run_to_the_end(doc)
@@ -136,7 +137,7 @@ class AMemoryCapEndsARunThatGrowsWithoutBound(real_run.RealRun):
         self.assertEqual(self.units_left(), [])
 
     def test_a_program_the_box_cannot_execute_under_a_cap_is_program_not_started(self):
-        # The box's report holds no end for the program, as it does for one a cap ended; only the
+        # The box's report holds no end for the program, as it can for one a cap ended; only the
         # scope's own result tells the two apart: this scope ended by itself, with a success.
         script = os.path.join(self.support, "script")
         with open(script, "w") as f:

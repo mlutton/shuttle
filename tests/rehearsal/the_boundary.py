@@ -95,9 +95,9 @@ def memory_cap_absent_reason() -> str | None:
 
 def require_memory_cap(case: unittest.TestCase) -> None:
     """For a test that needs a cap to be held: skip, saying why, on a machine that cannot hold
-    one (where the cap is refused instead, which a test that needs no cap shows). The hosted
-    runner's setting does not make the absence a failure: whether it can cap is for the report
-    to say."""
+    one. `SHUTTLE_REQUIRE_BOUNDARY` does not make the absence a failure, as it does for a missing
+    boundary: whether the machine can cap is for the report to say. The refusal of a named cap
+    is tested on every machine with the boundary."""
     require(case)
     reason = memory_cap_absent_reason()
     if reason is not None:
