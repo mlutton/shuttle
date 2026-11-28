@@ -623,8 +623,10 @@ def executor_driver_check(
     environment_names: Iterable[str],
     caller_environment: Mapping[str, str],
     facts: DriverFacts,
+    program: boundary.ProgramFacts,
 ) -> tuple[str | None, str | None]:
-    """The named variables' check, then the driver's own: (reason, one line) or (None, None)."""
+    """The named variables' check, then the driver's own, then whether the box shows the program
+    the driver asked for (the same for every driver): (reason, one line) or (None, None)."""
     missing = [n for n in environment_names if n not in caller_environment]
     if missing:
         return (
@@ -633,7 +635,9 @@ def executor_driver_check(
                 ", ".join(missing)
             ),
         )
-    refusal = table.DRIVERS[executor["name"]].check(executor["settings"], facts)
+    refusal = table.DRIVERS[executor["name"]].check(
+        executor["settings"], facts
+    ) or boundary.hidden_program(program)
     return refusal if refusal else (None, None)
 
 

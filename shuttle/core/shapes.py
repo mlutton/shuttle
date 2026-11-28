@@ -457,7 +457,9 @@ class Starter(Protocol):
 class ProcessOperations(NamedTuple):
     """Child processes. The handle is whatever `start` returns."""
 
-    find_program: Callable[[str], bool]  # whether a command can be found and run
+    find_program: Callable[
+        [str], str | None
+    ]  # where a command is found and can be run: its absolute path as found (a link is not followed), or None
     # start: argv, environment, the number `open_report` gave or None, and the name of a file the
     # child reads as its standard input (None: nothing to read, the null device). The file is
     # opened before anything starts: FileNotFoundError and nothing started when it is not there.

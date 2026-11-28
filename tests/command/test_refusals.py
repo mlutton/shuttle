@@ -10,6 +10,7 @@ import itertools
 import json
 import os
 import pwd
+import re
 import subprocess
 import sys
 import tempfile
@@ -241,6 +242,141 @@ class Refusals(RealCommand):
         self.assertEqual(check_lines[-2], "check: no refusal found")
         done, lines = self.command("run", doc)
         self.assertEqual(lines[-1], "ended_by_itself")
+
+    def a_program_in(self, folder):
+        os.makedirs(folder, exist_ok=True)
+        path = self.write("the-program", f"#!{real_run.INTERPRETER}\n{WRITES_WITNESS}", folder)
+        os.chmod(path, 0o755)
+        return path
+
+    def document_naming(self, program):
+        doc = self.document()
+        doc["executor"]["settings"] = {"command": program, "arguments": [self.witness]}
+        return doc
+
+    def refused_by_both(self, doc, folder):
+        for name in os.listdir(self.records):
+            os.unlink(os.path.join(self.records, name))
+        checked, check_lines = self.command("check", doc)
+        self.assertEqual(check_lines[-2], "check: refused: program_not_visible")
+        self.assertEqual(os.listdir(self.records), [])
+        self.command("run", doc)
+        self.assertEqual(
+            self.ending(self.outcome()),
+            ("could_not_start", "program_not_visible", "executor_driver_check"),
+        )
+        line = self.outcome()["receipt"]["ending"]["reason_text"]["value"]
+        self.assertIn(repr(folder), line)
+        self.assertIn("reach.visible", line)
+        self.assertEqual(
+            json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"], line
+        )
+        self.assertFalse(os.path.exists(self.witness))
+
+    def test_a_program_in_a_hidden_folder_is_refused_by_the_check_and_the_run_naming_the_folder(
+        self,
+    ):
+        hidden = os.path.join(self.root, "hidden")
+        self.refused_by_both(self.document_naming(self.a_program_in(hidden)), hidden)
+
+    def test_a_link_in_a_shown_folder_to_a_hidden_file_is_refused_naming_the_folder_of_the_file(
+        self,
+    ):
+        hidden = os.path.join(self.root, "hidden")
+        real = self.a_program_in(hidden)
+        link = os.path.join(self.support, "linked-program")
+        os.symlink(real, link)
+        self.refused_by_both(self.document_naming(link), os.path.realpath(hidden))
+
+    def test_a_link_in_a_hidden_folder_is_refused_even_to_a_shown_file(self):
+        shown = self.a_program_in(self.support)
+        hidden = os.path.join(self.root, "hidden")
+        os.mkdir(hidden)
+        link = os.path.join(hidden, "linked-program")
+        os.symlink(shown, link)
+        self.refused_by_both(self.document_naming(link), os.path.realpath(hidden))
+
+    def program_behind_a_link(self):
+        installed = os.path.join(self.root, "inst", "1.2", "bin")
+        real = self.a_program_in(installed)
+        os.symlink("1.2", os.path.join(self.root, "inst", "latest"))
+        through = os.path.join(self.root, "inst", "latest", "bin")
+        env = {**os.environ, "PATH": through + os.pathsep + os.environ["PATH"]}
+        doc = self.document_naming("the-program")
+        return doc, env, through, real, installed
+
+    def test_a_program_found_through_a_link_in_its_folder_is_refused_and_the_line_works_listed(
+        self,
+    ):
+        doc, env, through, real, _ = self.program_behind_a_link()
+        doc["reach"]["visible"].append(through)  # resolves to the folder the box does show
+        checked, check_lines = self.command("check", doc, env=env)
+        self.assertEqual(check_lines[-2], "check: refused: program_not_visible")
+        line = json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"]
+        self.assertNotIn("list '", line)  # nothing to list: the listing is there
+        named = re.search(r"name '([^']*)' as the command", line)
+        self.assertEqual(named.group(1), real)
+        doc["executor"]["settings"]["command"] = named.group(1)  # what the line says to do
+        checked, check_lines = self.command("check", doc, env=env)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+        done, lines = self.command("run", doc, env=env)
+        self.assertEqual(lines[-1], "ended_by_itself")
+        self.assertTrue(os.path.exists(self.witness))
+
+    def test_a_program_found_through_a_link_in_its_folder_is_refused_and_the_line_works_unlisted(
+        self,
+    ):
+        doc, env, _, real, installed = self.program_behind_a_link()
+        checked, check_lines = self.command("check", doc, env=env)
+        line = json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"]
+        self.assertEqual(check_lines[-2], "check: refused: program_not_visible")
+        named = re.search(r"name '([^']*)' as the command", line)
+        folder = re.search(r"list '([^']*)' under reach.visible", line)
+        self.assertEqual((named.group(1), folder.group(1)), (real, installed))
+        doc["executor"]["settings"]["command"] = named.group(1)
+        doc["reach"]["visible"].append(folder.group(1))
+        checked, check_lines = self.command("check", doc, env=env)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+        done, lines = self.command("run", doc, env=env)
+        self.assertEqual(lines[-1], "ended_by_itself")
+        self.assertTrue(os.path.exists(self.witness))
+
+    def test_a_command_with_two_leading_slashes_is_the_same_file_as_with_one(self):
+        doc = self.document()
+        doc["executor"]["settings"] = {
+            "command": "//bin/sh",
+            "arguments": ["-c", f'echo ran > "{self.witness}"'],
+        }
+        checked, check_lines = self.command("check", doc)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+        done, lines = self.command("run", doc)
+        self.assertEqual(lines[-1], "ended_by_itself")
+        self.assertTrue(os.path.exists(self.witness))
+
+    def test_a_program_in_a_folder_the_listing_refuses_is_told_to_move_not_to_list(self):
+        folder = os.path.join(
+            self.records, "bin"
+        )  # the records folder is hidden whatever is listed
+        doc = self.document_naming(self.a_program_in(folder))
+        checked, check_lines = self.command("check", doc)
+        line = json.loads(check_lines[1])["receipt"]["ending"]["reason_text"]["value"]
+        self.assertEqual(check_lines[-2], "check: refused: program_not_visible")
+        self.assertIn("cannot be listed", line)
+        self.assertNotIn("list '", line)
+        doc["reach"]["visible"].append(folder)  # what listing it would get, for the record
+        checked, check_lines = self.command("check", doc)
+        self.assertEqual(check_lines[-2], "check: refused: visible_overlaps_the_records")
+
+    def test_a_program_the_box_shows_is_accepted_by_the_check(self):
+        program = self.a_program_in(self.support)  # a visible folder
+        _, check_lines = self.command("check", self.document_naming(program))
+        self.assertEqual(check_lines[-2], "check: no refusal found")
+        program = self.a_program_in(os.path.join(self.root, "reference-folder"))  # a reference
+        doc = self.document_naming(program)
+        with open(program) as f:
+            doc["references"] = [ref(program, f.read())]
+        _, check_lines = self.command("check", doc)
+        self.assertEqual(check_lines[-2], "check: no refusal found")
 
     def test_a_matching_instruction_hash_and_reference_run(self):
         runbook = self.write("runbook.md", "contents")

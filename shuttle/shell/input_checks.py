@@ -12,7 +12,7 @@ from typing import Any
 from shuttle.core import place, refusals
 from shuttle.core.refusals import Found
 from shuttle.core.shapes import Document, Operations, VisibleLook
-from shuttle.shell import kinds, the_place
+from shuttle.shell import kinds, the_place, the_reach
 
 
 def _found_references(world: Operations, references: list[Document]) -> dict[str, dict[str, Any]]:
@@ -79,20 +79,9 @@ def _look_at_visible(world: Operations, raw: Document) -> dict[str, VisibleLook]
     return found
 
 
-def _account_folders(world: Operations) -> tuple[str, str | None]:
-    """The user's runtime folder (the box hides it, with the systemd and D-Bus sockets in it)
-    and home folder, resolved, as the system gives them for this user. Never from the caller's
-    environment: a caller that misnames a variable must not be able to switch a refusal off."""
-    home = world.identity.home_folder()
-    return (
-        world.boundary.resolve(world.identity.runtime_folder()),
-        world.boundary.resolve(home) if home else None,
-    )
-
-
 def run_input_checks(world: Operations, raw: Document) -> list[Found | None]:
     references = raw.get("references", [])
-    runtime, home = _account_folders(world)
+    runtime, home = the_reach.account_folders(world)
     return [
         *_kind_checks(world, raw),
         refusals.check_instruction(

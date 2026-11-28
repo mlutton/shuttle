@@ -162,20 +162,25 @@ def step_run_input_checks_and_executor_driver_check(state: RunState) -> None:
     location = state["raw"].get("statement_location")
     if isinstance(location, str):
         state["statement_parent"] = world.boundary.resolve(statement.location_parent(location))
-    reason, text = driver_check(world, state["raw"])
+    reason, text = driver_check(world, state["raw"], refusal is None)
     if reason:
         facts["executor_driver_check"] = reason
         state["problems"]["executor_driver_check"] = text or ""
 
 
-def driver_check(world: Operations, raw: Mapping[str, Any]) -> tuple[str | None, str | None]:
-    """The executor driver's check, and the check of the environment variables the document names."""
+def driver_check(
+    world: Operations, raw: Mapping[str, Any], inputs_accepted: bool
+) -> tuple[str | None, str | None]:
+    """The executor driver's check, and the check of the environment variables the document names;
+    `inputs_accepted` is whether the input checks found nothing to refuse."""
     names = raw.get("environment", [])
+    driver_facts, program = the_driver.gather(world, raw, inputs_accepted)
     return decisions.executor_driver_check(
         raw["executor"],
         names,
         launch_executor.caller_environment(world, names),
-        the_driver.facts(world, raw),
+        driver_facts,
+        program,
     )
 
 

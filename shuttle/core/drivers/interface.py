@@ -36,7 +36,9 @@ class Driver(Protocol):
         ...
 
     def program(self, settings: Settings) -> str:
-        """The program the shell looks for, to fill `DriverFacts.tool_found`."""
+        """The program the shell looks for, to fill `DriverFacts.tool_found`. The box must show the
+        file it is found at and the file that path leads to (the check refuses it otherwise, for every
+        driver)."""
         ...
 
     def login_path(self, environment: Mapping[str, str]) -> str | None:
