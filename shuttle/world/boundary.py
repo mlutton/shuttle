@@ -45,6 +45,18 @@ def forget(unit: str) -> None:
     _systemctl("reset-failed", "--", unit)
 
 
+def list_units(pattern: str) -> Mapping[str, str]:
+    done = _systemctl("list-units", "--all", "--plain", "--no-legend", "--full", "--", pattern)
+    if done.returncode != 0:
+        raise OSError(f"systemctl list-units failed with status {done.returncode}")
+    found: dict[str, str] = {}
+    for line in done.stdout.splitlines():
+        columns = line.split()  # unit, load, active, sub, description
+        if len(columns) >= 3:
+            found[columns[0]] = columns[2]
+    return found
+
+
 def resolve(path: str) -> str:
     return os.path.realpath(path)
 
@@ -102,5 +114,10 @@ def try_memory_cap(
 
 
 BOUNDARY = BoundaryOperations(
-    show=show, stop=stop, forget=forget, resolve=resolve, try_memory_cap=try_memory_cap
+    show=show,
+    stop=stop,
+    forget=forget,
+    list_units=list_units,
+    resolve=resolve,
+    try_memory_cap=try_memory_cap,
 )

@@ -12,6 +12,7 @@ import stat
 import sys
 import tempfile
 import unittest
+import uuid
 
 from shuttle.core import run_area
 from shuttle.shell import set_up_run_area, tear_down
@@ -66,7 +67,13 @@ class TheRealRunArea(unittest.TestCase):
         was = os.environ.get("TMPDIR")
         os.environ["TMPDIR"] = os.path.join(self.root, "temporary")
         self.addCleanup(self.put_back, was)
-        self.state = {"world": real.OPERATIONS, "problems": {}, "stand_ins": {}, "facts": {}}
+        self.state = {
+            "world": real.OPERATIONS,
+            "problems": {},
+            "stand_ins": {},
+            "facts": {},
+            "run_part": uuid.uuid4().hex,
+        }
 
     @staticmethod
     def put_back(was):

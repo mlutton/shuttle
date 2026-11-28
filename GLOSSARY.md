@@ -42,5 +42,13 @@ The caller's linked working copy of its repository, made for one run; it is the 
 **Run area**:
 A private folder made for one run, holding what the executor needs that is not the place.
 
+**Lock**:
+The file beside a run's run area (the area's name and `.lock`) and the exclusive hold its Shuttle keeps on it for the whole run. The kernel lets go of the hold when the process ends, however it ends, so a free lock is how a later run knows the run's Shuttle is gone.
+_Avoid_: lock file, for the hold
+
+**Sweep**:
+What a real run does just before it makes its own run area: it removes the run areas of runs whose Shuttle is gone (their lock is free and no scope of the run is active), with their lock files, and a lock file with no area beside it and a free lock; nothing else. The check form does not sweep.
+_Avoid_: clean-up or tidy (the tear-down removes a run's own area)
+
 **Record**:
 A file Shuttle writes about one run: a request record or an outcome record.

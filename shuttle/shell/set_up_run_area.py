@@ -1,6 +1,7 @@
 """Step 5, set up the run area: the run's own folder, and what the driver's setup asks of it.
 
-The folder is made new, empty and private. The driver's requests (shuttle.core.run_area) are
+The folder is made new, empty and private, named for the run, with a lock held beside it for as
+long as the run lives. The driver's requests (shuttle.core.run_area) are
 turned into a plan by the core and carried out here, in order, through the world's operations:
 every path the plan names is inside the area, except the sources it copies from, which are only
 read. The folder is remembered in the state as soon as
@@ -8,12 +9,13 @@ it exists, so the tear-down finds it however this step ends. A refused plan or a
 fails the step with one line saying which.
 """
 
+import contextlib
 from collections.abc import Sequence
 from typing import assert_never
 
 from shuttle.core import run_area
 from shuttle.core.shapes import Operations, RunState, SetupRequest, SetupStep, StepResult
-from shuttle.shell import the_driver
+from shuttle.shell import sweep_run_areas, the_driver
 
 
 def _carry_out(world: Operations, step: SetupStep) -> None:
@@ -49,13 +51,32 @@ def _for(step: SetupStep) -> str:
     )
 
 
+def _make_area(world: Operations, run_part: str) -> str:
+    """The run's area and its lock. The lock is made and held first, so the area is never on disk
+    with its lock free while its Shuttle lives: a sweep that finds the area of a live run finds
+    the lock held. A lock whose area could
+    not be made is let go and removed."""
+    files = world.files
+    area = f"{files.temporary_folder()}/{run_area.area_name(run_part)}"
+    lock = run_area.lock_path(area)
+    files.create_lock(lock)
+    try:
+        files.make_private_folder(area)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            files.release_lock(lock, True)
+        raise
+    return area
+
+
 def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
     world = state["world"]
     problem = run_area.refusal(requests)
     if problem:  # refused before anything is made
         state["problems"]["setup"] = f"{problem}; nothing was made and nothing was launched"
         return {"ok": False}
-    area = world.files.make_temporary_folder(run_area.AREA_PREFIX)
+    sweep_run_areas.sweep_before_the_run_makes_its_area(state)
+    area = _make_area(world, state["run_part"])
     state["run_area"] = area
     state["setup_variables"] = {}
     plan = run_area.plan(area, requests)

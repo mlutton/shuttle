@@ -25,8 +25,12 @@ from typing import Literal, cast
 from shuttle.core import boundary, fixed
 from shuttle.core.shapes import SetupAction, SetupPlan, SetupRequest, SetupStep
 
-# The folder the run area is made in, by this name followed by what the system adds.
+# The run area's name: this prefix, then the run's own part of its scope names (the id of its
+# request record), so a later run that finds the folder can ask whether a scope of that run is
+# still active.
 AREA_PREFIX = "shuttle-run-area-"
+# What is added to the area's name for the lock file beside it.
+LOCK_SUFFIX = ".lock"
 # Where the instruction is put for the executor's standard input; no request may name it.
 INSTRUCTION_NAME = "shuttle-instruction.txt"
 # Where the executor writes its statement, in place of the document's own statement location. No
@@ -44,6 +48,17 @@ _NAME = re.compile(f"{_PART}(?:/{_PART})*")
 # how a program starts (the dynamic loader's): no request may pass one.
 _OWN_VARIABLES = ("PATH", *boundary.BUS_VARIABLES)
 _LOADER_PREFIX = "LD_"
+
+
+def area_name(run_part: str) -> str:
+    """The name of a run's area, in the temporary folder."""
+    return AREA_PREFIX + run_part
+
+
+def lock_path(area: str) -> str:
+    """The lock file that says the run is alive: beside the area, never in it, so the box (which
+    binds the area and not the folder above it) cannot see it."""
+    return area + LOCK_SUFFIX
 
 
 def valid_name(name: object) -> bool:

@@ -23,7 +23,7 @@ flat = importlib.import_module("rehearsal.receipts").flat
 
 LOCATION = "/out/statement.json"
 # Where the executor writes: inside the first run area the simulated world makes.
-INNER = run_area.statement_path("/tmp/shuttle-run-area-000001")
+INNER = run_area.statement_path("/tmp/shuttle-run-area-" + f"{1:032x}")
 KEPT = "/records/inj-1.statement.kept"
 STATEMENT = {
     "claim": "done",

@@ -91,6 +91,14 @@ class SimulatedHarness:
         self.world.put_device("/dev/zero")
         return "/dev/zero"
 
+    def hold_the_lock_elsewhere(self, path):
+        self.world.put_lock_held_elsewhere(path)
+
+    def a_name_owned_by_another_user(self):
+        path = self.folder()
+        self.world.put_foreign(path)
+        return path
+
     def host_name(self):
         return self.world.host
 

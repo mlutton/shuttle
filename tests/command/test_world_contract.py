@@ -5,6 +5,9 @@ Python interpreter running a line or two), and the test process's own signals, e
 as it was. The simulated half is tests/by_value/test_world_contract.py.
 """
 
+import contextlib
+import errno
+import fcntl
 import importlib
 import json
 import os
@@ -16,6 +19,7 @@ import tempfile
 import unittest
 
 from shuttle.core import boundary, place
+from shuttle.world import files as real_files
 from shuttle.world import real
 
 TESTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -140,6 +144,16 @@ class RealHarness:
         signal.alarm(60)
         self.case.addCleanup(signal.signal, signal.SIGALRM, was)
         self.case.addCleanup(signal.alarm, 0)
+
+    def hold_the_lock_elsewhere(self, path):
+        """A lock held on its own open description, as another process holds one: a lock on the
+        same file by a second open conflicts with it, in this process or any other."""
+        descriptor = os.open(path, os.O_RDONLY)
+        self.case.addCleanup(os.close, descriptor)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def a_name_owned_by_another_user(self):
+        return "/" if os.geteuid() != 0 else None
 
     def host_name(self):
         return socket.gethostname()
@@ -294,6 +308,132 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
             os.path.join(folder, "real"),
         )
         self.assertTrue(os.path.isabs(self.world.boundary.resolve("relative")))
+
+    # What only a real process can show about a lock: the kernel gives it back when the holder
+    # dies, a hard kill included, and a child the holder started never keeps it.
+
+    HOLDS_A_LOCK_AND_STARTS_A_CHILD = (
+        "import subprocess, sys\n"
+        "from shuttle.world import files\n"
+        "files.create_lock(sys.argv[1])\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "print(child.pid, flush=True)\n"
+        "sys.stdin.read()\n"
+    )
+
+    def test_a_lock_is_free_when_its_holder_is_killed_though_a_child_it_started_lives_on(self):
+        lock = os.path.join(self.harness.folder(), "area.lock")
+        holder = subprocess.Popen(
+            [sys.executable, "-c", self.HOLDS_A_LOCK_AND_STARTS_A_CHILD, lock],
+            cwd=os.path.dirname(TESTS),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(holder.wait)
+        self.addCleanup(holder.stdout.close)
+        self.addCleanup(holder.stdin.close)
+        child = int(holder.stdout.readline())  # the line says the lock is held and the child is up
+        self.addCleanup(self.stop_a_child, child)
+        self.assertIs(self.world.files.try_lock(lock), False)
+        holder.kill()
+        holder.wait()
+        os.kill(child, 0)  # the child it started is still there
+        self.assertIs(self.world.files.try_lock(lock), True)
+        self.world.files.release_lock(lock, True)
+
+    @staticmethod
+    def stop_a_child(pid):
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
+
+    def test_a_lock_taken_and_let_go_is_free_for_a_second_open_of_the_same_file(self):
+        lock = os.path.join(self.harness.folder(), "area.lock")
+        self.world.files.create_lock(lock)
+        descriptor = os.open(lock, os.O_RDONLY)
+        self.addCleanup(os.close, descriptor)
+        with self.assertRaises(BlockingIOError):
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.world.files.release_lock(lock, False)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_a_lock_file_is_a_regular_file_only_its_owner_can_use_and_a_private_folder_likewise(
+        self,
+    ):
+        folder = self.harness.folder()
+        self.world.files.create_lock(os.path.join(folder, "area.lock"))
+        self.world.files.make_private_folder(os.path.join(folder, "area"))
+        self.assertEqual(os.stat(os.path.join(folder, "area.lock")).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(os.path.join(folder, "area")).st_mode & 0o777, 0o700)
+        self.world.files.release_lock(os.path.join(folder, "area.lock"), True)
+
+    def test_the_temporary_folder_is_the_one_the_environment_names_with_links_resolved(self):
+        folder = self.harness.folder()
+        link = os.path.join(self.harness.folder(), "link")
+        os.symlink(folder, link)
+        self.harness.set_variable("TMPDIR", link)
+        self.assertEqual(self.world.files.temporary_folder(), os.path.realpath(folder))
+
+    # The check that the name still leads to the file that was locked. A sweep that removes the
+    # file in the gap before the lock is taken is stood in for by a function the operation calls
+    # at that very point, so no case relies on winning a race.
+
+    def removes_the_file_first(self, path, times):
+        """A function for the gap that removes the file at `path` the first `times` times it is
+        called, as a sweep does, and counts the calls."""
+        calls = []
+
+        def between():
+            calls.append(1)
+            if len(calls) <= times:
+                os.unlink(path)
+
+        between.calls = calls
+        return between
+
+    def test_a_lock_file_removed_in_the_gap_is_made_again_and_the_lock_is_on_the_file_at_the_name(
+        self,
+    ):
+        for removed in (1, real_files._LOCK_TRIES - 1):  # the last try is the one that holds
+            with self.subTest(removed=removed):
+                lock = os.path.join(self.harness.folder(), "area.lock")
+                between = self.removes_the_file_first(lock, removed)
+                real_files.make_lock(lock, between)
+                self.assertEqual(len(between.calls), removed + 1)
+                self.assertTrue(os.path.isfile(lock))
+                self.assertIs(self.world.files.try_lock(lock), False)  # held: it is this file
+                self.world.files.release_lock(lock, True)
+
+    def test_a_lock_file_removed_in_the_gap_every_time_fails_after_its_bounded_tries_and_leaves_nothing(
+        self,
+    ):
+        lock = os.path.join(self.harness.folder(), "area.lock")
+        between = self.removes_the_file_first(lock, 99)
+        with self.assertRaises(OSError) as raised:
+            real_files.make_lock(lock, between)
+        self.assertEqual(raised.exception.errno, errno.EAGAIN)
+        self.assertEqual(len(between.calls), real_files._LOCK_TRIES)
+        self.assertFalse(os.path.lexists(lock))
+
+    def test_a_lock_file_swapped_after_it_was_opened_is_not_taken_and_the_new_file_stays_free(self):
+        lock = os.path.join(self.harness.folder(), "area.lock")
+        self.world.files.write_new(lock, "")
+
+        def swap():
+            os.unlink(lock)
+            self.world.files.write_new(lock, "")  # another file at the same name
+
+        with self.assertRaises(FileNotFoundError):
+            real_files.take_lock(lock, swap)
+        self.assertIs(self.world.files.try_lock(lock), True)  # nothing was held on the first
+        self.world.files.release_lock(lock, True)
+
+    def test_a_lock_file_removed_after_it_was_opened_is_not_taken(self):
+        lock = os.path.join(self.harness.folder(), "area.lock")
+        self.world.files.write_new(lock, "")
+        with self.assertRaises(FileNotFoundError):
+            real_files.take_lock(lock, lambda: os.unlink(lock))
+        self.assertFalse(os.path.lexists(lock))
 
 
 if __name__ == "__main__":
