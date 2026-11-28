@@ -81,6 +81,60 @@ class TheBoxCouldNotStartTheProgram(real_run.RealRun):
         self.assert_not_started(receipt, witness)
 
 
+class TheBoxFailingAfterTheForkIsNotBlamedOnTheProgram(real_run.RealRun):
+    def test_a_listed_folder_gone_before_the_launch_says_what_was_seen_and_both_things_to_look_at(
+        self,
+    ):
+        doomed = os.path.join(self.root, "doomed")
+        os.mkdir(doomed)
+        witness = os.path.join(self.place, "witness.txt")
+        script = self.script("fine.py", "import sys\nopen(sys.argv[1], 'w').close()\n")
+        doc = self.document(script, [witness])
+        doc["reach"]["visible"].append(doomed)
+        # The gate runs after the input check and before the launch: a real race, no hook.
+        doc["gates"] = [
+            {
+                "name": "remove",
+                "command": real_run.INTERPRETER,
+                "arguments": ["-c", f"import os; os.rmdir({doomed!r})"],
+                "limit_seconds": 60,
+            }
+        ]
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err, lines[-1]), (0, "", "could_not_start"))
+        ending = flat(self.outcome()["receipt"])["ending"]
+        self.assertEqual(
+            (ending["reason"], ending["failed_step"]), ("program_not_started", "launch")
+        )
+        line = ending["reason_text"]
+        self.assertNotIn("was made", line)  # the box was the thing that failed
+        self.assertIn("could not be made", line)
+        self.assertIn("the program", line)
+        self.assertFalse(os.path.exists(witness))
+
+
+class AFileTheShellRunsInPlaceOfTheKernelIsNotToldApart(real_run.RealRun):
+    """`execvp` hands a file the kernel will not execute to /bin/sh, so it is executed, as the
+    shell, and ends as its own exit; this pins that as it is, not as a wish."""
+
+    def test_an_elf_for_another_architecture_ends_as_the_programs_own_exit_not_told_apart(self):
+        with open("/usr/bin/true", "rb") as f:
+            data = bytearray(f.read())
+        self.assertEqual(bytes(data[:4]), b"\x7fELF")
+        data[18:20] = b"\x28\x00"  # e_machine: ARM
+        path = os.path.join(self.support, "other-architecture")
+        with open(path, "wb") as f:
+            f.write(data)
+        os.chmod(path, 0o755)
+        doc = self.document("unused")
+        doc["executor"]["settings"] = {"command": path, "arguments": []}
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
+        receipt = flat(self.outcome()["receipt"])
+        self.assertEqual(receipt["ending"]["reason"], "none")
+        self.assertIsInstance(receipt["execution"]["exit_code"], int)  # the shell's, whatever it is
+
+
 class AProgramThatStartedAndEndedByItselfIsStillItsOwnExit(real_run.RealRun):
     """The same real runs, for programs the box did execute: whatever they exit with, 126 and 127
     included, it is their own exit, and its witness file is there."""

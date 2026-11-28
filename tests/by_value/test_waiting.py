@@ -210,6 +210,11 @@ class WhetherTheProgramWasEverStarted(unittest.TestCase):
         self.assertIn("reach.visible", line)
         self.assertIn("interpreter", line)
         self.assertNotIn("program None", boundary.program_not_started_line(None))
+        # Two causes give the same report, so the line claims neither: not that the box was made,
+        # not that the program is at fault.
+        self.assertNotIn("was made", line)
+        self.assertIn("could not be made", line)
+        self.assertIn("the place", line)
 
     def test_a_program_that_could_not_be_executed_ends_as_a_launch_that_did_not_start_it(self):
         world = simulated.SimulatedWorld()

@@ -108,7 +108,7 @@ TABLE = [
         d(CNS, "launch_failed", "launch"),
     ),
     (
-        "step 7: the box was made and could not start the program",
+        "step 7: the program was never reported running",
         early(gates="ok", setup="ok", opening_freeze="ok", launch="program_not_started"),
         d(CNS, "program_not_started", "launch"),
     ),

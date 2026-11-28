@@ -240,10 +240,14 @@ class SimulatedWorld:
         that it started, unless `fails_to_start` (the boundary's own tool exits with `exit_code`
         before the executor runs). With `cannot_exec` the box is made and reports the executor forked,
         then the program cannot be executed: the boundary's tool ends with status 1 and never
-        reports an end (the real bubblewrap's way; `exit_code` is not used). A child that exits
-        reports its end with `exit_code`. `report` is the text a child writes to the report it was given.
+        reports an end (the real bubblewrap's way). A child that exits
+        reports its end with `exit_code`. `cannot_exec` refuses a non-zero
+        `exit_code`, `hangs`, `times_out` and `survives_stop`: such a program never runs. `report` is the text a child writes to the report it was given.
         `output` is the text it writes to its standard output when that is a file it was given
         (`output_to`); `writes` maps names to the text of files it makes as it starts."""
+        assert not cannot_exec or (exit_code == 0 and not (hangs or times_out or survives_stop)), (
+            "cannot_exec says nothing else: the program never runs, so no exit code and no hang"
+        )
         self.programs[command] = {
             "hangs": hangs or times_out or survives_stop,
             "times_out": times_out,

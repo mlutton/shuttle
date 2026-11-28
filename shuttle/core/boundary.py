@@ -466,10 +466,12 @@ def executor_ended(report: str) -> bool:
     Bubblewrap writes it when the program it executed ends, and only then: it keeps a pipe that
     closes when the program is executed (its own `setup_finished_pipe`, in every version from
     0.6.2 on that this was checked against) and writes the line only when the pipe was closed that
-    way. A program that could not be executed (the file or the interpreter its first line names is
-    missing or not in the box, a refused permission) ends bubblewrap itself with status 1 and no
-    such line, however the program would have ended. A program that was executed and ended with
-    any code, 126 and 127 included, has the line with that code.
+    way. A program the kernel could not execute and `execvp` could not hand to the shell either
+    (the file or the interpreter its first line names is missing or not in the box) ends
+    bubblewrap itself with status 1 and no such line, as does a failure of bubblewrap's own
+    set-up after the fork. A program that was executed and ended with any code, 126 and 127
+    included, has the line with that code; so has a file `execvp` runs through the shell (an ELF
+    for another architecture, no `#!` line, a `#!` line too long), which ends as its own exit.
     """
     return any(type(code) is int for code in _report_members(report, "exit-code"))
 
@@ -491,9 +493,10 @@ BUBBLEWRAP_FAILURE_STATUS = 1
 
 
 def program_not_started(cause: str, report: str, returncode: int | None) -> bool:
-    """Whether the box was made and could not start the program: the scope was seen to end by
-    itself, bubblewrap reported the executor forked and never reported its end, and bubblewrap
-    itself ended with its own failure status.
+    """Whether the program was never reported running: the scope was seen to end by itself,
+    bubblewrap reported the executor forked and never reported its end, and bubblewrap itself
+    ended with its own failure status. Two causes give this report: the program could not be
+    executed, or bubblewrap failed making the box after the fork; the report does not say which.
 
     Nothing here reads the program's exit code: a program that was executed has its end reported,
     whatever the code. What is not told this way is a program that did start and then failed by
@@ -510,14 +513,16 @@ def program_not_started(cause: str, report: str, returncode: int | None) -> bool
 
 
 def program_not_started_line(program: str | None) -> str:
-    """The one line for the caller when the box could not start the program: what to look at."""
+    """The one line for the caller when the program was never reported running: what was
+    observed, and both things to look at (the report does not say which one failed)."""
     which = "the program" if program is None else f"the program {program!r}"
     return (
-        f"the box was made and could not start {which}; the program, or the interpreter its "
-        "first line names, is missing, not executable, or in a folder the box does not show "
-        "(a folder is shown only when listed under reach.visible, and a relative command is "
-        "looked for in the place); check that each file exists, can be run, and is in a shown "
-        "folder"
+        f"the box was started and {which} was never reported as running; either it could not be "
+        "executed (the program, or the interpreter its first line names, is missing, not "
+        "executable, or in a folder the box does not show: a folder is shown only when listed "
+        "under reach.visible, and a relative command is looked for in the place), or the box "
+        "could not be made (a folder the document lists, or the place, is gone); check that "
+        "each of those exists and can be run or read"
     )
 
 
