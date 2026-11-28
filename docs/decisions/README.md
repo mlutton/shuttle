@@ -6,7 +6,7 @@ The maintainers' notes are the source for the reasons. A correction is a pull re
 
 Where the notes say a reason was not recorded, the record says so; it does not supply one.
 
-All three records were last rendered on 2026-11-27, against `main` at `14f9cd3`.
+All three records were last rendered on 2026-11-27, against `main` at `36ea58b`.
 
 - [0001](0001-the-reach-is-hidden-unless-declared.md): the executor's reach is hidden unless declared.
 - [0002](0002-the-boundary-is-a-scope-around-bubblewrap.md): the boundary is a systemd user scope around bubblewrap.

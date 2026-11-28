@@ -1,6 +1,6 @@
 # One run is one session, and a fix is a new run
 
-Status: accepted, 2026-11-24. Partly built as of `main` at `14f9cd3`: a run starts one executor and ends with it, and a request id is used once. Not built: anything that hands a fix run what it needs.
+Status: accepted, 2026-11-24. Partly built as of `main` at `36ea58b`: a run starts one executor and ends with it, and a request id is used once. Not built: anything that hands a fix run what it needs.
 
 ## Context
 
@@ -10,7 +10,7 @@ The earlier way of working kept an agent open between rounds and fixed things in
 
 One run starts one executor and ends with it; nothing stays open between runs. A fix round after a run is a new run, handed what it needs, and no agent is kept open between rounds. A run with a used request id is refused, so a fix run takes a new id.
 
-Built as of `14f9cd3`:
+Built as of `36ea58b`:
 
 - A run starts one executor through one command and writes its records (`README.md`), and the boundary stops everything the executor started.
 - The run area is removed whole at every ending the command lives to see.
