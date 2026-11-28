@@ -226,6 +226,39 @@ class ARunNamingTheCodexDriver(unittest.TestCase):
         self.assertIn(repr(PROGRAM), ending["reason_text"])
         self.assertEqual(receipt["execution"]["exit_code"], "none")
 
+    def test_a_memory_cap_takes_the_same_path_for_this_driver_as_for_the_command_driver(self):
+        cap = 64 * 1024 * 1024
+        world = world_for(
+            "events-finished.jsonl", "last-message-statement.json", document(memory_limit_bytes=cap)
+        )
+        world.program(PROGRAM, oom_kills=True)
+        receipt = self.run_it(world)
+        argv, _ = world.started[-1]
+        self.assertIn(f"MemoryMax={cap}", argv)
+        self.assertIn("MemorySwapMax=0", argv)
+        self.assertEqual(
+            (receipt["ending"]["ending"], receipt["ending"]["reason"]),
+            ("memory_limit", "memory_limit"),
+        )
+        self.assertEqual(world.units, {})
+
+    def test_a_memory_cap_on_a_machine_that_cannot_hold_it_is_refused_for_this_driver_too(self):
+        world = world_for(
+            "events-finished.jsonl",
+            "last-message-statement.json",
+            document(memory_limit_bytes=64 * 1024 * 1024),
+        )
+        world.memory_cap = "ignored"
+        out, err = io.StringIO(), io.StringIO()
+        check_form.check(scenes.DOCUMENT, out, err, world.operations)
+        self.assertIn("check: refused: memory_cap_unavailable", out.getvalue())
+        receipt = self.run_it(world)
+        self.assertEqual(
+            (receipt["ending"]["reason"], receipt["ending"]["failed_step"]),
+            ("memory_cap_unavailable", "input_check"),
+        )
+        self.assertEqual(world.started, [])  # the tool was never started
+
     def test_the_instruction_reaches_it_on_standard_input_and_never_on_the_command_line(self):
         world = world_for("events-finished.jsonl", "last-message-statement.json")
         self.run_it(world)

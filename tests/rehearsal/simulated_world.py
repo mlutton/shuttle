@@ -55,6 +55,7 @@ class _Child:
 _GONE = {"LoadState": "not-found", "ActiveState": "inactive", "Result": "success"}
 _STILL_THERE = {"LoadState": "loaded", "ActiveState": "active", "Result": "success"}
 _TIMED_OUT = {"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout"}
+_OOM_KILLED = {"LoadState": "loaded", "ActiveState": "failed", "Result": "oom-kill"}
 WAITS_BEFORE_GIVING_UP = 1000  # a wait that would never end is a failure of the test
 
 
@@ -238,6 +239,7 @@ class SimulatedWorld:
         output="",
         writes=None,
         cannot_exec=False,
+        oom_kills=False,
     ):
         """Say what starting `command` in the boundary makes: a child that exits at once with
         `exit_code`; or, with `hangs`, one that runs until the boundary is stopped; or, with
@@ -249,17 +251,23 @@ class SimulatedWorld:
         `cannot_exec` the box is started and reports the executor forked, and the program is never
         reported running: the boundary's tool ends with status 1 and no end line, as the real
         bubblewrap does both when the program cannot be executed and when it fails making the box
-        after the fork. `cannot_exec` refuses a non-zero `exit_code`, `hangs`, `times_out` and
-        `survives_stop`, because such a program never runs. `report` is the text a child writes
+        after the fork. `cannot_exec` refuses a non-zero `exit_code`, `hangs`, `times_out`,
+        `oom_kills` and `survives_stop`, because such a program never runs. With `oom_kills` the
+        kernel ends the program in the scope the first time it is looked at and the scope fails
+        with the result "oom-kill", as it does for a scope with a memory cap that is exceeded and
+        for a machine out of memory alike: the scope's result is all there is, so the simulation
+        does not say which. The box's tool is ended too, and reports no end for the program; with
+        a non-zero `exit_code` it saw the program killed first and ended as that number. `report` is the text a child writes
         to the report it was given.
         `output` is the text it writes to its standard output when that is a file it was given
         (`output_to`); `writes` maps names to the text of files it makes as it starts."""
-        assert not cannot_exec or (exit_code == 0 and not (hangs or times_out or survives_stop)), (
-            "cannot_exec says nothing else: the program never runs, so no exit code and no hang"
-        )
+        assert not cannot_exec or (
+            exit_code == 0 and not (hangs or times_out or oom_kills or survives_stop)
+        ), "cannot_exec says nothing else: the program never runs, so no exit code and no hang"
         self.programs[command] = {
-            "hangs": hangs or times_out or survives_stop,
+            "hangs": hangs or times_out or oom_kills or survives_stop,
             "times_out": times_out,
+            "oom_kills": oom_kills,
             "survives_stop": survives_stop,
             "exit_code": exit_code,
             "creates": tuple(creates),
@@ -588,6 +596,11 @@ class SimulatedWorld:
         if child.returncode is None and child.behaviour["times_out"]:
             child.returncode = -signal.SIGTERM
             self.units[child.unit] = dict(_TIMED_OUT)
+        if child.returncode is None and child.behaviour["oom_kills"]:
+            # The box is ended with the scope, or (with a non-zero `exit_code`) saw the kill first
+            # and ended as the kill's number.
+            child.returncode = child.behaviour["exit_code"] or -signal.SIGTERM
+            self.units[child.unit] = dict(_OOM_KILLED)
         return self._status(child)
 
     def _wait_for_exit(self, child, seconds):

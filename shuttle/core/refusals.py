@@ -344,6 +344,20 @@ def check_credential_values(entries: object) -> Found | None:
     return None
 
 
+def check_memory_cap(named: bool, machine_can_cap: bool) -> Found | None:
+    """A document that names a memory cap is refused on a machine that cannot hold one: the run
+    would otherwise go on without the cap it asked for. The setting left out is never refused."""
+    if not named or machine_can_cap:
+        return None
+    return _found(
+        "memory_cap_unavailable",
+        _INPUT,
+        "memory_limit_bytes is set, and this machine cannot cap memory for a user scope (a trial "
+        "scope given a memory cap did not hold it); leave memory_limit_bytes out of the document "
+        "to run without a memory cap",
+    )
+
+
 def check_environment_entries(entries: object) -> Found | None:
     """The environment part: names only. A value given with a name is refused, and one that looks
     like a credential is named as such (the value is never repeated)."""

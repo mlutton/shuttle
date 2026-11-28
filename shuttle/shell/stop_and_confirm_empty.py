@@ -42,6 +42,11 @@ def _executor_status(state: RunState, returncode: int | None) -> None:
         # What ended is the box's own tool, which reports a child killed by signal n as 128 + n,
         # as a script that exits with that number is reported: the signal is not read from it.
         facts["child_signal"] = fixed.CANNOT_TELL
+    if facts.get("wait") == "memory_limit":
+        # The scope ended the program, and whether bubblewrap saw the kill first (and reported it
+        # as 128 + 9) or was ended with it (and reported nothing) is a race: the number, when
+        # there is one, is not the program's own exit.
+        facts["exit_code"] = None
     state["executor_duration"] = world.clock.now() - state["clock_start"]
     state["ended_at"] = world.clock.timestamp()
 
@@ -55,7 +60,8 @@ def step(state: RunState) -> None:
         state["problems"]["stop_not_confirmed"] = (
             "the boundary was stopped by name but not seen empty; the place is not to be trusted"
         )
-    facts["wait"] = boundary.cause_of_end(facts.get("wait"), boundary.why_ended(properties))
+    capped = state.get("memory_limit_bytes") is not None
+    facts["wait"] = boundary.cause_of_end(facts.get("wait"), boundary.why_ended(properties, capped))
     report = world.processes.read_report(state["boundary_process"])
     returncode = world.processes.wait(state["boundary_process"], boundary.GRACE_SECONDS)
     if boundary.launch_failed(facts["wait"], report):

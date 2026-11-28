@@ -8,7 +8,7 @@ from typing import Final
 # Two version numbers, each checked on its own. The input document carries one (its key is
 # `format_version`); the records carry the other (the header's `record_version`).
 INPUT_VERSION = 1
-RECORD_VERSION = 3
+RECORD_VERSION = 4
 # The version of the notice execution adds to the instruction of a kind that expects a statement
 # (shuttle.core.notice). It changes whenever the notice's fixed words do.
 NOTICE_VERSION = 1
@@ -33,6 +33,7 @@ RECORD_KINDS = ("request", "outcome", "stop", "liveness")
 ENDINGS = (
     "ended_by_itself",
     "time_limit",
+    "memory_limit",
     "stopped_from_outside",
     "asked_for_a_human",
     "could_not_start",
@@ -42,6 +43,7 @@ ENDINGS = (
 REASONS_BY_ENDING = {
     "ended_by_itself": (),
     "time_limit": ("time_limit",),
+    "memory_limit": ("memory_limit",),
     "stopped_from_outside": ("stop_record", "signal"),
     "asked_for_a_human": (),
     "could_not_start": (
@@ -59,6 +61,7 @@ REASONS_BY_ENDING = {
         "statement_location_occupied",
         "statement_location_in_records",
         "no_time_limit",
+        "memory_cap_unavailable",
         "records_location_mismatch",
         "destination_branch_not_at_opening_commit",
         "destination_branch_checked_out",
@@ -123,6 +126,7 @@ _INPUT = ("input_check",)
 _INPUT_OR_DRIVER = ("input_check", "executor_driver_check")
 STEPS_FOR_REASON = {
     "time_limit": (NONE,),
+    "memory_limit": (NONE,),
     "stop_record": (NONE,),
     "signal": (NONE,),
     "stopped": (NONE,),

@@ -359,6 +359,7 @@ class RunState(TypedDict, total=False):
     program: str  # the program the executor was asked to run, as the launch names it
     boundary_name: str
     boundary_process: Any
+    memory_limit_bytes: int | None  # the cap the scope was started with, None when it has none
     run_area: str  # the run's own folder, once made
     statement_parent: str  # what the statement location's parent folder resolved to at the start
     setup_variables: dict[str, str]  # what the driver's setup passes to the executor

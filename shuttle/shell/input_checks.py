@@ -9,7 +9,7 @@ first) and for the check form (which lists them all).
 import hashlib
 from typing import Any
 
-from shuttle.core import place, refusals
+from shuttle.core import boundary, place, refusals
 from shuttle.core.refusals import Found
 from shuttle.core.shapes import Document, Operations, VisibleLook
 from shuttle.shell import kinds, the_place, the_reach
@@ -79,6 +79,24 @@ def _look_at_visible(world: Operations, raw: Document) -> dict[str, VisibleLook]
     return found
 
 
+def _memory_cap_check(world: Operations, raw: Document) -> Found | None:
+    """Asks the machine only when the document names a cap; a document without one runs as it
+    always did and starts no trial scope. A trial that cannot be made or read is a machine that
+    cannot be shown to cap."""
+    named = "memory_limit_bytes" in raw
+    held = False
+    if named:
+        try:
+            held = boundary.memory_cap_held(
+                world.boundary.try_memory_cap(
+                    boundary.TRIAL_MEMORY_BYTES, boundary.SWAP_WITH_A_CAP_BYTES
+                )
+            )
+        except OSError:
+            held = False
+    return refusals.check_memory_cap(named, held)
+
+
 def run_input_checks(world: Operations, raw: Document) -> list[Found | None]:
     references = raw.get("references", [])
     runtime, home = the_reach.account_folders(world)
@@ -96,4 +114,5 @@ def run_input_checks(world: Operations, raw: Document) -> list[Found | None]:
             home,
         ),
         place.check_place(raw.get("place"), the_place.look(world, raw)),
+        _memory_cap_check(world, raw),
     ]
