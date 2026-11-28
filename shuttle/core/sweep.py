@@ -103,7 +103,10 @@ def summary(areas_removed: int, locks_removed: int, left: Sequence[tuple[str, st
         return None
     line = f"shuttle: removed {_count(areas_removed, 'stale run area')} of runs that are gone"
     if locks_removed:
-        line += f" and {_count(locks_removed, 'leftover lock file')}"
+        if locks_removed == 1:
+            line += " and 1 lock file with no area beside it and a free lock"
+        else:
+            line += f" and {locks_removed} lock files with no area beside them and a free lock"
     if left:
         line += "; left alone: " + ", ".join(f"{name!r} ({why})" for name, why in left)
     return line

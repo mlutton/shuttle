@@ -8,7 +8,7 @@ import os
 import shutil
 import stat
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import BinaryIO
 
 from shuttle.core.shapes import FileOperations, NotARegularFile
@@ -243,11 +243,19 @@ def _is_the_file_at(descriptor: int, path: str) -> bool:
     )
 
 
-def create_lock(path: str) -> None:
+def _nothing() -> None:
+    """The default for the moment `between` stands for: no one acts in it."""
+
+
+def make_lock(path: str, between: Callable[[], None] = _nothing) -> None:
+    """`create_lock`, with `between` called in the gap after the file is opened and before it is
+    locked, which is where a sweep may lock and remove it; only a test gives it a function, to be
+    in that gap at a chosen moment without relying on a race."""
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
     for _ in range(_LOCK_TRIES):
         descriptor = os.open(path, flags, 0o600)
         try:
+            between()
             # This waits only while a sweep holds the file for a look; the sweep then removes it
             # (no area is beside it yet), so the name is checked again and the file made again.
             fcntl.flock(descriptor, fcntl.LOCK_EX)
@@ -263,7 +271,13 @@ def create_lock(path: str) -> None:
     raise OSError(errno.EAGAIN, "the lock file was removed each time it was made", path)
 
 
-def try_lock(path: str) -> bool:
+def create_lock(path: str) -> None:
+    make_lock(path)
+
+
+def take_lock(path: str, between: Callable[[], None] = _nothing) -> bool:
+    """`try_lock`, with `between` called after the file is opened and before it is locked and
+    checked against the name; only a test gives it a function (see `make_lock`)."""
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     except OSError as error:
@@ -272,6 +286,7 @@ def try_lock(path: str) -> bool:
         raise
     try:
         _must_be_regular(os.fstat(descriptor).st_mode, path)
+        between()
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -285,6 +300,10 @@ def try_lock(path: str) -> bool:
         raise
     _held[path] = descriptor
     return True
+
+
+def try_lock(path: str) -> bool:
+    return take_lock(path)
 
 
 def release_lock(path: str, remove: bool) -> None:

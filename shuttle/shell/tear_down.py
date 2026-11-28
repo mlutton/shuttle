@@ -2,10 +2,11 @@
 
 It runs whenever the set-up ran, even for a run that was refused after it or that ended any way at
 all. A tree removed leaves nothing behind and never follows a link (a path shared in place keeps
-its original). A failure is reported in the receipt and
-changes no ending. The area's lock goes after the area, so no moment exists when the area is
-there and its lock is free; a lock that cannot be removed is harmless, a later run's sweep removes
-it. An area that could not be removed keeps its lock until the process ends. `remove` is also the run's last resort, called when the step did not run.
+its original). A failure is reported in the receipt and changes no ending. The area's lock goes
+after the area, so no moment exists when the area is there and its lock is free; a lock that
+cannot be removed is harmless, a later run's sweep removes it. An area that could not be removed
+keeps its lock until the process ends. `remove` is also the run's last resort, called when the
+step did not run.
 """
 
 import contextlib

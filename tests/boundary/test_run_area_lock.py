@@ -115,7 +115,8 @@ HOLDS = [
 class ARunThatStartsAfterAShuttleWasKilled(RealRunInItsOwnTemporaryFolder):
     def kill_a_run_with_its_executor_up(self, request_id="r-1"):
         """Start a run, kill Shuttle with SIGKILL while its executor runs, and return the area's
-        name. The executor is left running in its scope, as a killed Shuttle leaves it."""
+        name. A killed Shuttle takes its executor with it (the box dies with its parent), so no
+        scope stays active; the manager is only told of the end a moment later."""
         up, go = self.pipe(f"up-{request_id}"), self.pipe(f"go-{request_id}")
         script = self.script("reports.py", REPORTS_WHAT_IT_SEES_AND_WAITS)
         proc = self.start(self.document(script, [up, go], request_id), variables=self.variables)
@@ -125,8 +126,11 @@ class ARunThatStartsAfterAShuttleWasKilled(RealRunInItsOwnTemporaryFolder):
         proc.communicate()
         return run_area.area_name(self.run_part(request_id))
 
-    def stop_the_scope(self, request_id="r-1"):
-        """Stop the killed run's scope by name; the call returns when it is stopped."""
+    def wait_until_the_scope_is_gone(self, request_id="r-1"):
+        """The killed run's scope is not active. The kernel has ended its processes by the time
+        Shuttle is dead, but the manager learns of it asynchronously and a sweep that asked in
+        between would see the scope active. `systemctl stop` returns only once the manager has
+        settled the unit (at once for one already ended), which is the wait with no sleep."""
         name = boundary.scope_name(request_id, self.run_part(request_id))
         subprocess.run(["systemctl", "--user", "stop", boundary.unit_of(name)], capture_output=True)
         self.assertNotEqual(self.scope_state(request_id), "active")
@@ -142,7 +146,7 @@ class ARunThatStartsAfterAShuttleWasKilled(RealRunInItsOwnTemporaryFolder):
     ):
         area = self.kill_a_run_with_its_executor_up()
         self.assertEqual(self.names_in_the_temporary_folder(), [area, area + ".lock"])
-        self.stop_the_scope()  # the executor of the dead run has ended; its scope is gone
+        self.wait_until_the_scope_is_gone()
         code, lines, err = self.run_a_quick_one_here("r-2")
         self.assertEqual(code, 0)
         self.assertEqual(lines[-1], "ended_by_itself")

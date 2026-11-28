@@ -132,7 +132,7 @@ class TheSweepOnTheRealFiles(unittest.TestCase):
             pass
         self.assertEqual(
             self.sweep(),
-            "shuttle: removed 0 stale run areas of runs that are gone and 1 leftover lock file\n",
+            "shuttle: removed 0 stale run areas of runs that are gone and 1 lock file with no area beside it and a free lock\n",
         )
         self.assertEqual(self.listing(), [])
 

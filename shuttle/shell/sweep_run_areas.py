@@ -2,9 +2,10 @@
 
 Only in a real run (the check form makes no area and never calls this), only in the temporary
 folder this run will use, and only what shuttle.core.sweep shows to be Shuttle's and unused. The
-sweep holds the lock of an area while it looks at it and removes it, so two sweeps at once never
-remove the same area twice and neither can reach an area a live run holds: the lock of a live run
-is held from before its area exists to after it is gone.
+kind and owner of a name are looked at before its lock is taken and not again; what protects the
+removal is the lock, held while the area is removed, and `remove_tree`, which refuses a link. So
+two sweeps at once never remove the same area twice and neither can reach an area a live run
+holds: the lock of a live run is held from before its area exists to after it is gone.
 
 It never changes a run: any trouble is a line on standard error, and the run goes on. What it says
 is one line, and only when it found something that looked stale.
