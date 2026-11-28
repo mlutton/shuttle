@@ -182,7 +182,7 @@ class ARunThatStartsAfterAShuttleWasKilled(RealRunInItsOwnTemporaryFolder):
         name = os.path.basename(area)
         self.assertEqual(
             err,
-            "shuttle: removed 0 stale run areas of runs that are gone; left alone: "
+            "shuttle: removed 0 stale run areas of runs that are gone; left: "
             f"{name!r} ({sweep.REASON_SCOPE_ACTIVE})\n",
         )
         self.assertEqual(self.names_in_the_temporary_folder(), [name, name + ".lock"])

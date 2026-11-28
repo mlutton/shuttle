@@ -203,11 +203,11 @@ class TheDecisionOverFacts(unittest.TestCase):
         self.assertEqual(
             line,
             "shuttle: removed 2 stale run areas of runs that are gone and 1 lock file with no area beside it and a free lock; "
-            "left alone: 'shuttle-run-area-a' (why a), 'shuttle-run-area-b' (why b)",
+            "left: 'shuttle-run-area-a' (why a), 'shuttle-run-area-b' (why b)",
         )
         self.assertEqual(
             sweep.summary(0, 0, [("n", "w")]),
-            "shuttle: removed 0 stale run areas of runs that are gone; left alone: 'n' (w)",
+            "shuttle: removed 0 stale run areas of runs that are gone; left: 'n' (w)",
         )
 
     def test_a_name_in_the_line_is_shown_escaped_on_one_line(self):
@@ -263,7 +263,7 @@ class TheSweepOnTheSimulatedWorld(unittest.TestCase):
                 line = sweeping(world)
                 self.assertEqual(
                     line,
-                    f"shuttle: removed 0 stale run areas of runs that are gone; left alone: "
+                    f"shuttle: removed 0 stale run areas of runs that are gone; left: "
                     f"{run_area.area_name(part(1))!r} ({sweep.REASON_SCOPE_ACTIVE})\n",
                 )
                 self.assertEqual(everything(world), before)  # the area and its lock file stay
@@ -299,7 +299,7 @@ class TheSweepOnTheSimulatedWorld(unittest.TestCase):
         line = sweeping(self.world)
         self.assertEqual(
             line,
-            "shuttle: removed 0 stale run areas of runs that are gone; left alone: "
+            "shuttle: removed 0 stale run areas of runs that are gone; left: "
             f"{run_area.area_name(part(1))!r} (it could not be removed (PermissionError))\n",
         )
         self.assertNotIn("secret detail", line)
@@ -330,6 +330,38 @@ class TheSweepOnTheSimulatedWorld(unittest.TestCase):
         self.world.will_raise("files.try_lock", PermissionError("detail"))
         self.assertIn("could not be checked (PermissionError)", sweeping(self.world))
         self.assertTrue(self.world.operations.files.exists(area))
+
+    def test_a_lock_file_with_no_area_that_cannot_be_removed_is_named_as_a_lock_file_not_an_area(
+        self,
+    ):
+        lock = run_area.lock_path(area_of(1))
+        self.world.put_file(lock, "")
+        self.world.will_raise("files.release_lock", PermissionError("detail"), nth=1)
+        line = sweeping(self.world)
+        name = run_area.area_name(part(1)) + run_area.LOCK_SUFFIX
+        self.assertEqual(
+            line,
+            "shuttle: removed 0 stale run areas of runs that are gone; left: "
+            f"{name!r} (it could not be removed (PermissionError))\n",
+        )
+        self.assertNotIn(f"{run_area.area_name(part(1))!r}", line)
+        self.assertTrue(self.world.operations.files.exists(lock))
+
+    def test_a_sweep_that_stops_on_the_second_of_two_areas_reports_the_first_it_removed(self):
+        stale(self.world, 1)
+        stale(self.world, 2)
+        # two looks per area: the third look is the second area's first
+        self.world.will_raise("files.look_at", RuntimeError("injected"), nth=3)
+        line = sweeping(self.world)
+        self.assertEqual(
+            line,
+            "shuttle: removed 1 stale run area of runs that are gone; "
+            "the sweep then stopped (RuntimeError) and the run goes on\n",
+        )
+        self.assertEqual(
+            remains(self.world), [run_area.area_name(part(2)) + s for s in ("", ".lock")]
+        )
+        self.assertEqual(self.world.locks_held, set())
 
     def test_a_lock_file_with_no_area_beside_it_is_removed_and_counted_as_a_lock_file(self):
         lock = run_area.lock_path(area_of(1))
@@ -537,6 +569,24 @@ class TheSweepInARun(unittest.TestCase):
                     self.assertEqual(receipt["ending"][field], clean_receipt["ending"][field])
                 self.assertLessEqual(len(err.splitlines()), 1)
 
+    def test_a_run_whose_sweep_stops_on_the_second_area_reports_the_first_and_ends_as_it_would(
+        self,
+    ):
+        world = scenes.scene()
+        world.make_folder(TMP)
+        stale(world, 8)
+        stale(world, 9)
+        world.will_raise("files.look_at", RuntimeError("injected"), nth=3)
+        code, _, err = scenes.run_in(world)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            err,
+            "shuttle: removed 1 stale run area of runs that are gone; "
+            "the sweep then stopped (RuntimeError) and the run goes on\n",
+        )
+        receipt = flat(scenes.outcome(world)["receipt"])
+        self.assertEqual(receipt["ending"]["ending"], "ended_by_itself")
+
     def test_a_run_whose_sweep_could_not_remove_an_area_prints_one_line_and_ends_normally(self):
         world = scenes.scene()
         world.make_folder(TMP)
@@ -546,7 +596,7 @@ class TheSweepInARun(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(
             err,
-            "shuttle: removed 0 stale run areas of runs that are gone; left alone: "
+            "shuttle: removed 0 stale run areas of runs that are gone; left: "
             f"{run_area.area_name(part(9))!r} (it could not be removed (PermissionError))\n",
         )
         receipt = flat(scenes.outcome(world)["receipt"])

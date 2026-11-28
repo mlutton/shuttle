@@ -18,7 +18,7 @@ from shuttle.core import run_area, sweep
 from shuttle.core.shapes import NotARegularFile, Operations, RunState
 
 # What one run part came to: "ignored" (not Shuttle's, or in use), "removed_area",
-# "removed_lock", or "left" with the reason it was left.
+# "removed_lock", or "left" (and "left_lock", for a lock file with no area) with the reason.
 _Result = tuple[str, str]
 
 
@@ -57,7 +57,7 @@ def _remove_the_lock(world: Operations, lock: str) -> _Result:
     except FileNotFoundError:
         return "ignored", ""
     except OSError as error:
-        return "left", sweep.reason_not_removed(type(error).__name__)
+        return "left_lock", sweep.reason_not_removed(type(error).__name__)
     return "removed_lock", ""
 
 
@@ -98,18 +98,24 @@ def _sweep(world: Operations) -> str | None:
     names: Sequence[str] = world.files.list_names(folder, run_area.AREA_PREFIX)
     areas = locks = 0
     left: list[tuple[str, str]] = []
+    stopped: str | None = None
     for part in sweep.run_parts(names):
         try:
             kind, why = _one(world, folder, part)
         except OSError as error:  # one name that cannot be seen to the end does not stop the rest
             kind, why = "left", sweep.reason_not_checked(type(error).__name__)
+        except Exception as error:  # fail closed: stop, and say what was done before it
+            stopped = type(error).__name__
+            break
         if kind == "removed_area":
             areas += 1
         elif kind == "removed_lock":
             locks += 1
         elif kind == "left":
             left.append((run_area.area_name(part), why))
-    return sweep.summary(areas, locks, left)
+        elif kind == "left_lock":  # only the lock file is there to be named
+            left.append((run_area.area_name(part) + run_area.LOCK_SUFFIX, why))
+    return sweep.summary(areas, locks, left, stopped)
 
 
 def sweep_before_the_run_makes_its_area(state: RunState) -> None:

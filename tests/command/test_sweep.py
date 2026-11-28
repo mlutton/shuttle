@@ -155,7 +155,7 @@ class TheSweepOnTheRealFiles(unittest.TestCase):
         line = self.sweep()
         self.assertEqual(
             line,
-            "shuttle: removed 0 stale run areas of runs that are gone; left alone: "
+            "shuttle: removed 0 stale run areas of runs that are gone; left: "
             f"{os.path.basename(area)!r} (it could not be removed (PermissionError))\n",
         )
         self.assertTrue(os.path.isfile(run_area.lock_path(area)))

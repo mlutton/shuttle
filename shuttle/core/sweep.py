@@ -96,10 +96,15 @@ def _count(number: int, what: str) -> str:
     return f"{number} {what}" if number == 1 else f"{number} {what}s"
 
 
-def summary(areas_removed: int, locks_removed: int, left: Sequence[tuple[str, str]]) -> str | None:
+def summary(
+    areas_removed: int,
+    locks_removed: int,
+    left: Sequence[tuple[str, str]],
+    stopped: str | None = None,
+) -> str | None:
     """The one line a sweep prints, or None when it found nothing that looked stale. Each name is
     shown as a quoted literal: it is data, never text to be read as anything else."""
-    if not areas_removed and not locks_removed and not left:
+    if not areas_removed and not locks_removed and not left and stopped is None:
         return None
     line = f"shuttle: removed {_count(areas_removed, 'stale run area')} of runs that are gone"
     if locks_removed:
@@ -108,7 +113,9 @@ def summary(areas_removed: int, locks_removed: int, left: Sequence[tuple[str, st
         else:
             line += f" and {locks_removed} lock files with no area beside them and a free lock"
     if left:
-        line += "; left alone: " + ", ".join(f"{name!r} ({why})" for name, why in left)
+        line += "; left: " + ", ".join(f"{name!r} ({why})" for name, why in left)
+    if stopped is not None:
+        line += f"; the sweep then stopped ({stopped}) and the run goes on"
     return line
 
 
