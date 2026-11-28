@@ -19,7 +19,7 @@ Built as of `14f9cd3`: the executor is launched with `systemd-run --user --scope
 - **A transient systemd service instead of a scope.** The trial measured it: the same survivors as the scope. Whether it was weighed against the scope beyond that table was not recorded.
 - **Bubblewrap alone.** Not taken, because the scope tracks everything a run starts, ends all of it and holds the time limit. In the trial, bubblewrap alone left no survivor except through the multiplexer socket, and its parent-death test left none. It remains the fallback if Shuttle must ever run without a user systemd.
 - **Each driver owning its whole launch.** Considered and rejected: each driver would re-implement stopping and confirming.
-- **A container runtime (docker, podman) and other isolation tools (firejail, Landlock).** Not weighed. On the trial machine docker's tool was present but refused on its socket and podman was absent; neither was probed, and no reason for passing over the others is recorded.
+- **A container runtime (docker, podman) and other isolation tools (firejail, Landlock).** Not weighed: neither was probed, and no reason for passing over the others is recorded.
 
 ## Evidence and its limits
 

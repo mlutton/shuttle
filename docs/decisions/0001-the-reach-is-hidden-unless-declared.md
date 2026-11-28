@@ -18,7 +18,7 @@ The reach (see `GLOSSARY.md`) is what the executor can see and write. Each path 
 
 Who declares what:
 
-- The executor driver declares what its tool needs. For the Codex driver that is one login file, copied into the run's own home and removed with the run area. Nothing is copied back.
+- The executor driver declares what its tool needs. For the Codex driver that is the login file and, when there is one, the tool's settings file, both copied into the run's own home and removed with the run area. Nothing is copied back.
 - The input document names the place and may list extra read-only folders. It can never make anything writable.
 - When the program a run needs sits in a hidden folder, the check form and the run refuse, naming the folder.
 - `changes_to_place: not` is enforced by the box for every driver. The executor writes its statement inside the run area, and Shuttle copies it out.
@@ -38,7 +38,7 @@ Who declares what:
 ## Consequences
 
 - A tool installed under the home folder must be listed as visible, or the run is refused. The check covers the program file only, not an interpreter a script names, a library, or anything else the program opens from another hidden folder; those fail inside the box as the executor's own failure.
-- The executor's own commands can read, and overwrite, the one copied login file: from the source reading, Codex's own sandbox does not hide the disk. That is one file where it was the whole home folder. Whether the service retires the old refresh token is not known. A refreshed login is lost with the run area.
+- The executor's own commands can read, and overwrite, the copied login file and settings file: from the source reading, Codex's own sandbox does not hide the disk. That is a copy of one login (and the settings file) where it was the whole home folder. Whether the service retires the old refresh token is not known. A refreshed login is lost with the run area.
 - Gates and the closing freeze still run in a scope with no box. The network is open for Codex, which must reach its service. Codex also sends usage analytics to its vendor by default; Shuttle sets nothing about it and it is left on for now, not yet assessed.
 - A folder listed as visible that is or holds the home folder, the user's runtime folder, `/tmp`, `/proc` or `/dev` is refused, as is one touching the records folder.
 - Also not built: a receipt note of a login the tool changed during a run (decided), sweeping run areas left behind when Shuttle itself is killed hard, and detection of a run that needed a writable `.git`.
