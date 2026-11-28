@@ -52,9 +52,7 @@ def let_go(path):
 class RealRunInItsOwnTemporaryFolder(real_run.RealRun):
     def setUp(self):
         super().setUp()
-        self.temporary = os.path.join(self.root, "temporary")
-        os.mkdir(self.temporary)
-        self.variables = {"TMPDIR": self.temporary}
+        self.variables = {"TMPDIR": self.temporary}  # the harness's own folder, named for clarity
 
     def names_in_the_temporary_folder(self):
         return sorted(os.listdir(self.temporary))

@@ -186,11 +186,7 @@ class TheCommandKilledHard(real_run.RealRun):
     def test_leaves_the_boundary_empty(self):
         up = self.pipe("up")
         script = self.script("sleeps.py", SAYS_IT_IS_UP_AND_SLEEPS)
-        # A run killed hard leaves its area: the test's own temporary folder holds it, so it is
-        # not left in the machine's, where the next run on the machine would sweep it.
-        temporary = os.path.join(self.root, "temporary")
-        os.mkdir(temporary)
-        proc = self.start(self.document(script, [up]), variables={"TMPDIR": temporary})
+        proc = self.start(self.document(script, [up]))
         with open(up) as f:
             f.read()  # blocks until the script is running in the boundary
         cgroup = self.cgroup_of("r-1")
