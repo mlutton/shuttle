@@ -8,8 +8,6 @@ scrubbed: a kept file holds whatever the executor printed.
 
 from typing import Final, Literal
 
-from shuttle.core.shapes import NotARegularFile
-
 # The three kept files, by what each is. A kind names the receipt field (`<kind>_kept`) and, with
 # its dashes, the kept file (`<request id>.<kind>.kept`).
 KINDS: Final = ("standard_output", "standard_error", "final_message")
@@ -32,10 +30,24 @@ def field_name(kind: str) -> str:
     return f"{kind}_kept"
 
 
-def reading_after(error: BaseException) -> Literal["none", "cannot_tell"]:
-    """What a kept file's field reads after the copy raised `error`: a name that holds a folder, a
-    link, a pipe or a device was looked at and holds no file to keep, so there is none; a failure
-    of any other kind could not look, so Shuttle cannot tell."""
-    if isinstance(error, IsADirectoryError | NotARegularFile):
+# What looking at the name a tool leaves a file at can find, as `look_at` of the file operations
+# says it: "missing", "file", "folder", "link" (to anything) or "other" (a pipe, a device, a socket).
+Step = Literal["copy", "none", "cannot_tell"]
+
+
+def what_to_do(kind: str, named: bool, look: str) -> Step:
+    """What the step does for one kept file, from what looking at its name found.
+
+    "none" means looked, and there is nothing: the driver has no such file (`named` False), or the
+    tool did not write its final message. A standard output or standard error file was made new
+    for the executor before it started, so one that is missing now was removed, and output may
+    have been written and cannot be shown: "cannot tell". So is anything but a regular file at the
+    name (a link is never followed), since something is there that was not kept.
+    """
+    if not named:
+        return "none"
+    if look == "file":
+        return "copy"
+    if look == "missing" and kind == "final_message":
         return "none"
     return "cannot_tell"

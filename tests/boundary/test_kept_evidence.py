@@ -96,7 +96,9 @@ class TheExecutorsOutputIsKept(real_run.RealRun):
         doc = self.document(self.script("swaps.py", SWAPS_ITS_OUTPUT_FOR_A_LINK), [secret])
         code, lines, err = self.run_to_the_end(doc)
         self.assertEqual((code, err, lines[-1]), (0, "", "ended_by_itself"))
-        self.assertEqual(self.execution()["standard_output_kept"], {"state": "none", "value": None})
+        self.assertEqual(
+            self.execution()["standard_output_kept"], {"state": "cannot tell", "value": None}
+        )
         self.assertFalse(os.path.exists(os.path.join(self.records, "r-1.standard-output.kept")))
         self.assertEqual(self.kept("standard-error"), b"swapped\n")
 

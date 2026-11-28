@@ -307,6 +307,9 @@ def step_runs(step: str, facts: Mapping[str, object]) -> bool:
         return facts.get("header_source") is not None
     if step == "tear_down":  # the run area is removed whatever the ending, once set-up was tried
         return facts.get("header_source") is not None and "setup" in facts
+    if step == "move_kept_files" and facts.get("launch") == "program_not_started":
+        # The box was started, and what it printed in complaint is in the executor's files.
+        return facts.get("header_source") is not None and facts.get("setup") == "ok"
     if facts.get("header_source") is None or _failed_before_launch(facts):
         return False
     # Nothing is frozen or delivered unless the stop is confirmed: until then something may still

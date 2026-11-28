@@ -422,8 +422,9 @@ class FileOperations(NamedTuple):
     # NotARegularFile if existing is a link (to anything, a missing name too), a pipe, a device
     # or a socket: a link is never followed and nothing waits on what is there. At most the
     # size seen when it opened is copied. Nothing is left under the new name when it raises
-    # (existing name, new name): `copy` in every way, the new file made readable and writable by its
-    # owner only, whatever the process's umask
+
+    # `copy_private`, (existing name, new name): `copy` in every way, the new file made readable and
+    # writable by its owner only, whatever the process's umask.
     copy_private: Callable[[str, str], None]
     hash: Callable[
         [str], str

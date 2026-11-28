@@ -12,7 +12,6 @@ import sys
 import unittest
 
 from shuttle.core import decisions, evidence, fixed, run_area
-from shuttle.core.shapes import NotARegularFile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 scenes = importlib.import_module("rehearsal.scene")
@@ -55,20 +54,23 @@ class TheNamesAndTheReading(unittest.TestCase):
         for name in FIELDS:
             self.assertIn(name, fixed.RECEIPT_GROUPS["execution"])
 
-    def test_a_file_that_is_not_a_regular_file_reads_none_and_any_other_failure_cannot_tell(self):
-        for error, reading in (
-            (
-                FileNotFoundError("gone"),
-                "cannot_tell",
-            ),  # the area was there, so this is not "absent"
-            (IsADirectoryError("a folder"), "none"),
-            (NotARegularFile("a link"), "none"),
-            (PermissionError("no"), "cannot_tell"),
-            (FileExistsError("taken"), "cannot_tell"),
-            (OSError("disk"), "cannot_tell"),
-        ):
-            with self.subTest(type(error).__name__):
-                self.assertEqual(evidence.reading_after(error), reading)
+    def test_what_looking_at_a_name_found_decides_what_the_step_does_for_each_kind(self):
+        rows = [
+            # (kind, the driver names a file, what was found, what is done)
+            ("standard_output", True, "file", "copy"),
+            ("final_message", True, "file", "copy"),
+            ("standard_output", True, "missing", "cannot_tell"),  # made new for the executor
+            ("standard_error", True, "missing", "cannot_tell"),
+            ("final_message", True, "missing", "none"),  # the tool did not write one
+            ("final_message", False, "missing", "none"),  # the driver has none
+            ("standard_output", False, "missing", "none"),
+        ]
+        for kind in evidence.KINDS:
+            for found in ("folder", "link", "other"):
+                rows.append((kind, True, found, "cannot_tell"))
+        for kind, named, found, done in rows:
+            with self.subTest(kind=kind, named=named, found=found):
+                self.assertEqual(evidence.what_to_do(kind, named, found), done)
 
     def test_the_record_version_is_five(self):
         self.assertEqual(fixed.RECORD_VERSION, 5)
@@ -160,6 +162,28 @@ class TheRunKeepsWhatTheExecutorPrinted(unittest.TestCase):
         )
 
 
+class WhenTheProgramWasNotStarted(unittest.TestCase):
+    def test_what_the_box_printed_is_kept_and_a_run_that_started_no_process_keeps_nothing(self):
+        world = scenes.scene(None, cannot_exec=True, error="the box's complaint\n")
+        code, _, err = scenes.run_in(world)
+        self.assertEqual(code, 0, err)
+        receipt = scenes.outcome(world)["receipt"]
+        self.assertEqual(receipt["ending"]["reason"]["value"], "program_not_started")
+        self.assertEqual(
+            receipt["execution"]["standard_error_kept"], held(KEPT_ERR, "the box's complaint\n")
+        )
+        self.assertEqual(world.text_of(KEPT_ERR), "the box's complaint\n")
+        self.assertEqual(decisions.check_receipt(receipt), [])
+        # the box itself could not be started: no process, so nothing to keep
+        world = scenes.scene(None, fails_to_start=True, error="never printed\n")
+        scenes.run_in(world)
+        receipt = scenes.outcome(world)["receipt"]
+        self.assertEqual(receipt["ending"]["reason"]["value"], "launch_failed")
+        for name in FIELDS:
+            self.assertEqual(receipt["execution"][name], NOTHING, name)
+        self.assertNotIn(KEPT_ERR, world.files)
+
+
 class WhatCannotBeKeptIsSaidAndChangesNoEnding(unittest.TestCase):
     def run_with(self, program, before):
         world = scenes.scene(None, **program)
@@ -168,17 +192,19 @@ class WhatCannotBeKeptIsSaidAndChangesNoEnding(unittest.TestCase):
         self.assertEqual(code, 0, err)
         return world, scenes.outcome(world)["receipt"]
 
-    def test_a_file_that_is_not_there_when_the_files_are_kept_reads_none(self):
+    def test_a_file_made_for_the_executor_that_is_not_there_when_the_files_are_kept_cannot_be_told(
+        self,
+    ):
         def removes(world):
             world.on_call("boundary.stop", lambda: world.files.pop(OUT, None))
 
         world, receipt = self.run_with({"output": "x", "error": "y"}, removes)
         got = receipt["execution"]
-        self.assertEqual(got["standard_output_kept"], NOTHING)
+        self.assertEqual(got["standard_output_kept"], CANNOT)
         self.assertEqual(got["standard_error_kept"], held(KEPT_ERR, "y"))
         self.assertNotIn(KEPT_OUT, world.files)
 
-    def test_a_link_a_pipe_or_a_folder_in_its_place_is_not_followed_and_reads_none(self):
+    def test_a_link_a_pipe_or_a_folder_in_its_place_is_not_followed_and_cannot_be_told(self):
         things = {
             "a link to a file": lambda w: (
                 w.put_file("/elsewhere", "secret"),
@@ -199,7 +225,7 @@ class WhatCannotBeKeptIsSaidAndChangesNoEnding(unittest.TestCase):
                     world.on_call("boundary.stop", swap)
 
                 world, receipt = self.run_with({"output": "x"}, swaps)
-                self.assertEqual(receipt["execution"]["standard_output_kept"], NOTHING)
+                self.assertEqual(receipt["execution"]["standard_output_kept"], CANNOT)
                 self.assertNotIn(KEPT_OUT, world.files)
                 self.assertNotIn(
                     "secret",

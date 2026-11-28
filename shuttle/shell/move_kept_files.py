@@ -18,8 +18,9 @@ The executor's standard output and standard error, and the final message its dri
 each copied whole to a name beside the statement's (shuttle.core.evidence), made readable and
 writable by the owner only, and the copy is what is hashed. Each is looked at on its own, and
 a failure in one never changes another, the statement or the run's ending: a file that is not there
-reads "none", a folder, link, pipe or device in its place is not followed and reads "none", and a
-file that could not be moved or hashed reads "cannot tell". Nothing is scrubbed. The step runs
+reads "none" only where it was never to be there (the driver has no such file, or the tool did not
+write its final message); a standard output or standard error file that is gone, anything but a
+regular file in its place (never followed), and a file that could not be moved or hashed read "cannot tell". Nothing is scrubbed. The step runs
 before the tear-down, which removes the files it copies from, and for every ending the run
 lives to see the executor start.
 
@@ -102,19 +103,18 @@ def keep_output_file(
     world: Operations, source: HeaderSource, kind: str, name: str | None
 ) -> dict[str, dict[str, str] | str]:
     """The result for one kept file of the executor's output, as its field's key alone. `name` is
-    where the tool left it, None when the driver has no such file. A key left out reads
-    "cannot tell", an empty text "none"."""
+    where the tool left it, None when the driver has no such file. What the look at the name
+    means is `evidence.what_to_do`'s. A key left out reads "cannot tell", an empty text "none"."""
     field = evidence.field_name(kind)
     try:
-        if name is None or not world.files.exists(name):
-            return {field: ""}
+        look = world.files.look_at(name)[0] if name is not None else "missing"
+        todo = evidence.what_to_do(kind, name is not None, look)
+        if todo != "copy" or name is None:
+            return {field: ""} if todo == "none" else {}
         kept = decisions.join_path(
             source["records_location"], evidence.kept_name(source["request_id"], kind)
         )
-        try:
-            world.files.copy_private(name, kept)
-        except OSError as error:
-            return {field: ""} if evidence.reading_after(error) == "none" else {}
+        world.files.copy_private(name, kept)
         return {field: {"kept_at": kept, "hash": world.files.hash(kept)}}
     except Exception:  # a failure to keep evidence never changes the run's ending
         return {}
