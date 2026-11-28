@@ -93,6 +93,9 @@ class SimulatedWorld:
         self._ids = 0
         self._temporary = 0
         self.read_only = set()  # names the owner may not write
+        self.memory_cap = (
+            "held"  # what a trial scope's cgroup shows: "held", "ignored" or "unreadable"
+        )
         self.the_freeze = None  # None, "fails" (git ends with an error) or "times_out" (the limit)
         self.refs = {}  # reference -> commit, as the freeze made them
         self.commits = {}  # commit -> {"files": name to bytes, "parent": commit or None}
@@ -124,7 +127,11 @@ class SimulatedWorld:
                 read_report=self._read_report,
             ),
             boundary=BoundaryOperations(
-                show=self._show, stop=self._stop, forget=self._forget, resolve=self._resolve
+                show=self._show,
+                stop=self._stop,
+                forget=self._forget,
+                resolve=self._resolve,
+                try_memory_cap=self._try_memory_cap,
             ),
             clock=ClockOperations(now=self._now, timestamp=self._timestamp),
             signals=SignalOperations(install=self._install, name_of=self._name_of),
@@ -607,6 +614,17 @@ class SimulatedWorld:
         self._enter("boundary.forget", unit)
         if self.units.get(unit, _GONE)["ActiveState"] == "failed":
             self.units.pop(unit, None)
+
+    def _try_memory_cap(self, memory_max, swap_max):
+        """A machine that holds the cap shows the numbers it was asked for; one whose user scopes
+        cannot be capped shows "max" ("ignored": the files are there and say nothing caps) or
+        raises OSError ("unreadable": a scope that could not be made or whose files are missing)."""
+        self._enter("boundary.try_memory_cap", memory_max, swap_max)
+        if self.memory_cap == "unreadable":
+            raise OSError("the trial scope could not read its limits")
+        if self.memory_cap == "ignored":
+            return "max", "max"
+        return str(memory_max), str(swap_max)
 
     def _resolve(self, path):
         self._enter("boundary.resolve", path)

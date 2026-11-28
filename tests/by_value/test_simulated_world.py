@@ -44,6 +44,7 @@ CALLS = {
     "boundary.stop": ("u.scope",),
     "boundary.forget": ("u.scope",),
     "boundary.resolve": ("/f",),
+    "boundary.try_memory_cap": (67108864, 0),
     "clock.now": (),
     "clock.timestamp": (),
     "signals.install": (print,),

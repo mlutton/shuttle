@@ -855,6 +855,26 @@ class ContractCases:
             {},
         )
 
+    # --------------------------------------------------------------- the boundary
+
+    def memory_cap_trial(self):
+        """The trial's answer, or the class of the error it raised."""
+        try:
+            return self.world.boundary.try_memory_cap(64 * 1024 * 1024, 0)
+        except OSError as error:
+            return type(error)
+
+    def test_a_memory_cap_trial_gives_two_texts_or_raises_os_error(self):
+        answer = self.memory_cap_trial()
+        if answer is OSError:  # a machine whose scope could not be made or read
+            return
+        self.assertIsInstance(answer, tuple)
+        self.assertEqual(len(answer), 2)
+        self.assertTrue(all(isinstance(part, str) and part for part in answer))
+
+    def test_a_memory_cap_trial_answers_the_same_each_time(self):
+        self.assertEqual(self.memory_cap_trial(), self.memory_cap_trial())
+
     # ------------------------------------------------------------------ clock
 
     def test_the_steady_clock_does_not_go_back(self):
