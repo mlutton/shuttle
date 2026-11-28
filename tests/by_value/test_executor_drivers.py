@@ -212,6 +212,20 @@ class ARunNamingTheCodexDriver(unittest.TestCase):
         self.assertEqual((code, err), (0, ""))
         return flat(scenes.outcome(world)["receipt"])
 
+    def test_a_tool_the_box_could_not_start_ends_as_could_not_start_like_the_command_driver_does(
+        self,
+    ):
+        world = world_for("events-finished.jsonl", "last-message-statement.json")
+        world.program(PROGRAM, cannot_exec=True)
+        receipt = self.run_it(world)
+        ending = receipt["ending"]
+        self.assertEqual(
+            (ending["ending"], ending["reason"], ending["failed_step"]),
+            ("could_not_start", "program_not_started", "launch"),
+        )
+        self.assertIn(repr(PROGRAM), ending["reason_text"])
+        self.assertEqual(receipt["execution"]["exit_code"], "none")
+
     def test_the_instruction_reaches_it_on_standard_input_and_never_on_the_command_line(self):
         world = world_for("events-finished.jsonl", "last-message-statement.json")
         self.run_it(world)

@@ -30,7 +30,7 @@ from shuttle.core.shapes import (
 
 # ---------------------------------------------------------------- the ending
 
-_LAUNCH = ("ok", "failed", "stopped_before")
+_LAUNCH = ("ok", "failed", "program_not_started", "stopped_before")
 _WAIT = ("exited", "time_limit", "stop_record", "signal", "error")
 _CNS = "could_not_start"
 _EF = "execution_failed"
@@ -61,7 +61,8 @@ def decide_ending(facts: Facts) -> Decision:
       id_claim: "ok", "used" or "unusable".
       input_check, executor_driver_check: None, or the reason code of the refusal.
       gates: "ok", "no" or "failed". setup, opening_freeze: "ok" or "failed".
-      launch: "ok", "failed" or "stopped_before".
+      launch: "ok", "failed" (the executor was never reported forked), "program_not_started" (it
+        was, and the program was never reported running) or "stopped_before".
       wait: "exited", "time_limit", "stop_record", "signal" or "error".
       stop: "confirmed" or "not_confirmed". closing_freeze, delivery: "ok" or "failed".
 
@@ -84,6 +85,8 @@ def _decide(f: Facts) -> Decision:
     launch = f.get("launch")
     if launch == "failed":
         return _decision(_CNS, "launch_failed", "launch")
+    if launch == "program_not_started":
+        return _decision(_CNS, "program_not_started", "launch")
     if launch == "stopped_before":
         return _decision(_CNS, "stopped")
     if launch != "ok":
@@ -276,7 +279,7 @@ def _failed_before_launch(f: Mapping[str, object]) -> bool:
         or f.get("gates") in ("no", "failed")
         or f.get("setup") == "failed"
         or f.get("opening_freeze") == "failed"
-        or f.get("launch") in ("failed", "stopped_before")
+        or f.get("launch") in ("failed", "program_not_started", "stopped_before")
     )
 
 

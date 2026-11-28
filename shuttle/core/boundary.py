@@ -366,7 +366,8 @@ def launch_argv(
     with its parent and the reach `box_arguments` gives it. The variables the shell needed to
     reach systemd are taken out of the executor's environment unless the caller named them.
     Bubblewrap's status report goes to the descriptor `report_fd`, which says whether the
-    executor was ever started (see `executor_started`). The executor starts in the place.
+    executor was ever forked (see `executor_started`) and whether the program ended
+    (`executor_ended`). The executor starts in the place.
     """
     left_out = [v for v in BUS_VARIABLES if v not in environment_names]
     return [
@@ -435,27 +436,51 @@ def cause_of_end(wait: str | None, scope_end: str) -> str:
     return CANNOT_TELL
 
 
-def executor_started(report: str) -> bool:
-    """Whether bubblewrap's status report says the executor was started inside the box.
-
-    The report is bubblewrap's `--json-status-fd`: one JSON object per line. Once the executor is
-    running in the box, a line with a "child-pid" member (a positive whole number) is written.
-    Lines that are not JSON objects, and members and objects not known, are ignored.
-    """
+def _report_members(report: str, name: str) -> list[object]:
+    """The values of the member `name` in the objects of bubblewrap's status report, one JSON object
+    per line. Lines that are not JSON objects, and members and objects not known, are ignored."""
+    found: list[object] = []
     for line in report.splitlines():
         try:
-            found = json.loads(line)
+            parsed = json.loads(line)
         except (ValueError, RecursionError):  # not JSON, or nested too deep to read
             continue
-        pid = found.get("child-pid") if isinstance(found, dict) else None
-        if type(pid) is int and pid > 0:
-            return True
-    return False
+        if isinstance(parsed, dict) and name in parsed:
+            found.append(parsed[name])
+    return found
+
+
+def executor_started(report: str) -> bool:
+    """Whether bubblewrap's status report says the box was made and the executor forked.
+
+    Once bubblewrap has made the box and forked the process that will become the executor, a line
+    with a "child-pid" member (a positive whole number) is written. That is before the program is
+    executed, so it does not say the program started: see `program_not_started`.
+    """
+    return any(type(pid) is int and pid > 0 for pid in _report_members(report, "child-pid"))
+
+
+def executor_ended(report: str) -> bool:
+    """Whether bubblewrap's status report holds the executor's end: a line with an "exit-code"
+    member (a whole number).
+
+    Bubblewrap writes it when the program it executed ends, and only then: it keeps a pipe that
+    closes when the program is executed (its own `setup_finished_pipe`, in every version from
+    0.6.2 on that this was checked against) and writes the line only when the pipe was closed that
+    way. A program the kernel could not execute and `execvp` could not hand to the shell either
+    (the file or the interpreter its first line names is missing or not in the box) ends
+    bubblewrap itself with status 1 and no such line, as does a failure of bubblewrap's own
+    set-up after the fork. A program that was executed and ended with any code, 126 and 127
+    included, has the line with that code; so has a file `execvp` runs through the shell (an ELF
+    for another architecture, no `#!` line, a `#!` line whose interpreter path the kernel cuts),
+    which ends as its own exit.
+    """
+    return any(type(code) is int for code in _report_members(report, "exit-code"))
 
 
 def launch_failed(cause: str, report: str) -> bool:
     """Whether the boundary never started the executor: the scope was seen to end by itself and
-    bubblewrap never reported the executor running.
+    bubblewrap never reported the executor forked.
 
     That reads the same whether a tool was missing, `systemd-run` could not make the scope or
     `bwrap` could not make the box. A time limit, a signal, or a cause that cannot be told is
@@ -463,6 +488,43 @@ def launch_failed(cause: str, report: str) -> bool:
     launch is never a guess.
     """
     return cause == "exited" and not executor_started(report)
+
+
+# What bubblewrap itself ends with when it fails: its own error exit, never the program's.
+BUBBLEWRAP_FAILURE_STATUS = 1
+
+
+def program_not_started(cause: str, report: str, returncode: int | None) -> bool:
+    """Whether the program was never reported running, after the executor was reported forked.
+    Two causes give this report: the program could not be executed, or bubblewrap failed making
+    the box after the fork; the report does not say which.
+
+    Nothing here reads the program's exit code: a program that was executed has its end reported,
+    whatever the code. What is not told this way is a program that did start and then failed by
+    itself in a way that looks the same from inside (the dynamic loader failing on a missing
+    library exits 127 as the program, after the execution). A bubblewrap ended by a signal or by
+    another status was ended from outside, which says nothing of the program: not a guess.
+    """
+    return (
+        cause == "exited"
+        and executor_started(report)
+        and not executor_ended(report)
+        and returncode == BUBBLEWRAP_FAILURE_STATUS
+    )
+
+
+def program_not_started_line(program: str | None) -> str:
+    """The one line for the caller when the program was never reported running: what was
+    observed, and both things to look at (the report does not say which one failed)."""
+    which = "the program" if program is None else f"the program {program!r}"
+    return (
+        f"the box was started and {which} was never reported as running; either it could not be "
+        "executed (the program, or the interpreter its first line names, is missing, not "
+        "executable, or in a folder the box does not show: a folder is shown only when listed "
+        "under reach.visible, and a relative command is looked for in the place), or the box "
+        "could not be made (a folder the document lists, or the place, is gone); check that "
+        "each of those exists and can be run or read"
+    )
 
 
 def wait_cause(child_exited: bool, signal_name: str | None) -> str | None:
