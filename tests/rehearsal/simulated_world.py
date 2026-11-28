@@ -554,7 +554,7 @@ class SimulatedWorld:
             elif not behaviour["fails_to_start"]:
                 child.report = '{"child-pid": 2}\n'
                 if not behaviour["hangs"] and not behaviour["cannot_exec"]:
-                    child.report += '{"exit-code": %d}\n' % behaviour["exit_code"]
+                    child.report += f'{{"exit-code": {behaviour["exit_code"]}}}\n'
         if unit:
             self.units[unit] = dict(_STILL_THERE)
         self.children.append(child)
