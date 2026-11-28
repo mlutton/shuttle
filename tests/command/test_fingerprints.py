@@ -606,11 +606,11 @@ class FilterDrivers(FingerprintCase):
                 os.remove(os.path.join(self.records, "r-1.request.json"))
 
     def test_drivers_planted_from_outside_the_box_during_the_run_are_never_run(self):
-        # The box keeps the executor out of the git folders, but a gate has no box and could plant
-        # configuration there. So the test plays that part: the script says it is up, the test
-        # (outside the box, after the opening freeze) defines a clean driver named by the
-        # .gitattributes the script then writes, and a process driver named by info/attributes,
-        # then lets the script go on; the closing freeze must not run either.
+        # The box keeps the executor out of the git folders, but nothing keeps another process on
+        # the machine out of them while a run is going. So the test is that process: the script says
+        # it is up, the test (outside the box, after the opening freeze) defines a clean driver
+        # named by the .gitattributes the script then writes, and a process driver named by
+        # info/attributes, then lets the script go on; the closing freeze must not run either.
         up, go = self.pipe("up"), self.pipe("go")
         script = (
             "import os, sys\n"
