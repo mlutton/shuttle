@@ -4,7 +4,7 @@ Status: accepted, 2026-11-25 (the choice of mechanism); confirmed 2026-11-27 tha
 
 ## Context
 
-A caller needs a run to start one executor and to know, from the run itself, that everything the executor started has ended. A stop by process group misses what is started detached (a new session, a user service, a timer) or through a daemon such as a terminal-multiplexer server, so "stops everything it started" can be confirmed only with a control group, or something like it, that is stopped and then seen empty. What the box lets the executor see and write is a separate decision: [0001](0001-the-reach-is-hidden-unless-declared.md).
+A caller needs a run to start one executor and to know, from the run itself, that everything the executor started has ended. A stop by process group misses what is started detached (a new session, a user service, a timer) or through a daemon such as a terminal-multiplexer server, so the design relied on a control group, or something like it, that is stopped and then seen empty, to confirm that a run "stops everything it started". That reliance was not tested for mechanisms beyond those in the trial below. What the box lets the executor see and write is a separate decision: [0001](0001-the-reach-is-hidden-unless-declared.md).
 
 ## Decision
 
@@ -19,7 +19,7 @@ Built as of `14f9cd3`: the executor is launched with `systemd-run --user --scope
 - **A transient systemd service instead of a scope.** The trial measured it: the same survivors as the scope. Whether it was weighed against the scope beyond that table was not recorded.
 - **Bubblewrap alone.** Not taken, because the scope tracks everything a run starts, ends all of it and holds the time limit. In the trial, bubblewrap alone left no survivor except through the multiplexer socket, and its parent-death test left none. It remains the fallback if Shuttle must ever run without a user systemd.
 - **Each driver owning its whole launch.** Considered and rejected: each driver would re-implement stopping and confirming.
-- **A container runtime (docker, podman) and other isolation tools (firejail, Landlock).** Not weighed: neither was probed, and no reason for passing over the others is recorded.
+- **A container runtime (docker, podman) and other isolation tools (firejail, Landlock).** Whether any of these was weighed is not recorded. The trial did not probe docker or podman, and the other tools were not reached.
 
 ## Evidence and its limits
 

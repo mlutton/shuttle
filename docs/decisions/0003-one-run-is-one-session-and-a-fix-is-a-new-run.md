@@ -22,14 +22,14 @@ Not built: handing a fix run what it needs. The round and the loop are not Shutt
 ## Alternatives considered
 
 - **Keep the builder open between rounds and fix there.** Not taken; it is the practice being left. Why it was a problem is not recorded beyond the Context. A case for it was made before the decision: continuing the same session is cheap and keeps context, and suits a narrow fix round, while a fresh session suits a case where the earlier attempt's framing was the problem. After the decision, the holder of that view agreed with the decision on cost grounds: with a record to start from, a narrow fix round is a new run handed the gap, and the price is that each run re-reads its input.
-- **Resume the tool's own earlier conversation.** Codex has a resume command. Whether it was weighed was not recorded, and Shuttle does not use it.
+- **Resume the tool's own earlier conversation.** From a reading of the Codex CLI source (gathered by helper agents, checked only through the paths they cited, and not run), Codex has a resume command. Whether it was weighed is not recorded, and Shuttle does not use it.
 - **A service that supervises long-lived agents.** Not taken: one command is one run, and nothing stays in the background. Beyond the reasons here, no reason is recorded.
 
 ## Consequences
 
 - Each fix run starts without the earlier run's context, and each run re-reads its input. No source says the records Shuttle writes are enough for a caller to hand over what the next run needs, and Shuttle does not do the handing.
-- With an empty tool home, Codex rebuilds about 39 MB of caches each run (a single measurement). The driver starts with an empty tool home except what it copies in.
+- With an empty tool home, Codex rebuilds about 39 MB of caches each run (a figure from the Codex driver prototype). The driver starts with an empty tool home except what it copies in.
 - A run cannot ask a human and carry on. In the first version "asked for a human" is not reachable as an ending: a tool that waits ends as "time limit", and a tool that exits with a question as its last message ends "ended by itself". One report of a set of probes (not re-run) found that Codex in non-interactive mode never showed an approval prompt, and that a tool whose endpoint was unreachable did not end by itself in 90 seconds.
 - A used request id cannot be reused, so a retry needs a new id.
 - It rules out an agent kept alive between requests, and any interactive exchange with one run.
-- The word "session" is the design's; Shuttle's `GLOSSARY.md` has no entry for a run or a session, and the code does not use the word for what a run is.
+- The word "session" comes from the proposal that led to this decision. It is also a vendor's word for what an agent executor has. Shuttle's `GLOSSARY.md` has no entry for a run or a session, and the code does not use the word for what a run is.

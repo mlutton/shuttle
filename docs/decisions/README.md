@@ -1,8 +1,8 @@
 # Decision records
 
-A record here says why something in Shuttle is the way it is: the context, what was decided, what else was considered and why it was not taken, and what the decision costs. Each is a short public rendering of the project's internal decision notes.
+A record here says why something in Shuttle is the way it is: the context, what was decided, what else was considered and why it was not taken, and what the decision costs. Each is a short rendering of the maintainers' decision notes.
 
-The internal notes are the source for the reasons. A correction goes there first, and the record is then rendered again. A record states its own status: what of it is built as of a named commit of `main`. That part is checked against the repository and goes stale as the code changes.
+The maintainers' notes are the source for the reasons. A correction is a pull request here; the maintainers carry an accepted correction back to the notes, and the record is rendered again from them. A record states its own status: what of it is built as of a named commit of `main`. That part is checked against the repository and goes stale as the code changes.
 
 Where the notes say a reason was not recorded, the record says so; it does not supply one.
 
