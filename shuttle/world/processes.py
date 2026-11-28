@@ -1,9 +1,11 @@
 """Child processes: the real set."""
 
+import contextlib
 import os
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
+from typing import BinaryIO
 
 from shuttle.core.shapes import ProcessOperations
 
@@ -32,36 +34,47 @@ def open_report() -> int:
     return write
 
 
+def _make_new(name: str | None, made: list[str], opened: contextlib.ExitStack) -> BinaryIO | int:
+    """A file made new for a child's output, closed with `opened`; the null device for no name.
+    A name it made is put in `made`, so a start that fails can take it away again."""
+    if name is None:
+        return subprocess.DEVNULL
+    stream = opened.enter_context(open(name, "xb"))  # noqa: SIM115
+    made.append(name)
+    return stream
+
+
 def start(
     argv: Sequence[str],
     environment: Mapping[str, str],
     report: int | None = None,
     input_from: str | None = None,
     output_to: str | None = None,
+    error_to: str | None = None,
 ) -> subprocess.Popen[bytes]:
     held = _opened.pop(report) if report is not None else None
-    given = None
-    kept = None
+    made: list[str] = []
     try:
-        given = open(input_from, "rb") if input_from is not None else None  # noqa: SIM115
-        kept = open(output_to, "xb") if output_to is not None else None  # noqa: SIM115
-        child = _Child(
-            list(argv),
-            env=dict(environment),
-            stdin=given if given is not None else subprocess.DEVNULL,
-            stdout=kept if kept is not None else subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            pass_fds=(held[1],) if held else (),
-        )
+        with contextlib.ExitStack() as opened:
+            given = opened.enter_context(open(input_from, "rb")) if input_from else None
+            child = _Child(
+                list(argv),
+                env=dict(environment),
+                stdin=given if given is not None else subprocess.DEVNULL,
+                stdout=_make_new(output_to, made, opened),
+                stderr=_make_new(error_to, made, opened),
+                pass_fds=(held[1],) if held else (),
+            )
     except BaseException:
         if held:
             os.close(held[0])
+        # Nothing started, so a file this call made is not left behind (one it did not make,
+        # because the name was taken, was never opened here).
+        for name in made:
+            with contextlib.suppress(OSError):
+                os.unlink(name)
         raise
     finally:
-        if given is not None:
-            given.close()
-        if kept is not None:
-            kept.close()
         if held:
             os.close(held[1])  # only the child holds the write end now
     if held:

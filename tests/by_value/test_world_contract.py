@@ -44,6 +44,7 @@ class SimulatedHarness:
             "writes_to_the_report": {"report": "hello\n"},
             "copies_its_input": {},
             "prints_hello": {"output": "hello\n"},
+            "prints_to_error": {"error": "oops\n"},
         }
         if kind in behaviours:
             self.world.program(kind, **behaviours[kind])
@@ -58,6 +59,9 @@ class SimulatedHarness:
             kind = "@" if name in self.world.links else "/" if name in self.world.folders else ""
             found.append(name[len(folder) + 1 :] + kind)
         return sorted(found)
+
+    def mode_of(self, path):
+        return self.world.mode_of(path)
 
     def is_a_link(self, path):
         return path in self.world.links

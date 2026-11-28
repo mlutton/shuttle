@@ -88,9 +88,18 @@ def link(existing: str, new: str) -> None:
     os.link(existing, new)
 
 
-def _fill(source: BinaryIO, size: int, new: str) -> None:
+def _create(new: str, mode: int | None) -> BinaryIO:
+    """A new file for writing; with `mode`, made with exactly those permission bits at creation
+    (never wider, whatever the umask), so there is no moment it is more readable."""
+    if mode is None:
+        return open(new, "xb")  # noqa: SIM115
+    descriptor = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, mode)
+    return os.fdopen(descriptor, "wb")
+
+
+def _fill(source: BinaryIO, size: int, new: str, mode: int | None = None) -> None:
     """Copy at most `size` bytes: a file still being appended to cannot make the copy endless."""
-    with open(new, "xb") as target:
+    with _create(new, mode) as target:
         left = size
         while left > 0:
             block = source.read(min(_BLOCK, left))
@@ -102,17 +111,25 @@ def _fill(source: BinaryIO, size: int, new: str) -> None:
         os.fsync(target.fileno())
 
 
-def copy(existing: str, new: str) -> None:
+def _copy(existing: str, new: str, mode: int | None) -> None:
     source, size = _open_regular(existing, follow=False)
     with source:
         try:
-            _fill(source, size, new)
+            _fill(source, size, new, mode)
         except FileExistsError:  # the name is another's: leave it
             raise
         except BaseException:
             with contextlib.suppress(OSError):
                 os.unlink(new)
             raise
+
+
+def copy(existing: str, new: str) -> None:
+    _copy(existing, new, None)
+
+
+def copy_private(existing: str, new: str) -> None:
+    _copy(existing, new, 0o600)
 
 
 def hash_of(path: str) -> str:
@@ -324,6 +341,7 @@ FILES = FileOperations(
     write_new=write_new,
     link=link,
     copy=copy,
+    copy_private=copy_private,
     hash=hash_of,
     remove=remove,
     usable_folder=usable_folder,

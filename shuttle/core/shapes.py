@@ -411,6 +411,9 @@ class FileOperations(NamedTuple):
     # NotARegularFile if existing is a link (to anything, a missing name too), a pipe, a device
     # or a socket: a link is never followed and nothing waits on what is there. At most the
     # size seen when it opened is copied. Nothing is left under the new name when it raises
+    # (existing name, new name): `copy` in every way, the new file made readable and writable by its
+    # owner only, whatever the process's umask
+    copy_private: Callable[[str, str], None]
     hash: Callable[
         [str], str
     ]  # the sha256 of the file's bytes, as 64 lower-case hex digits; raises as read
@@ -491,6 +494,7 @@ class Starter(Protocol):
         report: int | None = None,
         input_from: str | None = None,
         output_to: str | None = None,
+        error_to: str | None = None,
     ) -> Process: ...
 
 
@@ -505,7 +509,8 @@ class ProcessOperations(NamedTuple):
     # opened before anything starts: FileNotFoundError and nothing started when it is not there.
     # `output_to` is a name made new for the child's standard output (None: the null device):
     # FileExistsError, or FileNotFoundError when the folder above it is not there, and nothing
-    # started. OSError, ValueError
+    # started. `error_to` is the same for its standard error (None: the null device); the two
+    # names may not be one. OSError, ValueError
     start: Starter
     poll: Callable[[Process], int | None]  # None while running; negative: ended by that signal
     wait: Callable[
