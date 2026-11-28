@@ -1,6 +1,6 @@
 # The executor's reach is hidden unless declared
 
-Status: accepted, 2026-11-27. Mostly built as of `main` at `36ea58b`: what the executor sees is hidden unless declared, the place's git folders are read-only, the box enforces `changes_to_place: not`, and a program in a hidden folder is refused before the run. Not built: see Consequences.
+Status: accepted, 2026-11-27. Mostly built as of `main` at `d89f730`: what the executor sees is hidden unless declared, the place's git folders are read-only, the box enforces `changes_to_place: not`, and a program in a hidden folder is refused before the run. Not built: see Consequences.
 
 ## Context
 
@@ -41,5 +41,6 @@ Who declares what:
 - The executor's own commands can read, and overwrite, the copied login file and settings file: from the source reading, Codex's own sandbox does not hide the disk. That is a copy of one login (and the settings file) where it was the whole home folder. Whether the service retires the old refresh token is not known. A refreshed login is lost with the run area.
 - Gates and the closing freeze still run in a scope with no box. The network is open for Codex, which must reach its service. Codex also sends usage analytics to its vendor by default; Shuttle sets nothing about it and it is left on for now, not yet assessed.
 - A folder listed as visible that is or holds the home folder, the user's runtime folder, `/tmp`, `/proc` or `/dev` is refused, as is one touching the records folder.
-- Also not built: a receipt note of a login the tool changed during a run (decided), sweeping run areas left behind when Shuttle itself is killed hard, and detection of a run that needed a writable `.git`, which is decided against (see Alternatives).
+- Also not built: a receipt note of a login the tool changed during a run (decided), and detection of a run that needed a writable `.git`, which is decided against (see Alternatives).
+- Built since `36ea58b`: sweeping the run areas left behind when Shuttle itself is killed hard ([0005](0005-a-run-sweeps-the-areas-of-runs-that-are-gone.md)). The run area holds a copy of the login until it is removed, and a later real run now removes the ones a hard-killed Shuttle left, with the limits that record gives.
 - Not tested: no real Codex run has been made inside the boundary as built, and the test suite never starts the real tool.

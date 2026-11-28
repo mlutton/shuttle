@@ -1,6 +1,6 @@
 # The boundary is a systemd user scope around bubblewrap
 
-Status: accepted, 2026-11-25 (the choice of mechanism); confirmed 2026-11-27 that the scope stays. Built as of `main` at `36ea58b`, with the stop and status forms not built and no real Codex run made in the boundary as it now is.
+Status: accepted, 2026-11-25 (the choice of mechanism); confirmed 2026-11-27 that the scope stays. Built as of `main` at `d89f730`, with the stop and status forms not built and no real Codex run made in the boundary as it now is.
 
 ## Context
 
@@ -8,9 +8,9 @@ A caller needs a run to start one executor and to know, from the run itself, tha
 
 ## Decision
 
-Shuttle starts the executor in a systemd user scope and, inside it, runs bubblewrap with its own process space that dies with its parent. The scope holds the time limit (its maximum runtime) and is stopped by name and seen empty; the box holds the reach. Together they are the boundary (`GLOSSARY.md`). The boundary belongs to execution, not to each driver. The time limit has one owner, the scope: the command observes why the scope ended and names the ending; it has no second deadline.
+Shuttle starts the executor in a systemd user scope and, inside it, runs bubblewrap with its own process space that dies with its parent. The scope holds the time limit (its maximum runtime) and, when the input document names one, a memory cap ([0004](0004-a-run-can-carry-a-memory-cap.md)), and is stopped by name and seen empty; the box holds the reach. Together they are the boundary (`GLOSSARY.md`). The boundary belongs to execution, not to each driver. The time limit has one owner, the scope: the command observes why the scope ended and names the ending; it has no second deadline.
 
-Built as of `36ea58b`: the executor is launched with `systemd-run --user --scope` with `RuntimeMaxSec` and `TimeoutStopSec=3s` around `bwrap --unshare-pid --die-with-parent`; the run stops the scope by name, sees it empty and reads from it why it ended, and a reason it cannot read is "execution failed".
+Built as of `d89f730`: the executor is launched with `systemd-run --user --scope` with `RuntimeMaxSec` and `TimeoutStopSec=3s` (and `MemoryMax` and `MemorySwapMax` when the document names a memory cap) around `bwrap --unshare-pid --die-with-parent`; the run stops the scope by name, sees it empty and reads from it why it ended, and a reason it cannot read is "execution failed".
 
 ## Alternatives considered
 
