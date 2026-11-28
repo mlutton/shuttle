@@ -102,6 +102,26 @@ class TheExecutorsOutputIsKept(real_run.RealRun):
         self.assertFalse(os.path.exists(os.path.join(self.records, "r-1.standard-output.kept")))
         self.assertEqual(self.kept("standard-error"), b"swapped\n")
 
+    def test_a_program_the_box_cannot_execute_ends_as_not_started_and_keeps_what_the_box_printed(
+        self,
+    ):
+        script = os.path.join(self.support, "script")
+        with open(script, "w") as f:
+            f.write("#!/nonexistent-folder/sh\n")
+        os.chmod(script, os.stat(script).st_mode | stat.S_IXUSR)
+        doc = self.document("unused")
+        doc["executor"]["settings"] = {"command": script, "arguments": []}
+        code, lines, err = self.run_to_the_end(doc)
+        self.assertEqual((code, err, lines[-1]), (0, "", "could_not_start"))
+        receipt = self.outcome()["receipt"]
+        self.assertEqual(receipt["ending"]["reason"]["value"], "program_not_started")
+        complaint = self.kept("standard-error")
+        self.assertNotEqual(complaint, b"")
+        self.assertIn(script.encode(), complaint)  # the box names the program it could not run
+        self.held("standard-error", complaint, "standard_error_kept")
+        self.held("standard-output", self.kept("standard-output"), "standard_output_kept")
+        self.assertEqual(self.execution()["final_message_kept"], {"state": "none", "value": None})
+
     def test_they_are_kept_when_the_time_limit_ends_the_run(self):
         doc = self.document(self.script("hangs.py", PRINTS_THEN_HANGS), limit=1)
         code, lines, err = self.run_to_the_end(doc)
