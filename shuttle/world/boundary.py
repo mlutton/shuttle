@@ -59,7 +59,9 @@ _READ_THE_CAP = (
 )
 
 
-def try_memory_cap(memory_max: int, swap_max: int) -> tuple[str, str]:
+def try_memory_cap(
+    memory_max: int, swap_max: int, timeout: float = _ANSWER_SECONDS
+) -> tuple[str, str]:
     unit = f"shuttle-probe-{uuid.uuid4().hex}"
     try:
         done = subprocess.run(
@@ -81,13 +83,17 @@ def try_memory_cap(memory_max: int, swap_max: int) -> tuple[str, str]:
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
-            timeout=_ANSWER_SECONDS,
+            timeout=timeout,
         )
     except (subprocess.SubprocessError, UnicodeDecodeError) as error:
         raise OSError(f"the trial scope did not answer ({type(error).__name__})") from error
     finally:
-        # A scope that failed stays loaded until it is reset; one that is gone says "not loaded".
+        # On every path out nothing of this call is left: a scope still running (the tool was
+        # killed after making it) is stopped, and a failed one stays loaded until it is reset.
+        # Both are no-ops for a scope that is already gone.
         with contextlib.suppress(OSError):  # not answering: the caller is told by what follows
+            stop(f"{unit}.scope")
+        with contextlib.suppress(OSError):
             forget(f"{unit}.scope")
     lines = done.stdout.split()
     if done.returncode != 0 or len(lines) != 2:

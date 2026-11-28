@@ -121,6 +121,8 @@ class ACapOnAMachineThatCannotHoldItIsRefused(unittest.TestCase):
         got = refusals.check_memory_cap(True, False)
         assert got is not None
         self.assertIn("this machine cannot cap memory for a user scope", got["problem"])
+        for case in ("could not be made or read", "did not hold the cap"):
+            self.assertIn(case, got["problem"])  # true whichever way the trial failed
         self.assertIn(
             "leave memory_limit_bytes out of the document to run without a memory cap",
             got["problem"],
@@ -251,6 +253,15 @@ class WhatEndedTheScopeDecidesTheEnding(unittest.TestCase):
         self.assertEqual(
             (saw["execution"]["exit_code"], saw["execution"]["signal"]), ("none", "cannot tell")
         )
+
+    def test_the_reason_line_says_the_cap_was_exceeded_and_gives_the_cap_from_the_document(self):
+        for cap in (CAP, 12345):
+            with self.subTest(cap=cap):
+                world = self.run_it(scenes.document(memory_limit_bytes=cap), oom_kills=True)
+                line = flat(scenes.outcome(world)["receipt"])["ending"]["reason_text"]
+                self.assertEqual(line, boundary.memory_limit_line(cap))
+                self.assertIn(f"exceeding the memory cap of {cap} bytes", line)
+                self.assertNotIn("\n", line)
 
     def test_the_closing_freeze_and_the_place_are_the_same_as_for_a_time_limit(self):
         got = []

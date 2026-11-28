@@ -15,6 +15,8 @@ import shutil
 import stat
 import sys
 
+from shuttle.core import boundary
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 real_run = importlib.import_module("rehearsal.real_run")
 the_boundary = importlib.import_module("rehearsal.the_boundary")
@@ -78,6 +80,7 @@ class AMemoryCapEndsARunThatGrowsWithoutBound(real_run.RealRun):
             ("memory_limit", "memory_limit", "none"),
         )
         self.assertIs(ending["everything_stopped"], True)
+        self.assertEqual(ending["reason_text"], boundary.memory_limit_line(CAP))
         self.assertFalse(os.path.exists(finished))  # it did not get to the end
         self.assertLess(self.reached(reached), 200)  # and was ended well short of what it tried
         self.assertEqual(self.processes_with(marker), 0)  # the child it left running is gone

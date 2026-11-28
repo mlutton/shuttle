@@ -204,6 +204,8 @@ def reason_text(decision: Decision, problems: Mapping[str, str]) -> str:
     """The one line beside the reason: the problem recorded for its step, or none, or cannot tell."""
     if decision["reason"] == fixed.NONE:
         return fixed.NONE
+    if decision["reason"] == "memory_limit":  # it names no step; its line is the cap's own
+        return problems.get("memory_limit") or fixed.CANNOT_TELL
     return problems.get(decision["failed_step"]) or fixed.CANNOT_TELL
 
 

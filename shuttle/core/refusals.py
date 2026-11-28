@@ -353,8 +353,9 @@ def check_memory_cap(named: bool, machine_can_cap: bool) -> Found | None:
         "memory_cap_unavailable",
         _INPUT,
         "memory_limit_bytes is set, and this machine cannot cap memory for a user scope (a trial "
-        "scope given a memory cap did not hold it); leave memory_limit_bytes out of the document "
-        "to run without a memory cap",
+        "of a short scope with a memory cap failed: the scope could not be made or read, or it "
+        "did not hold the cap); leave memory_limit_bytes out of the document to run without a "
+        "memory cap",
     )
 
 

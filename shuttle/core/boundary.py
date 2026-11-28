@@ -544,6 +544,12 @@ def launch_failed(cause: str, report: str) -> bool:
     return cause == "exited" and not executor_started(report)
 
 
+# How many times a capped run's scope is read, one read straight after another, before it is
+# stopped: the manager that is told of the kernel's kill ends the scope as `oom-kill`, and a stop
+# that arrives first ends it as a success. Bounded, so a scope that really is still running (a
+# stray process) is stopped after a few tens of reads, as it always was.
+SETTLE_READS = 50
+
 # What bubblewrap itself ends with when it fails: its own error exit, never the program's.
 BUBBLEWRAP_FAILURE_STATUS = 1
 
@@ -564,6 +570,16 @@ def program_not_started(cause: str, report: str, returncode: int | None) -> bool
         and executor_started(report)
         and not executor_ended(report)
         and returncode == BUBBLEWRAP_FAILURE_STATUS
+    )
+
+
+def memory_limit_line(limit_bytes: int | None) -> str:
+    """The one line for the caller when the scope ended the run for exceeding its memory cap: the
+    cap as the document gave it, in bytes."""
+    held = "the memory cap" if limit_bytes is None else f"the memory cap of {limit_bytes} bytes"
+    return (
+        f"the run was ended for exceeding {held} the document set in memory_limit_bytes; the cap "
+        "holds memory and swap together, and files written to memory-backed storage count"
     )
 
 
