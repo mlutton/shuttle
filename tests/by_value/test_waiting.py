@@ -119,8 +119,9 @@ STARTED_AND_ENDED = STARTED + '{"exit-code": 0}\n'
 
 
 class WhetherTheExecutorEverStarted(unittest.TestCase):
-    """bubblewrap says "child-pid" once the executor is running inside it. A run that ended
-    with no such line never started the executor, whatever the exit code of what was launched."""
+    """bubblewrap says "child-pid" once the box is made and the executor forked, before the program
+    is executed. A run that ended with no such line never started the executor, whatever the exit
+    code of what was launched."""
 
     def test_the_report_rows(self):
         for report, expected in (
@@ -155,7 +156,8 @@ class WhetherTheExecutorEverStarted(unittest.TestCase):
 
 class WhetherTheProgramWasEverStarted(unittest.TestCase):
     """bubblewrap writes the executor's end only for a program it executed, whatever the program's
-    own exit code; and it ends with status 1 itself when it could not execute the program."""
+    own exit code; it ends with status 1 itself, with no such line, when it could not execute the
+    program or failed making the box after the fork."""
 
     def test_the_end_of_the_executor_in_the_report_rows(self):
         for report, expected in (

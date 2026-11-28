@@ -1,8 +1,10 @@
 """A program the box could not start, against a program that started and failed by itself, through
 the real command in the real box.
 
-The ending says the box could not start the program when bubblewrap never reports the program's
-end (it reports it for every program it executed, whatever the exit code); no exit code is read.
+The ending says the box was started and the program never reported running when bubblewrap
+reports the executor forked and never reports the program's end (it reports it for every program
+it executed, whatever the exit code); no exit code is read. That covers a program the box could
+not execute and a box bubblewrap failed to make after the fork.
 Each uncovered case here passes the check before the launch (the check looks at the program file
 only) and fails when the box executes the program.
 """

@@ -61,8 +61,8 @@ def decide_ending(facts: Facts) -> Decision:
       id_claim: "ok", "used" or "unusable".
       input_check, executor_driver_check: None, or the reason code of the refusal.
       gates: "ok", "no" or "failed". setup, opening_freeze: "ok" or "failed".
-      launch: "ok", "failed" (the box was never made), "program_not_started" (the program was
-        never reported running after the box was started) or "stopped_before".
+      launch: "ok", "failed" (the executor was never reported forked), "program_not_started" (it
+        was, and the program was never reported running) or "stopped_before".
       wait: "exited", "time_limit", "stop_record", "signal" or "error".
       stop: "confirmed" or "not_confirmed". closing_freeze, delivery: "ok" or "failed".
 

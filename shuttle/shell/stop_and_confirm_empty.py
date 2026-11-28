@@ -35,7 +35,9 @@ def _executor_status(state: RunState, returncode: int | None) -> None:
         world.signals.name_of(-returncode) if returncode is not None and returncode < 0 else None,
     )
     if facts.get("launch") in ("failed", "program_not_started"):
-        facts["exit_code"] = facts["child_signal"] = None  # nothing ran: nothing to claim
+        facts["exit_code"] = facts["child_signal"] = (
+            None  # no end was reported: no exit code or signal to claim
+        )
     else:
         # What ended is the box's own tool, which reports a child killed by signal n as 128 + n,
         # as a script that exits with that number is reported: the signal is not read from it.

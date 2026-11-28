@@ -366,7 +366,8 @@ def launch_argv(
     with its parent and the reach `box_arguments` gives it. The variables the shell needed to
     reach systemd are taken out of the executor's environment unless the caller named them.
     Bubblewrap's status report goes to the descriptor `report_fd`, which says whether the
-    executor was ever started (see `executor_started`). The executor starts in the place.
+    executor was ever forked (see `executor_started`) and whether the program ended
+    (`executor_ended`). The executor starts in the place.
     """
     left_out = [v for v in BUS_VARIABLES if v not in environment_names]
     return [
@@ -450,7 +451,7 @@ def _report_members(report: str, name: str) -> list[object]:
 
 
 def executor_started(report: str) -> bool:
-    """Whether bubblewrap's status report says the executor was started inside the box.
+    """Whether bubblewrap's status report says the box was made and the executor forked.
 
     Once bubblewrap has made the box and forked the process that will become the executor, a line
     with a "child-pid" member (a positive whole number) is written. That is before the program is
@@ -471,14 +472,15 @@ def executor_ended(report: str) -> bool:
     bubblewrap itself with status 1 and no such line, as does a failure of bubblewrap's own
     set-up after the fork. A program that was executed and ended with any code, 126 and 127
     included, has the line with that code; so has a file `execvp` runs through the shell (an ELF
-    for another architecture, no `#!` line, a `#!` line too long), which ends as its own exit.
+    for another architecture, no `#!` line, a `#!` line whose interpreter path the kernel cuts),
+    which ends as its own exit.
     """
     return any(type(code) is int for code in _report_members(report, "exit-code"))
 
 
 def launch_failed(cause: str, report: str) -> bool:
     """Whether the boundary never started the executor: the scope was seen to end by itself and
-    bubblewrap never reported the executor running.
+    bubblewrap never reported the executor forked.
 
     That reads the same whether a tool was missing, `systemd-run` could not make the scope or
     `bwrap` could not make the box. A time limit, a signal, or a cause that cannot be told is
@@ -493,10 +495,9 @@ BUBBLEWRAP_FAILURE_STATUS = 1
 
 
 def program_not_started(cause: str, report: str, returncode: int | None) -> bool:
-    """Whether the program was never reported running: the scope was seen to end by itself,
-    bubblewrap reported the executor forked and never reported its end, and bubblewrap itself
-    ended with its own failure status. Two causes give this report: the program could not be
-    executed, or bubblewrap failed making the box after the fork; the report does not say which.
+    """Whether the program was never reported running, after the executor was reported forked.
+    Two causes give this report: the program could not be executed, or bubblewrap failed making
+    the box after the fork; the report does not say which.
 
     Nothing here reads the program's exit code: a program that was executed has its end reported,
     whatever the code. What is not told this way is a program that did start and then failed by
