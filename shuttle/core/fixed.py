@@ -8,7 +8,7 @@ from typing import Final
 # Two version numbers, each checked on its own. The input document carries one (its key is
 # `format_version`); the records carry the other (the header's `record_version`).
 INPUT_VERSION = 1
-RECORD_VERSION = 2
+RECORD_VERSION = 3
 # The version of the notice execution adds to the instruction of a kind that expects a statement
 # (shuttle.core.notice). It changes whenever the notice's fixed words do.
 NOTICE_VERSION = 1
@@ -84,6 +84,7 @@ REASONS_BY_ENDING = {
         "setup_failed",
         "freeze_failed",
         "launch_failed",
+        "program_not_started",
         "stopped",
         "records_location_unusable",
         "execution_error",
@@ -138,6 +139,7 @@ STEPS_FOR_REASON = {
     "setup_failed": ("setup",),
     "freeze_failed": ("opening_freeze",),
     "launch_failed": ("launch",),
+    "program_not_started": ("launch",),
     "stop_not_confirmed": ("stop_not_confirmed",),
     "closing_freeze_failed": ("closing_freeze",),
     "destination_changed": ("delivery",),

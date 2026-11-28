@@ -153,6 +153,97 @@ class WhetherTheExecutorEverStarted(unittest.TestCase):
                 self.assertEqual(boundary.launch_failed(cause, report), expected)
 
 
+class WhetherTheProgramWasEverStarted(unittest.TestCase):
+    """bubblewrap writes the executor's end only for a program it executed, whatever the program's
+    own exit code; and it ends with status 1 itself when it could not execute the program."""
+
+    def test_the_end_of_the_executor_in_the_report_rows(self):
+        for report, expected in (
+            (STARTED_AND_ENDED, True),
+            (STARTED + '{"exit-code": 1}\n', True),
+            (STARTED + '{"exit-code": 126}\n', True),
+            (STARTED + '{"exit-code": 127}\n', True),
+            (STARTED + '{"exit-code": 137}\n', True),
+            (STARTED, False),
+            ("", False),
+            (STARTED + '{"exit-code": "1"}\n', False),
+            (STARTED + '{"exit-code": true}\n', False),
+            (STARTED + '{"exit-code": null}\n', False),
+            (STARTED + "exit-code 1\n", False),
+            (STARTED + '["exit-code", 1]\n', False),
+        ):
+            with self.subTest(report=report[-30:]):
+                self.assertEqual(boundary.executor_ended(report), expected)
+
+    def test_the_program_did_not_start_rows(self):
+        for label, given, expected in (
+            ("forked, no end reported, bubblewrap failed", ("exited", STARTED, 1), True),
+            (
+                "the executor's own exit 1 is reported as its end",
+                ("exited", STARTED_AND_ENDED, 1),
+                False,
+            ),
+            ("exit 126 reported", ("exited", STARTED + '{"exit-code": 126}\n', 1), False),
+            ("exit 127 reported", ("exited", STARTED + '{"exit-code": 127}\n', 1), False),
+            (
+                "exit 127 reported, bubblewrap exit 127",
+                ("exited", STARTED + '{"exit-code": 127}\n', 127),
+                False,
+            ),
+            ("never forked is a failed launch, not this", ("exited", "", 1), False),
+            ("bubblewrap ended by a signal says nothing", ("exited", STARTED, -9), False),
+            ("bubblewrap ended with another status", ("exited", STARTED, 2), False),
+            ("bubblewrap ended with status 0 and no end", ("exited", STARTED, 0), False),
+            ("status not read", ("exited", STARTED, None), False),
+            ("time limit", ("time_limit", STARTED, 1), False),
+            ("signal", ("signal", STARTED, 1), False),
+            ("stop record", ("stop_record", STARTED, 1), False),
+            ("cause not told", ("cannot_tell", STARTED, 1), False),
+        ):
+            with self.subTest(label):
+                self.assertEqual(boundary.program_not_started(*given), expected)
+
+    def test_the_line_names_the_program_as_data_and_says_what_to_look_at(self):
+        line = boundary.program_not_started_line("a\nb 'c")
+        self.assertNotIn("\n", line)
+        self.assertIn(repr("a\nb 'c"), line)
+        self.assertIn("reach.visible", line)
+        self.assertIn("interpreter", line)
+        self.assertNotIn("program None", boundary.program_not_started_line(None))
+
+    def test_a_program_that_could_not_be_executed_ends_as_a_launch_that_did_not_start_it(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, cannot_exec=True)
+        state["program"] = "the-tool"
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        facts = state["facts"]
+        self.assertEqual(
+            (facts["launch"], facts["stop"], facts["exit_code"], facts["child_signal"]),
+            ("program_not_started", "confirmed", None, None),
+        )
+        self.assertEqual(
+            decisions.decide_ending(facts),
+            {"ending": "could_not_start", "reason": "program_not_started", "failed_step": "launch"},
+        )
+        self.assertIn(
+            "'the-tool'", decisions.reason_text(decisions.decide_ending(facts), state["problems"])
+        )
+
+    def test_a_program_that_started_and_exited_with_any_code_is_its_own_exit(self):
+        for code in (0, 1, 2, 126, 127, 255):
+            with self.subTest(code=code):
+                world = simulated.SimulatedWorld()
+                state = a_state(world, exit_code=code)
+                wait_for_the_end.step(state)
+                stop_and_confirm_empty.step(state)
+                facts = state["facts"]
+                self.assertEqual(facts["exit_code"], code)
+                self.assertNotIn(facts.get("launch"), ("failed", "program_not_started"))
+                ran = {**facts, "launch": "ok", "closing_freeze": "ok", "delivery": "ok"}
+                self.assertEqual(decisions.decide_ending(ran)["ending"], "ended_by_itself")
+
+
 class TheLimitTheTimerCanTake(unittest.TestCase):
     def test_rows(self):
         for value, usable in (

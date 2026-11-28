@@ -230,6 +230,7 @@ class SimulatedWorld:
         report=None,
         output="",
         writes=None,
+        cannot_exec=False,
     ):
         """Say what starting `command` in the boundary makes: a child that exits at once with
         `exit_code`; or, with `hangs`, one that runs until the boundary is stopped; or, with
@@ -237,7 +238,10 @@ class SimulatedWorld:
         the first time it is looked at. With `survives_stop` stopping the boundary does nothing.
         The child creates the named files as it starts. A child started in the boundary reports
         that it started, unless `fails_to_start` (the boundary's own tool exits with `exit_code`
-        before the executor runs); `report` is the text a child writes to the report it was given.
+        before the executor runs). With `cannot_exec` the box is made and reports the executor forked,
+        then the program cannot be executed: the boundary's tool ends with status 1 and never
+        reports an end (the real bubblewrap's way; `exit_code` is not used). A child that exits
+        reports its end with `exit_code`. `report` is the text a child writes to the report it was given.
         `output` is the text it writes to its standard output when that is a file it was given
         (`output_to`); `writes` maps names to the text of files it makes as it starts."""
         self.programs[command] = {
@@ -247,6 +251,7 @@ class SimulatedWorld:
             "exit_code": exit_code,
             "creates": tuple(creates),
             "fails_to_start": fails_to_start,
+            "cannot_exec": cannot_exec,
             "report": report,
             "output": output,
             "writes": dict(writes or {}),
@@ -540,7 +545,7 @@ class SimulatedWorld:
         child = _Child(executor, behaviour, unit)
         child.input = bytes(given)
         if not behaviour["hangs"]:
-            child.returncode = behaviour["exit_code"]
+            child.returncode = 1 if behaviour["cannot_exec"] else behaviour["exit_code"]
         if report is not None:
             if gate:
                 child.report = "" if behaviour["fails_to_start"] else boundary.GATE_STARTED + "\n"
@@ -548,6 +553,8 @@ class SimulatedWorld:
                 child.report = behaviour["report"]
             elif not behaviour["fails_to_start"]:
                 child.report = '{"child-pid": 2}\n'
+                if not behaviour["hangs"] and not behaviour["cannot_exec"]:
+                    child.report += '{"exit-code": %d}\n' % behaviour["exit_code"]
         if unit:
             self.units[unit] = dict(_STILL_THERE)
         self.children.append(child)

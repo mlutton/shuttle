@@ -47,6 +47,7 @@ def step(state: RunState) -> None:
     spec = the_driver.of(raw).launch(
         raw["executor"]["settings"], the_driver.launch_context(world, raw, state["run_area"])
     )
+    state["program"] = spec["argv"][0]
     environment = decisions.build_environment(names, caller_environment(world, names))
     environment.update(state.get("setup_variables", {}))
     instruction_file = put_instruction(state)

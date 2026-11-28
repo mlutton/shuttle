@@ -27,16 +27,14 @@ def stop_boundary(world: Operations, name: str) -> Mapping[str, str] | None:
     return properties
 
 
-def _executor_status(state: RunState) -> None:
+def _executor_status(state: RunState, returncode: int | None) -> None:
     """The executor's exit and the moment it ended, once the boundary is empty."""
     world, facts = state["world"], state["facts"]
-    process = state["boundary_process"]
-    returncode = world.processes.wait(process, boundary.GRACE_SECONDS)
     facts["exit_code"], facts["child_signal"] = decisions.exit_facts(
         returncode,
         world.signals.name_of(-returncode) if returncode is not None and returncode < 0 else None,
     )
-    if facts.get("launch") == "failed":
+    if facts.get("launch") in ("failed", "program_not_started"):
         facts["exit_code"] = facts["child_signal"] = None  # nothing ran: nothing to claim
     else:
         # What ended is the box's own tool, which reports a child killed by signal n as 128 + n,
@@ -57,14 +55,18 @@ def step(state: RunState) -> None:
         )
     facts["wait"] = boundary.cause_of_end(facts.get("wait"), boundary.why_ended(properties))
     report = world.processes.read_report(state["boundary_process"])
+    returncode = world.processes.wait(state["boundary_process"], boundary.GRACE_SECONDS)
     if boundary.launch_failed(facts["wait"], report):
         facts["launch"] = "failed"
         state["problems"]["launch"] = (
             "the boundary ended without ever starting the executor; the executor did not run"
         )
+    elif boundary.program_not_started(facts["wait"], report, returncode):
+        facts["launch"] = "program_not_started"
+        state["problems"]["launch"] = boundary.program_not_started_line(state.get("program"))
     state["stand_ins"]["stop_confirmation"] = {
         "everything_stopped": empty,
         "stop_reason": "",
         "stop_asker": "",
     }
-    _executor_status(state)
+    _executor_status(state, returncode)

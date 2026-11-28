@@ -356,6 +356,7 @@ class RunState(TypedDict, total=False):
     ended_at: str
     clock_start: float
     run_part: str
+    program: str  # the program the executor was asked to run, as the launch names it
     boundary_name: str
     boundary_process: Any
     run_area: str  # the run's own folder, once made

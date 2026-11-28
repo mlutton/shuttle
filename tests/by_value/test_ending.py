@@ -107,6 +107,11 @@ TABLE = [
         early(gates="ok", setup="ok", opening_freeze="ok", launch="failed", exit_code=None),
         d(CNS, "launch_failed", "launch"),
     ),
+    (
+        "step 7: the box was made and could not start the program",
+        early(gates="ok", setup="ok", opening_freeze="ok", launch="program_not_started"),
+        d(CNS, "program_not_started", "launch"),
+    ),
     ("an interrupt before launch", early(launch="stopped_before"), d(CNS, "stopped")),
     (
         "step 8: the executor ends with exit code 0",
@@ -238,7 +243,7 @@ class DecideEndingTable(unittest.TestCase):
             "gates": ("ok", "no", fixed.CANNOT_TELL),
             "setup": ("ok", "failed", fixed.CANNOT_TELL),
             "opening_freeze": ("ok", "failed", fixed.CANNOT_TELL),
-            "launch": ("ok", "failed", "stopped_before", fixed.CANNOT_TELL),
+            "launch": ("ok", "failed", "program_not_started", "stopped_before", fixed.CANNOT_TELL),
             "wait": ("exited", "time_limit", "signal", "error", fixed.CANNOT_TELL),
             "stop": ("confirmed", "not_confirmed", fixed.CANNOT_TELL),
             "closing_freeze": ("ok", "failed", fixed.CANNOT_TELL),
@@ -260,6 +265,9 @@ class PairingsTheListForbids(unittest.TestCase):
         for decision in (
             d(CNS, "launch_failed", "gates"),
             d(CNS, "launch_failed"),
+            d(CNS, "program_not_started"),
+            d(CNS, "program_not_started", "setup"),
+            d("ended_by_itself", "program_not_started", "launch"),
             d(CNS, "stopped", "launch"),
             d(CNS),
             d(EF, "delivery_failed", "closing_freeze"),
