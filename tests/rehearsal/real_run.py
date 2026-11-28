@@ -66,6 +66,10 @@ class RealRun(unittest.TestCase):
         self.records = os.path.join(self.root, "records")
         self.records_folders = [self.records]  # every records folder a run of this test uses
         self.place = os.path.join(self.root, "place")
+        # Where a run makes its run area unless the test names another: a run starts by removing
+        # stale areas from its temporary folder, so it must never be the machine's own.
+        self.temporary = os.path.join(self.root, "run-areas")
+        os.mkdir(self.temporary)
         # What the executor may read but not write, listed as visible in every document: its
         # scripts, the pipes it says it is up through (a named pipe can be written to where a file
         # cannot) and the stand-in tool. The test's root is not: it holds the records.
@@ -125,7 +129,7 @@ class RealRun(unittest.TestCase):
     def start(self, doc, path_first=None, variables=None, form="run", root=None):
         """The real command, started; the caller waits for it with `communicate`. With
         `path_first`, that folder comes first on the command's PATH; `variables` are added to its
-        environment; `form` is the command's name (`run` unless given) and `root` the folder the
+        environment (its TMPDIR is this test's own `self.temporary` unless `variables` names one); `form` is the command's name (`run` unless given) and `root` the folder the
         input document is written in (`self.root` unless given). The command and what it starts
         run under `self.limits` (DEFAULT_LIMITS unless the test raised one)."""
         path = os.path.join(root or self.root, f"{doc['request_id']}.input.json")
@@ -134,7 +138,7 @@ class RealRun(unittest.TestCase):
         proc = subprocess.Popen(
             [sys.executable, "-m", "shuttle", form, path],
             cwd=REPO,
-            env={**self.environment(path_first), **(variables or {})},
+            env={**self.environment(path_first), "TMPDIR": self.temporary, **(variables or {})},
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
