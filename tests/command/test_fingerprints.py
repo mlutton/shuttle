@@ -645,11 +645,11 @@ class FilterDrivers(FingerprintCase):
         os.close(let_go)
         stdout, stderr = proc.communicate(timeout=120)
         self.assertEqual((proc.returncode, stderr), (0, ""), stdout)
+        self.assertFalse(os.path.exists(self.marker), "a driver ran")
         saw = outcome_fields(self)["execution"]
         self.assertEqual(
             (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (3, 0, 0)
         )
-        self.assertFalse(os.path.exists(self.marker), "a driver ran")
         for name in ("new.txt", "new.dat"):  # the bytes on disk
             self.assertEqual(self.git("show", f"{saw['fingerprint_after']}:{name}"), "as written")
         self.assertEqual(sorted(os.listdir(self.records)), ["r-1.outcome.json", "r-1.request.json"])
