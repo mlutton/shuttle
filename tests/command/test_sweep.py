@@ -74,11 +74,11 @@ class TheSweepOnTheRealFiles(unittest.TestCase):
         return sorted(os.listdir(self.temporary))
 
     def test_a_look_alike_is_left_alone_for_real_whatever_its_shape(self):
-        # one name per shape: the right name and no lock file (an area from before the lock), a
+        # one name per shape: the right name and no lock file (the right name and no lock file), a
         # lock file that is a link, a link to a folder, a file with the area's name, a lock file
         # that is a folder, a lock file that leads nowhere, a name that is almost the pattern
-        before_the_lock = self.area()
-        os.makedirs(os.path.join(before_the_lock, "home"))
+        no_lock_file = self.area()
+        os.makedirs(os.path.join(no_lock_file, "home"))
         linked_lock = self.area()
         os.mkdir(linked_lock)
         with open(os.path.join(self.root, "elsewhere"), "w"):
@@ -108,7 +108,7 @@ class TheSweepOnTheRealFiles(unittest.TestCase):
         before = self.listing()
         self.assertEqual(self.sweep(), "")
         self.assertEqual(self.listing(), before)
-        for path in (before_the_lock, linked_lock, folder_lock, dangling_lock, almost):
+        for path in (no_lock_file, linked_lock, folder_lock, dangling_lock, almost):
             self.assertTrue(os.path.isdir(path), path)
         self.assertTrue(os.path.islink(linked_area))
         self.assertTrue(os.path.isfile(file_area))

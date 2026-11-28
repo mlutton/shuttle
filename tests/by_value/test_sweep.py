@@ -102,7 +102,7 @@ class WhichNamesAreAnAreasOrALocks(unittest.TestCase):
             "x" + area,
             " " + area,
             area.replace("shuttle", "shuttl3"),
-            run_area.AREA_PREFIX + "abc12345",  # an area from before the name held the run part
+            run_area.AREA_PREFIX + "abc12345",  # a name with a short random tail, not a run part
             "./" + area,
             "/" + area,
         ]
@@ -466,7 +466,7 @@ class ALookAlikeIsLeftAlone(unittest.TestCase):
         self.assertEqual(self.world.calls("boundary.list_units"), [])
         self.assertEqual(self.world.locks_held, set())
 
-    def test_a_folder_with_the_right_name_and_no_lock_file_an_area_from_before_the_lock(self):
+    def test_a_folder_with_the_right_name_and_no_lock_file_beside_it(self):
         self.world.make_folder(f"{area_of(1)}/home")
         self.left_alone()
 
@@ -545,7 +545,9 @@ class TheSweepInARun(unittest.TestCase):
         self.assertEqual(receipt["ending"]["ending"], "ended_by_itself")
         self.assertEqual(receipt["execution"]["teardown_failure"], "none")
 
-    def test_a_sweep_that_fails_changes_nothing_about_the_run_not_its_ending_exit_or_receipt(self):
+    def test_a_sweep_that_fails_changes_nothing_about_the_run_not_its_ending_or_exit_code_and_prints_at_most_one_line(
+        self,
+    ):
         clean = scenes.scene()
         clean.make_folder(TMP)
         scenes.run_in(clean)

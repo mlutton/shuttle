@@ -223,8 +223,8 @@ def look_at(path: str) -> tuple[str, bool]:
     return kind, seen.st_uid == os.geteuid()
 
 
-# The descriptor of every lock this process holds, by the name of its file. A descriptor made by
-# `open` is not inherited by a child that is started, so a child never keeps a lock alive.
+# The descriptor of every lock this process holds, by the name of its file. A descriptor opened
+# with `O_CLOEXEC` is not inherited by a child that is started, so a child never keeps a lock alive.
 _held: dict[str, int] = {}
 _LOCK_TRIES = 5
 
@@ -244,7 +244,7 @@ def _is_the_file_at(descriptor: int, path: str) -> bool:
 
 
 def _nothing() -> None:
-    """The default for the moment `between` stands for: no one acts in it."""
+    """The default `between`: does nothing."""
 
 
 def make_lock(path: str, between: Callable[[], None] = _nothing) -> None:

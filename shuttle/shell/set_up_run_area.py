@@ -53,7 +53,8 @@ def _for(step: SetupStep) -> str:
 
 def _make_area(world: Operations, run_part: str) -> str:
     """The run's area and its lock. The lock is made and held first, so the area is never on disk
-    with its lock free: a sweep that finds the area finds the lock held. A lock whose area could
+    with its lock free while its Shuttle lives: a sweep that finds the area of a live run finds
+    the lock held. A lock whose area could
     not be made is let go and removed."""
     files = world.files
     area = f"{files.temporary_folder()}/{run_area.area_name(run_part)}"

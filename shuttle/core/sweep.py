@@ -30,7 +30,7 @@ Taken = Literal["taken", "held", "gone"]
 Scopes = Mapping[str, str] | Literal["unknown"]
 Step = Literal[
     "ignore",  # not Shuttle's: leave it, say nothing
-    "in_use",  # its lock is held: the run is alive, leave it, say nothing
+    "in_use",  # its lock is held (a live run, or another sweep looking): leave it, say nothing
     "take_lock",
     "ask_scopes",
     "remove_lock",  # a lock file whose area is gone

@@ -421,7 +421,7 @@ class FileOperations(NamedTuple):
     # The run area (shuttle.core.run_area). None of these reads a file's content except
     # `copy_path`, which copies the bytes without looking at them, and none follows a link.
     # The temporary folder run areas are made in: `TMPDIR` when it is set, else the system's;
-    # absolute, links resolved. Nothing is made or looked at
+    # absolute, links resolved. Whether the folder exists or can be used is not checked
     temporary_folder: Callable[[], str]
     make_private_folder: Callable[
         [str], None
@@ -455,7 +455,7 @@ class FileOperations(NamedTuple):
         [str], None
     ]  # a new regular file, owner-only, made and locked; FileExistsError if the name is taken (a
     # link too), FileNotFoundError if the folder above is not there. In the moment between the
-    # file being made and locked another may lock it (and remove it, when it is no area's): the
+    # file being made and locked another may lock it (and remove it, as a sweep does a lock file with no area beside it): the
     # call then waits for that and makes the file again, so it returns holding the lock on the
     # file that is at the name
     try_lock: Callable[
@@ -463,8 +463,8 @@ class FileOperations(NamedTuple):
     ]  # take the lock on an existing file without waiting: True and now held, False when
     # another holds it (this process's own hold included). FileNotFoundError when nothing is
     # there or the name no longer leads to the file opened, NotARegularFile for a link, a pipe,
-    # a device or a socket, IsADirectoryError for a folder. A file that is not opened is not
-    # changed
+    # a device or a socket, IsADirectoryError for a folder: such a name is never opened for locking
+    # and nothing is changed
     release_lock: Callable[
         [str, bool], None
     ]  # (name, remove): let go of a lock held by this process (no error if none is held), and

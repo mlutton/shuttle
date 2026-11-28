@@ -394,7 +394,7 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
     def test_a_lock_file_removed_in_the_gap_is_made_again_and_the_lock_is_on_the_file_at_the_name(
         self,
     ):
-        for removed in (1, 4):  # the fifth and last try is the one that holds
+        for removed in (1, real_files._LOCK_TRIES - 1):  # the last try is the one that holds
             with self.subTest(removed=removed):
                 lock = os.path.join(self.harness.folder(), "area.lock")
                 between = self.removes_the_file_first(lock, removed)
@@ -404,7 +404,7 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
                 self.assertIs(self.world.files.try_lock(lock), False)  # held: it is this file
                 self.world.files.release_lock(lock, True)
 
-    def test_a_lock_file_removed_in_the_gap_every_time_fails_after_five_tries_and_leaves_nothing(
+    def test_a_lock_file_removed_in_the_gap_every_time_fails_after_its_bounded_tries_and_leaves_nothing(
         self,
     ):
         lock = os.path.join(self.harness.folder(), "area.lock")
@@ -412,7 +412,7 @@ class RealOperationsHoldTheContract(contract.ContractCases, unittest.TestCase):
         with self.assertRaises(OSError) as raised:
             real_files.make_lock(lock, between)
         self.assertEqual(raised.exception.errno, errno.EAGAIN)
-        self.assertEqual(len(between.calls), 5)
+        self.assertEqual(len(between.calls), real_files._LOCK_TRIES)
         self.assertFalse(os.path.lexists(lock))
 
     def test_a_lock_file_swapped_after_it_was_opened_is_not_taken_and_the_new_file_stays_free(self):
