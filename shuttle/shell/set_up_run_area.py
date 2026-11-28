@@ -15,7 +15,7 @@ from typing import assert_never
 
 from shuttle.core import run_area
 from shuttle.core.shapes import Operations, RunState, SetupRequest, SetupStep, StepResult
-from shuttle.shell import the_driver
+from shuttle.shell import sweep_run_areas, the_driver
 
 
 def _carry_out(world: Operations, step: SetupStep) -> None:
@@ -74,6 +74,7 @@ def set_up(state: RunState, requests: Sequence[SetupRequest]) -> StepResult:
     if problem:  # refused before anything is made
         state["problems"]["setup"] = f"{problem}; nothing was made and nothing was launched"
         return {"ok": False}
+    sweep_run_areas.sweep_before_the_run_makes_its_area(state)
     area = _make_area(world, state["run_part"])
     state["run_area"] = area
     state["setup_variables"] = {}
