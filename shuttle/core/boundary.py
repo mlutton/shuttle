@@ -117,8 +117,9 @@ class ProgramFacts(TypedDict):
     """What the shell found of the program a run needs, for `hidden_program`. `found_at` is where
     the caller's machine finds it (the absolute path of the name, a link not followed),
     `folder_leads_to` the folder of that path with links resolved and `resolves_to` the file the
-    path leads to; all None when it is not found. `shown` is None when the document names no place
-    to build it from (that document is refused before a launch). `records`, `runtime` and `home`
+    path leads to. All but `found_at` are None when it is not found or when the input checks
+    refused the document (it has no reach to judge the program against). `shown` is also None
+    when the document names no place to build it from. `records`, `runtime` and `home`
     are the resolved folders a listing may not touch (see `refusals.listing_problem`)."""
 
     found_at: str | None
@@ -205,16 +206,14 @@ _BOX_OWN = ("/usr", "/etc", "/tmp", "/proc", "/dev")
 
 
 def _resolver_target(resolver: str | None) -> str | None:
-    """The file the box binds for name lookup, or None when it binds none."""
     if resolver is None or any(_inside(resolver, own) for own in _BOX_OWN):
         return None
     return resolver
 
 
 def shown_paths(shown: Shown) -> list[str]:
-    """Every path of the machine's own that the box shows the executor, as a folder or a file: the
-    system folders, the resolver's file, the place, the references, the visible folders and the
-    git folders. Not the run area, which is made empty for the run and so holds no program that
+    """Every path of the machine's own that the box shows the executor, as a folder or a file. Not
+    the run area, which is made empty for the run and so holds no program that
     was found before it, and not the executor's own `/tmp`, `/dev` and `/proc`, which are not the
     machine's. A path is shown when it is one of these or inside one; this is the answer
     `box_arguments` gives in bind arguments (a test holds the two together)."""
@@ -249,7 +248,7 @@ def hidden_program(program: ProgramFacts) -> tuple[str, str] | None:
     leads into a hidden one leads nowhere, and a path that goes through a link in its folder is not
     a path the box has (it binds the real folder). Only that file is looked at, never an
     interpreter a script names or a library a program loads. A line never tells the caller to list
-    a folder the reach check would refuse, nor to do what leaves the caller with the same refusal.
+    a folder the reach check would refuse.
     """
     found, leads_to, shown = program["found_at"], program["resolves_to"], program["shown"]
     folder_real = program["folder_leads_to"]

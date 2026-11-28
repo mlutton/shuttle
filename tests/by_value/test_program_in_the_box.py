@@ -31,7 +31,6 @@ RECORDS, RUNTIME, HOME = "/records", "/run/user/1000", "/home/someone"
 
 
 def facts(found_at, resolves_to=None, shown=SHOWN, folder_leads_to=None):
-    """The facts for a program found at `found_at`; the folder is a plain one unless said."""
     return {
         "found_at": found_at,
         "folder_leads_to": folder_leads_to or boundary.folder_of(found_at),

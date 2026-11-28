@@ -244,8 +244,6 @@ class Refusals(RealCommand):
         self.assertEqual(lines[-1], "ended_by_itself")
 
     def a_program_in(self, folder):
-        """An executable in `folder` (made if it is not there) that writes the witness; the
-        command driver can name it by its absolute path."""
         os.makedirs(folder, exist_ok=True)
         path = self.write("the-program", f"#!{real_run.INTERPRETER}\n{WRITES_WITNESS}", folder)
         os.chmod(path, 0o755)
@@ -257,8 +255,6 @@ class Refusals(RealCommand):
         return doc
 
     def refused_by_both(self, doc, folder):
-        """The check and the run refuse the document with the same line, which names `folder` and
-        reach.visible; nothing is written by the check or started by the run."""
         for name in os.listdir(self.records):
             os.unlink(os.path.join(self.records, name))
         checked, check_lines = self.command("check", doc)
@@ -301,8 +297,6 @@ class Refusals(RealCommand):
         self.refused_by_both(self.document_naming(link), os.path.realpath(hidden))
 
     def program_behind_a_link(self):
-        """`inst/1.2/bin/the-program`, a link `inst/latest` to `inst/1.2`, and the caller's PATH
-        with `inst/latest/bin` first; the command is the bare name, found through that PATH."""
         installed = os.path.join(self.root, "inst", "1.2", "bin")
         real = self.a_program_in(installed)
         os.symlink("1.2", os.path.join(self.root, "inst", "latest"))
