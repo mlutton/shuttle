@@ -6,8 +6,10 @@ The maintainers' notes are the source for the reasons. A correction is a pull re
 
 Where the notes say a reason was not recorded, the record says so; it does not supply one.
 
-All three records were last rendered on 2026-11-27, against `main` at `36ea58b`.
+All five records were last rendered on 2026-11-28, against `main` at `d89f730`.
 
 - [0001](0001-the-reach-is-hidden-unless-declared.md): the executor's reach is hidden unless declared.
 - [0002](0002-the-boundary-is-a-scope-around-bubblewrap.md): the boundary is a systemd user scope around bubblewrap.
 - [0003](0003-one-run-is-one-session-and-a-fix-is-a-new-run.md): one run is one session, and a fix is a new run.
+- [0004](0004-a-run-can-carry-a-memory-cap.md): a run can carry a memory cap, held by the scope.
+- [0005](0005-a-run-sweeps-the-areas-of-runs-that-are-gone.md): a run sweeps the run areas of runs that are gone.

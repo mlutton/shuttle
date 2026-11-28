@@ -1,6 +1,6 @@
 # One run is one session, and a fix is a new run
 
-Status: accepted, 2026-11-24. Partly built as of `main` at `36ea58b`: a run starts one executor and ends with it, and a request id is used once. Not built: anything that hands a fix run what it needs.
+Status: accepted, 2026-11-24. Partly built as of `main` at `d89f730`: a run starts one executor and ends with it, and a request id is used once. Not built: anything that hands a fix run what it needs.
 
 ## Context
 
@@ -10,10 +10,10 @@ The earlier way of working kept an agent open between rounds and fixed things in
 
 One run starts one executor and ends with it; nothing stays open between runs. A fix round after a run is a new run, handed what it needs, and no agent is kept open between rounds. A run with a used request id is refused, so a fix run takes a new id.
 
-Built as of `36ea58b`:
+Built as of `d89f730`:
 
 - A run starts one executor through one command and writes its records (`README.md`), and the boundary stops everything the executor started.
-- The run area is removed whole at every ending the command lives to see.
+- The run area is removed whole at every ending the command lives to see. A run area left by a Shuttle that was killed hard is removed by a later real run's sweep ([0005](0005-a-run-sweeps-the-areas-of-runs-that-are-gone.md)).
 - The Codex driver starts the tool in its exit-when-done `exec` mode with the instruction on standard input. It copies in only what the tool needs; the tool's history, sessions and caches are left behind because they are never named. Nothing in Shuttle resumes a tool's earlier session.
 - A final message that is a question ends the run as "ended by itself", with the statement "wrong shape" and the question kept as the receipt's `waiting_question`. The input document requires `thread` and `round`, which are copied unchanged into every record's header.
 
