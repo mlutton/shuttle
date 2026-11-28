@@ -458,7 +458,14 @@ class Refusals(RealCommand):
         self.assertRegex(lines[0], "^[0-9a-f]{32}$")
         self.assertEqual(
             sorted(os.listdir(self.records)),
-            sorted([f"{lines[0]}.request.json", f"{lines[0]}.outcome.json"]),
+            sorted(
+                [
+                    f"{lines[0]}.request.json",
+                    f"{lines[0]}.outcome.json",
+                    f"{lines[0]}.standard-output.kept",
+                    f"{lines[0]}.standard-error.kept",
+                ]
+            ),
         )
 
 

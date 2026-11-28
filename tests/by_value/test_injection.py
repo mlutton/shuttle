@@ -259,7 +259,10 @@ class Injection(unittest.TestCase):
             "ended_by_itself",
         )
         self.assertIn("not written", err)
-        self.assertEqual(world.names_in(scenes.RECORDS), ["inj-1.request.json"])
+        self.assertEqual(
+            world.names_in(scenes.RECORDS),
+            ["inj-1.request.json", "inj-1.standard-error.kept", "inj-1.standard-output.kept"],
+        )
 
     def test_an_error_in_the_claim_step_prints_the_refusal_then_could_not_start_and_writes_nothing(
         self,

@@ -89,7 +89,6 @@ Settings = dict[str, Any]
 
 class LaunchSpec(TypedDict):
     argv: list[str]
-    output_to: NotRequired[str]  # a file made new for the child's standard output, in the run area
 
 
 class DriverFacts(TypedDict):
@@ -115,6 +114,10 @@ class OutputFiles(TypedDict, total=False):
 
     events: str
     last_message: str
+    # Where the tool's standard output and standard error are written, for the run to keep. A tool
+    # whose standard output is the event stream gives the events' name for both.
+    standard_output: str
+    standard_error: str
 
 
 # One line of a saved file, as `FileOperations.read_lines` gives it: the bytes, and whether the
@@ -200,6 +203,11 @@ class StepResult(TypedDict, total=False):
     statement_location: str
     claim: str
     session_file: str
+    # each kept file of the executor's output (shuttle.core.evidence): {"kept_at", "hash"}, "" for
+    # none; a key left out reads "cannot tell"
+    standard_output_kept: dict[str, str] | str
+    standard_error_kept: dict[str, str] | str
+    final_message_kept: dict[str, str] | str
     failure: str  # a tear-down that failed says how; "" reads "none"
 
 
@@ -270,6 +278,9 @@ class ExecutionGroup(TypedDict):
     peak_memory_bytes: Pair
     processor_time_seconds: Pair
     session_file_kept_at: Pair
+    standard_output_kept: Pair
+    standard_error_kept: Pair
+    final_message_kept: Pair
     teardown_failure: Pair
     stop_reason: Pair
     stop_asker: Pair

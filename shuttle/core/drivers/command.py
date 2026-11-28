@@ -10,6 +10,7 @@ runs.
 from collections.abc import Mapping
 
 from shuttle.core import pairs
+from shuttle.core.run_area import standard_error_path, standard_output_path
 from shuttle.core.shapes import (
     DriverFacts,
     ExecutorDriverGroup,
@@ -89,7 +90,11 @@ def launch(settings: Settings, context: LaunchContext) -> LaunchSpec:
 
 
 def output_files(run_area: str) -> OutputFiles:
-    return {}
+    """Its standard output and standard error, which the run keeps; it has no final message."""
+    return {
+        "standard_output": standard_output_path(run_area),
+        "standard_error": standard_error_path(run_area),
+    }
 
 
 def observe(settings: Settings, saved: SavedOutput) -> Observed:

@@ -374,6 +374,9 @@ LAUNCHED_RUN = {
         "peak_memory_bytes": "not built",
         "processor_time_seconds": "not built",
         "session_file_kept_at": "not built",
+        "standard_output_kept": "not built",
+        "standard_error_kept": "not built",
+        "final_message_kept": "not built",
         "teardown_failure": "not built",
         "stop_reason": "not built",
         "stop_asker": "not built",
@@ -444,6 +447,9 @@ REFUSED_RUN = {
         "peak_memory_bytes": "none",
         "processor_time_seconds": "none",
         "session_file_kept_at": "none",
+        "standard_output_kept": "none",
+        "standard_error_kept": "none",
+        "final_message_kept": "none",
         "teardown_failure": "none",
         "stop_reason": "none",
         "stop_asker": "none",
@@ -508,20 +514,39 @@ class EveryFieldHasTheStateTheRunEarnedIt(unittest.TestCase):
             "statement_location": "",
             "claim": "",
             "session_file": "",
+            "standard_output_kept": "",
+            "standard_error_kept": "",
+            "final_message_kept": "",
         }
         receipt = core.build_receipt(ENDED, ran_facts(stand_ins={**STAND_INS, "kept_files": kept}))
         states = self.states(receipt)
         self.assertEqual(states["execution"]["files_list_kept_file"], "not built")
         self.assertEqual(states["execution"]["session_file_kept_at"], "none")
+        in_executor = [n for n in kept if n.startswith(("statement", "claim"))]
         self.assertEqual(
-            {name: states["executor"][name] for name in kept if name != "session_file"},
-            {name: "none" for name in kept if name != "session_file"},
+            {name: states["executor"][name] for name in in_executor},
+            {name: "none" for name in in_executor},
         )
         expected = {group: {**rows} for group, rows in LAUNCHED_RUN.items()}
         expected["execution"]["files_list_kept_file"] = "not built"
         expected["execution"]["session_file_kept_at"] = "none"
-        expected["executor"].update({n: "none" for n in kept if n != "session_file"})
+        for name in ("standard_output_kept", "standard_error_kept", "final_message_kept"):
+            expected["execution"][name] = "none"
+        expected["executor"].update({n: "none" for n in in_executor})
         self.assertEqual(states, expected)
+
+    def test_a_kept_file_of_the_executors_output_is_a_value_none_or_cannot_tell_by_what_the_step_gave(
+        self,
+    ):
+        where = {"kept_at": "/records/r.standard-output.kept", "hash": "ab" * 32}
+        kept = {"session_file": "", "standard_output_kept": where, "standard_error_kept": ""}
+        # final_message_kept is left out of the step's result: it could not be told
+        receipt = core.build_receipt(ENDED, ran_facts(stand_ins={**STAND_INS, "kept_files": kept}))
+        execution = receipt["execution"]
+        self.assertEqual(execution["standard_output_kept"], {"state": "value", "value": where})
+        self.assertEqual(execution["standard_error_kept"], {"state": "none", "value": None})
+        self.assertEqual(execution["final_message_kept"], {"state": "cannot tell", "value": None})
+        self.assertEqual(core.check_receipt(receipt), [])
 
     def test_a_run_that_was_refused_before_anything_started(self):
         facts = ran_facts(

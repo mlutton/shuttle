@@ -85,7 +85,14 @@ class TheKeptStatement(unittest.TestCase):
         world = self.run_with(None)
         for field in ("statement_state", "statement_hash", "statement_location", "claim"):
             self.assertEqual(pairs(world)[field], {"state": "none", "value": None}, field)
-        self.assertEqual(world.names_in("/records"), ["inj-1.outcome.json", "inj-1.request.json"])
+        self.assertEqual(  # the executor's own output is kept, a statement it did not leave is not
+            [
+                n
+                for n in world.names_in("/records")
+                if not n.endswith((".standard-output.kept", ".standard-error.kept"))
+            ],
+            ["inj-1.outcome.json", "inj-1.request.json"],
+        )
 
     def test_a_statement_of_the_wrong_shape_shows_wrong_shape_is_kept_and_has_no_claim(self):
         text = json.dumps({**STATEMENT, "claim": "finished"})
@@ -143,7 +150,7 @@ class TheKeptStatement(unittest.TestCase):
     def test_the_kept_copy_is_made_from_the_run_area_and_then_copied_to_the_location(self):
         world = self.run_with(UNTIDY)
         self.assertEqual(world.calls("files.copy"), [((INNER, KEPT), 0.0), ((KEPT, LOCATION), 0.0)])
-        self.assertEqual([a for a, _ in world.calls("files.hash")], [(KEPT,)])
+        self.assertEqual([a for a, _ in world.calls("files.hash") if a == (KEPT,)], [(KEPT,)])
         self.assertNotIn(INNER, world.files)  # the run area, and the original with it, is removed
 
     def test_a_statement_written_at_the_documents_location_and_not_in_the_run_area_is_none(self):

@@ -150,8 +150,18 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         self.assertEqual(len(during), 1)
         ((name, held),) = during.items()
         self.assertTrue(name.startswith("shuttle-run-area-"))
-        # the instruction's file, and the executor's own home and `/tmp`, made empty
-        self.assertEqual(held, ["home", "shuttle-instruction.txt", "tmp"])
+        # the instruction's file, the files its standard output and error go to, and the executor's own
+        # home and `/tmp`, made empty
+        self.assertEqual(
+            held,
+            [
+                "home",
+                "shuttle-instruction.txt",
+                "shuttle-standard-error",
+                "shuttle-standard-output",
+                "tmp",
+            ],
+        )
         self.assertEqual(os.listdir(temporary), [])  # removed whole at the end
         self.assertEqual(receipt["execution"]["teardown_failure"], "none")
         kept = os.path.join(self.records, "r-1.statement.kept")

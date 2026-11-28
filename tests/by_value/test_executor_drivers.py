@@ -333,6 +333,46 @@ class ARunNamingTheCodexDriver(unittest.TestCase):
         )
         self.assertEqual(world.links, {})
 
+    def test_its_event_stream_final_message_and_errors_are_kept_whole_and_the_receipt_says_where(
+        self,
+    ):
+        world = world_for("events-finished.jsonl", "last-message-done.txt")
+        world.programs[PROGRAM]["error"] = "a warning\n"
+        receipt = self.run_it(world)
+        kept = {
+            "standard_output_kept": ("standard-output", saved("events-finished.jsonl")),
+            "final_message_kept": ("final-message", saved("last-message-done.txt")),
+            "standard_error_kept": ("standard-error", "a warning\n"),
+        }
+        for field, (what, text) in kept.items():
+            where = f"/records/inj-1.{what}.kept"
+            self.assertEqual(world.text_of(where), text, field)
+            self.assertEqual(
+                receipt["execution"][field],
+                {"kept_at": where, "hash": hashlib.sha256(text.encode()).hexdigest()},
+                field,
+            )
+
+    def test_a_final_message_that_is_also_the_statement_is_kept_whole_as_the_message_too(self):
+        world = world_for("events-finished.jsonl", "last-message-statement.json")
+        receipt = self.run_it(world)
+        text = saved("last-message-statement.json")
+        self.assertEqual(world.text_of("/records/inj-1.final-message.kept"), text)
+        self.assertEqual(world.text_of("/records/inj-1.statement.kept"), text)
+        self.assertEqual(
+            receipt["execution"]["final_message_kept"]["hash"],
+            hashlib.sha256(text.encode()).hexdigest(),
+        )
+
+    def test_a_tool_that_left_no_final_message_reads_none_for_it_and_the_rest_are_kept(self):
+        world = world_for("events-finished.jsonl", "last-message-done.txt")
+        world.programs[PROGRAM]["writes"] = {}
+        receipt = self.run_it(world)
+        self.assertEqual(receipt["execution"]["final_message_kept"], "none")
+        self.assertEqual(
+            world.text_of("/records/inj-1.standard-output.kept"), saved("events-finished.jsonl")
+        )
+
     def test_the_area_is_removed_whole_afterwards(self):
         world = world_for("events-finished.jsonl", "last-message-done.txt")
         self.run_it(world)

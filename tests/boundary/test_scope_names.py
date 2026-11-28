@@ -208,7 +208,12 @@ class ACheckWhileARunOfTheSameDocumentIsInItsGates(real_run.RealRun):
         self.assertEqual(self.listed(f"shuttle-*-{request_id}-*"), [])
         self.assertEqual(
             sorted(n for n in os.listdir(self.records) if n.startswith(request_id)),
-            [f"{request_id}.outcome.json", f"{request_id}.request.json"],
+            [
+                f"{request_id}.outcome.json",
+                f"{request_id}.request.json",
+                f"{request_id}.standard-error.kept",
+                f"{request_id}.standard-output.kept",
+            ],
         )
 
     @staticmethod

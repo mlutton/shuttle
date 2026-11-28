@@ -652,7 +652,15 @@ class FilterDrivers(FingerprintCase):
         )
         for name in ("new.txt", "new.dat"):  # the bytes on disk
             self.assertEqual(self.git("show", f"{saw['fingerprint_after']}:{name}"), "as written")
-        self.assertEqual(sorted(os.listdir(self.records)), ["r-1.outcome.json", "r-1.request.json"])
+        self.assertEqual(
+            sorted(os.listdir(self.records)),
+            [
+                "r-1.outcome.json",
+                "r-1.request.json",
+                "r-1.standard-error.kept",
+                "r-1.standard-output.kept",
+            ],
+        )
 
 
 PRINTS_ITS_WORKING_DIRECTORY = """

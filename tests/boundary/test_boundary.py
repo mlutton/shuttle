@@ -218,7 +218,14 @@ class AScriptThatTriesToWriteTheRecords(real_run.RealRun):
         self.assertEqual(len(tries), 8, tries)
         self.assertEqual([t for t in tries if "GOT THROUGH" in t], [])
         self.assertEqual(
-            sorted(os.listdir(self.records)), ["old.txt", "r-1.outcome.json", "r-1.request.json"]
+            sorted(os.listdir(self.records)),
+            [
+                "old.txt",
+                "r-1.outcome.json",
+                "r-1.request.json",
+                "r-1.standard-error.kept",
+                "r-1.standard-output.kept",
+            ],
         )
         with open(os.path.join(self.records, "old.txt")) as f:
             self.assertEqual(f.read(), "original")

@@ -22,7 +22,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from shuttle.core import pairs
-from shuttle.core.run_area import HOME_NAME
+from shuttle.core.run_area import HOME_NAME, standard_error_path
 from shuttle.core.shapes import (
     DriverFacts,
     ExecutorDriverGroup,
@@ -163,8 +163,11 @@ def setup_requests(settings: Settings, environment: Mapping[str, str]) -> list[S
 
 
 def output_files(run_area: str) -> OutputFiles:
+    events = f"{run_area}/out/events.jsonl"
     return {
-        "events": f"{run_area}/out/events.jsonl",
+        "events": events,
+        "standard_output": events,  # the event stream is what the tool prints
+        "standard_error": standard_error_path(run_area),
         "last_message": f"{run_area}/out/last-message.txt",
     }
 
@@ -187,7 +190,7 @@ def launch(settings: Settings, context: LaunchContext) -> LaunchSpec:
     network = "true" if context["network"] else "false"
     argv += ["-c", f"sandbox_workspace_write.network_access={network}"]
     argv += ["--json", "-o", files["last_message"], "-"]
-    return {"argv": argv, "output_to": files["events"]}
+    return {"argv": argv}
 
 
 # ---------------------------------------------------------------------------- observing
