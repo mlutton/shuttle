@@ -54,5 +54,5 @@ _Avoid_: clean-up or tidy (the tear-down removes a run's own area)
 A file Shuttle writes about one run: a request record or an outcome record.
 
 **Kept file**:
-A file Shuttle copies out of the run area into the records folder, whole and unedited, before the tear-down removes the area, named `<request id>.<what>.kept`: the executor's statement, its standard output, its standard error and the final message its tool left. The receipt says where each was kept and its hash. Nothing is removed from a kept file, so it can hold anything the executor printed.
+A file Shuttle copies out of the run area into the records folder, unedited (as the file stands when it is copied), before the tear-down removes the area, named `<request id>.<what>.kept`: the executor's statement, its standard output, its standard error and the final message its tool left. The receipt says where each was kept and its hash. Nothing is removed from a kept file, so it can hold anything the executor printed.
 _Avoid_: log or artifact

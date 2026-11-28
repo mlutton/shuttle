@@ -110,12 +110,14 @@ class LaunchContext(TypedDict):
 
 
 class OutputFiles(TypedDict, total=False):
-    """Where a driver's tool leaves what the shell hands back to `observe`, whole paths."""
+    """Where a driver's tool leaves what the run uses, whole paths: `events` and `last_message` are
+    what the shell hands back to `observe`; every key is what the run keeps (the final message
+    under `last_message`)."""
 
     events: str
     last_message: str
-    # Where the tool's standard output and standard error are written, for the run to keep. A tool
-    # whose standard output is the event stream gives the events' name for both.
+    # Where the tool's standard output and standard error are written. A tool whose standard output
+    # is the event stream gives the same name under `events` and `standard_output`.
     standard_output: str
     standard_error: str
 
@@ -423,8 +425,8 @@ class FileOperations(NamedTuple):
     # or a socket: a link is never followed and nothing waits on what is there. At most the
     # size seen when it opened is copied. Nothing is left under the new name when it raises
 
-    # `copy_private`, (existing name, new name): `copy` in every way, the new file made readable and
-    # writable by its owner only, whatever the process's umask.
+    # `copy_private`, (existing name, new name): `copy` in every way, the new file made no wider
+    # than readable and writable by its owner only (the process's umask can narrow that).
     copy_private: Callable[[str, str], None]
     hash: Callable[
         [str], str

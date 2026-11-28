@@ -36,8 +36,9 @@ INSTRUCTION_NAME = "shuttle-instruction.txt"
 # Where the executor writes its statement, in place of the document's own statement location. No
 # request may name it.
 STATEMENT_NAME = "shuttle-statement.json"
-# Where the executor's standard output and standard error are written, for every driver whose tool
-# does not name a file of its own for them. No request may name them.
+# Where the command driver writes the executor's standard output and standard error, and where the
+# Codex driver writes its standard error (its standard output is its event stream file). No
+# request may name either.
 STANDARD_OUTPUT_NAME = "shuttle-standard-output"
 STANDARD_ERROR_NAME = "shuttle-standard-error"
 _KEPT_NAMES = (INSTRUCTION_NAME, STATEMENT_NAME, STANDARD_OUTPUT_NAME, STANDARD_ERROR_NAME)

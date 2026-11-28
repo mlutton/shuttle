@@ -89,8 +89,9 @@ def link(existing: str, new: str) -> None:
 
 
 def _create(new: str, mode: int | None) -> BinaryIO:
-    """A new file for writing; with `mode`, made with exactly those permission bits at creation
-    (never wider, whatever the umask), so there is no moment it is more readable."""
+    """A new file for writing; with `mode`, made with no wider permission bits than those, at
+    creation (the umask can narrow them and nothing widens them), so there is no moment it is
+    more readable."""
     if mode is None:
         return open(new, "xb")  # noqa: SIM115
     descriptor = os.open(new, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, mode)

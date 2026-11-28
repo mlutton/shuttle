@@ -151,7 +151,7 @@ class AScriptThatHangsEndsAsTimeLimit(real_run.RealRun):
         ((name, held),) = during.items()
         self.assertTrue(name.startswith("shuttle-run-area-"))
         # the instruction's file, the files its standard output and error go to, and the executor's own
-        # home and `/tmp`, made empty
+        # home and `/tmp` (the last two made empty)
         self.assertEqual(
             held,
             [

@@ -1,8 +1,8 @@
 """By value: what a run keeps of the executor's own output, and what the receipt says of it.
 
 The names and the reading of a failure are by value; the run is on the simulated world, through
-the command driver and, for a final message, a driver that has one. The real command and the real
-boundary are in tests/boundary/test_kept_evidence.py.
+the command driver, which has no final message (the Codex driver's is kept in
+tests/by_value/test_executor_drivers.py). The real command and the real boundary are in tests/boundary/test_kept_evidence.py.
 """
 
 import hashlib

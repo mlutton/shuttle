@@ -1,6 +1,6 @@
 """The executor's own output, kept: what is kept, under what name, and how a failure reads.
 
-A run keeps three files whole and unedited beside the statement, in the records folder the
+A run keeps three files unedited beside the statement, in the records folder the
 executor cannot see: what the executor wrote to its standard output and to its standard error,
 and the final message the driver's tool left (a driver whose tool leaves none keeps none). Nothing is
 scrubbed: a kept file holds whatever the executor printed.
@@ -9,7 +9,7 @@ scrubbed: a kept file holds whatever the executor printed.
 from typing import Final, Literal
 
 # The three kept files, by what each is. A kind names the receipt field (`<kind>_kept`) and, with
-# its dashes, the kept file (`<request id>.<kind>.kept`).
+# its underscores made dashes, the kept file (`<request id>.<kind>.kept`).
 KINDS: Final = ("standard_output", "standard_error", "final_message")
 
 # The key of a driver's `output_files` that says where the tool leaves each kind.
@@ -30,13 +30,14 @@ def field_name(kind: str) -> str:
     return f"{kind}_kept"
 
 
-# What looking at the name a tool leaves a file at can find, as `look_at` of the file operations
-# says it: "missing", "file", "folder", "link" (to anything) or "other" (a pipe, a device, a socket).
 Step = Literal["copy", "none", "cannot_tell"]
 
 
 def what_to_do(kind: str, named: bool, look: str) -> Step:
     """What the step does for one kept file, from what looking at its name found.
+
+    `look` is what `look_at` of the file operations says: "missing", "file", "folder", "link" (to
+    anything) or "other" (a pipe, a device, a socket).
 
     "none" means looked, and there is nothing: the driver has no such file (`named` False), or the
     tool did not write its final message. A standard output or standard error file was made new

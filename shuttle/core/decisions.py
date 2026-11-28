@@ -294,7 +294,9 @@ def step_runs(step: str, facts: Mapping[str, object]) -> bool:
     """Whether a step runs, given the facts so far.
 
     The last step always runs. The first runs once, until a header is formed. After a refusal only the claim of the request id
-    (when a header exists) and the last step run. A stop that is not confirmed
+    (when a header exists), the tear-down (once set-up was tried) and the last step run; after
+    `program_not_started` the step that moves kept files runs too, since the box was started and its
+    own output is in the executor's files. A stop that is not confirmed
     takes no closing freeze and delivers nothing.
     """
     if step == "write_outcome_record":

@@ -15,14 +15,15 @@ there; otherwise nowhere (a parent the executor swapped for a link is not follow
 file and the list of changed files belong to later steps.
 
 The executor's standard output and standard error, and the final message its driver's tool left, are
-each copied whole to a name beside the statement's (shuttle.core.evidence), made readable and
+each copied unedited to a name beside the statement's (shuttle.core.evidence), made readable and
 writable by the owner only, and the copy is what is hashed. Each is looked at on its own, and
 a failure in one never changes another, the statement or the run's ending: a file that is not there
 reads "none" only where it was never to be there (the driver has no such file, or the tool did not
 write its final message); a standard output or standard error file that is gone, anything but a
 regular file in its place (never followed), and a file that could not be moved or hashed read "cannot tell". Nothing is scrubbed. The step runs
-before the tear-down, which removes the files it copies from, and for every ending the run
-lives to see the executor start.
+before the tear-down, which removes the files it copies from, and for every ending in which the
+executor was started, and for `program_not_started`, where the box was started and could not run
+the program.
 
 A result key left out reads as "cannot tell" in the receipt; an empty text reads as "none".
 """

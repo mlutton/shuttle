@@ -15,7 +15,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 real_run = importlib.import_module("rehearsal.real_run")
 
-# Bytes that are not text, a line with no end, and the same on the error stream.
+# Bytes that are not text and a last line with no end on standard output; bytes that are not text on
+# standard error.
 PRINTS_TO_BOTH = r"""
 import os, sys
 os.write(1, b"out \x00\xff\r\nno final newline")
