@@ -9,6 +9,7 @@ machine without the boundary.
 import importlib
 import json
 import os
+import select
 import stat
 import subprocess
 import sys
@@ -34,17 +35,19 @@ import sys
 open(sys.argv[2], "w").write("started")
 """
 
-# Tries to commit a change in the place, which the box refuses (the git folder is read-only), then
-# writes a file.
-MAKES_ITS_OWN_COMMITS = """
+# Tries to commit a change in the place, which the box refuses (the git folder is read-only), says
+# on the witness file what git answered (the exit codes of the add and of the commit), then writes
+# a file.
+TRIES_TO_COMMIT_AND_IS_REFUSED = """
 import os, subprocess, sys
 place = sys.argv[1]
 def git(*args):
-    subprocess.run(["git", "-c", "user.name=exec", "-c", "user.email=exec@example.invalid",
-                    "-C", place, *args], capture_output=True)
+    return subprocess.run(["git", "-c", "user.name=exec", "-c", "user.email=exec@example.invalid",
+                           "-C", place, *args], capture_output=True).returncode
 open(os.path.join(place, "changed.txt"), "w").write("written by the executor\\n")
-git("add", "-A")
-git("commit", "-q", "-m", "the executor's own commit")
+added = git("add", "-A")
+committed = git("commit", "-q", "-m", "the executor's own commit")
+open(sys.argv[2], "w").write(f"{added} {committed}")
 open(os.path.join(place, "later.txt"), "w").write("not committed\\n")
 """
 
@@ -274,9 +277,13 @@ class TheClosingCommit(FingerprintCase):
         self.assertEqual(self.git("rev-parse", f"{after}^"), self.head)
 
 
-class AScriptThatMakesItsOwnCommits(FingerprintCase):
-    def test_does_not_move_the_closing_fingerprint_which_is_the_working_files_not_the_history(self):
-        self.finished(self.document_for(MAKES_ITS_OWN_COMMITS))
+class AScriptWhoseCommitTheBoxRefuses(FingerprintCase):
+    def test_is_refused_the_commit_and_the_closing_fingerprint_still_tracks_the_working_files(self):
+        self.finished(self.document_for(TRIES_TO_COMMIT_AND_IS_REFUSED))
+        with open(self.witness) as f:
+            added, committed = f.read().split()
+        self.assertNotEqual(committed, "0", "the box let the commit through")
+        self.assertNotEqual(added, "0", "the box let the index be written")
         executors_commit = self.git("rev-parse", "HEAD")
         self.assertEqual(executors_commit, self.head)  # the script's commit was refused
         saw = outcome_fields(self)["execution"]
@@ -598,29 +605,46 @@ class FilterDrivers(FingerprintCase):
                 os.remove(os.path.join(self.records, "r-1.outcome.json"))
                 os.remove(os.path.join(self.records, "r-1.request.json"))
 
-    def test_drivers_added_by_the_script_during_the_run_are_never_run(self):
-        # the script tries to add a clean driver named by .gitattributes and a process driver
-        # named by info/attributes, with their configuration; the box refuses the writes to the
-        # git folder, so only the files in the place arrive
+    def test_drivers_planted_from_outside_the_box_during_the_run_are_never_run(self):
+        # The box keeps the executor out of the git folders, but a gate has no box and could plant
+        # configuration there. So the test plays that part: the script says it is up, the test
+        # (outside the box, after the opening freeze) defines a clean driver named by the
+        # .gitattributes the script then writes, and a process driver named by info/attributes,
+        # then lets the script go on; the closing freeze must not run either.
+        up, go = self.pipe("up"), self.pipe("go")
         script = (
             "import os, sys\n"
-            "place, config, command = sys.argv[1], sys.argv[3], sys.argv[4]\n"
-            "try:\n"
-            "    open(config, 'a').write('[filter \"x\"]\\n\\tclean = ' + command + '; cat\\n')\n"
-            "    open(config, 'a').write('[filter \"p\"]\\n\\tprocess = ' + command + '\\n')\n"
-            "    info = os.path.join(os.path.dirname(config), 'info')\n"
-            "    os.makedirs(info, exist_ok=True)\n"
-            "    open(os.path.join(info, 'attributes'), 'w').write('*.dat filter=p\\n')\n"
-            "except OSError:\n"
-            "    pass\n"
+            "place, up, go = sys.argv[1], sys.argv[3], sys.argv[4]\n"
+            "open(up, 'w').write('u')\n"
+            "descriptor = os.open(go, os.O_RDWR)\n"
+            "os.read(descriptor, 1)\n"
             "open(os.path.join(place, '.gitattributes'), 'w').write('*.txt filter=x\\n')\n"
             "open(os.path.join(place, 'new.txt'), 'w').write('as written\\n')\n"
             "open(os.path.join(place, 'new.dat'), 'w').write('as written\\n')\n"
         )
-        doc = self.document_for(
-            script, [os.path.join(self.main, ".git", "config"), f"touch '{self.marker}'"]
-        )
-        self.finished(doc)
+        proc = self.start(self.document_for(script, [up, go]))
+        said = os.open(up, os.O_RDWR)  # read and write, so it never sees an end of file
+        ended = os.pidfd_open(proc.pid)
+        try:
+            ready, _, _ = select.select([said, ended], [], [])
+            if said not in ready:
+                stdout, stderr = proc.communicate(timeout=120)
+                self.fail(f"the command ended before the script was up: {stdout!r} {stderr!r}")
+        finally:
+            os.close(said)
+            os.close(ended)
+        config = os.path.join(self.main, ".git", "config")
+        self.define_driver(config, "x", "clean")
+        self.define_driver(config, "p", "process")
+        info = os.path.join(self.main, ".git", "info")
+        os.makedirs(info, exist_ok=True)
+        with open(os.path.join(info, "attributes"), "w") as f:
+            f.write("*.dat filter=p\n")
+        let_go = os.open(go, os.O_RDWR)
+        os.write(let_go, b"g")
+        os.close(let_go)
+        stdout, stderr = proc.communicate(timeout=120)
+        self.assertEqual((proc.returncode, stderr), (0, ""), stdout)
         saw = outcome_fields(self)["execution"]
         self.assertEqual(
             (saw["files_added"], saw["files_changed"], saw["files_deleted"]), (3, 0, 0)
