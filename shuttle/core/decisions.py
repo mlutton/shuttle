@@ -31,7 +31,7 @@ from shuttle.core.shapes import (
 # ---------------------------------------------------------------- the ending
 
 _LAUNCH = ("ok", "failed", "program_not_started", "stopped_before")
-_WAIT = ("exited", "time_limit", "stop_record", "signal", "error")
+_WAIT = ("exited", "time_limit", "memory_limit", "stop_record", "signal", "error")
 _CNS = "could_not_start"
 _EF = "execution_failed"
 
@@ -63,7 +63,7 @@ def decide_ending(facts: Facts) -> Decision:
       gates: "ok", "no" or "failed". setup, opening_freeze: "ok" or "failed".
       launch: "ok", "failed" (the executor was never reported forked), "program_not_started" (it
         was, and the program was never reported running) or "stopped_before".
-      wait: "exited", "time_limit", "stop_record", "signal" or "error".
+      wait: "exited", "time_limit", "memory_limit", "stop_record", "signal" or "error".
       stop: "confirmed" or "not_confirmed". closing_freeze, delivery: "ok" or "failed".
 
     The executor's exit code and signal, and anything that happens after delivery
@@ -128,6 +128,16 @@ def _decide_before_launch(f: Mapping[str, object]) -> Decision | None:
     return None
 
 
+# What the wait ended on, when that is not the executor going away by itself: the ending and
+# its reason.
+_ENDING_OF_WAIT = {
+    "time_limit": ("time_limit", "time_limit"),
+    "memory_limit": ("memory_limit", "memory_limit"),
+    "stop_record": ("stopped_from_outside", "stop_record"),
+    "signal": ("stopped_from_outside", "signal"),
+}
+
+
 def _decide_after_launch(f: Mapping[str, object]) -> Decision:
     wait = f.get("wait")
     if wait == "error" or f.get("stop") == "not_confirmed":
@@ -144,13 +154,8 @@ def _decide_after_launch(f: Mapping[str, object]) -> Decision:
             return _decision(_EF, failed_reason, step)
         if f.get(step) != "ok":
             return _after_launch_error()
-    if wait == "time_limit":
-        return _decision("time_limit", "time_limit")
-    if wait == "stop_record":
-        return _decision("stopped_from_outside", "stop_record")
-    if wait == "signal":
-        return _decision("stopped_from_outside", "signal")
-    return _decision("ended_by_itself")
+    ending, reason = _ENDING_OF_WAIT.get(str(wait), ("ended_by_itself", fixed.NONE))
+    return _decision(ending, reason)
 
 
 def check_decision(decision: Mapping[str, object]) -> list[str]:
@@ -199,6 +204,8 @@ def reason_text(decision: Decision, problems: Mapping[str, str]) -> str:
     """The one line beside the reason: the problem recorded for its step, or none, or cannot tell."""
     if decision["reason"] == fixed.NONE:
         return fixed.NONE
+    if decision["reason"] == "memory_limit":  # it names no step; its line is the cap's own
+        return problems.get("memory_limit") or fixed.CANNOT_TELL
     return problems.get(decision["failed_step"]) or fixed.CANNOT_TELL
 
 
@@ -388,6 +395,7 @@ _DOCUMENT_FIELDS = (
     "reach",
     "place",
     "freeze_limit_seconds",
+    "memory_limit_bytes",
     "network",
     "changes_to_place",
 )
@@ -547,6 +555,25 @@ def _standard_settings_refusal(raw: Document) -> tuple[str, str] | None:
     return None
 
 
+def _optional_limits_refusal(raw: Document) -> tuple[str, str] | None:
+    """The optional limits, judged when the document gives them: the freeze's own time limit and
+    the memory cap."""
+    if "freeze_limit_seconds" in raw and not _usable_time_limit(raw["freeze_limit_seconds"]):
+        return (
+            "missing_setting",
+            "freeze_limit_seconds must be a number from "
+            f"{boundary.SHORTEST_LIMIT_SECONDS:g} to {boundary.LONGEST_LIMIT_SECONDS} seconds",
+        )
+    if "memory_limit_bytes" in raw and not boundary.usable_memory_limit(raw["memory_limit_bytes"]):
+        return (
+            "missing_setting",
+            "memory_limit_bytes must be a whole number of bytes from "
+            f"{boundary.SHORTEST_MEMORY_LIMIT_BYTES} to {boundary.LONGEST_MEMORY_LIMIT_BYTES}, "
+            "or left out to run without a memory cap",
+        )
+    return None
+
+
 def _parts_refusal(raw: Document) -> tuple[str, str] | None:
     """The shape of the parts the refusal checks judge; what they hold is judged by those checks."""
     for field in ("instruction", "instruction_hash", "statement_location", "place"):
@@ -555,12 +582,9 @@ def _parts_refusal(raw: Document) -> tuple[str, str] | None:
     refusal = _standard_settings_refusal(raw)
     if refusal:
         return refusal
-    if "freeze_limit_seconds" in raw and not _usable_time_limit(raw["freeze_limit_seconds"]):
-        return (
-            "missing_setting",
-            "freeze_limit_seconds must be a number from "
-            f"{boundary.SHORTEST_LIMIT_SECONDS:g} to {boundary.LONGEST_LIMIT_SECONDS} seconds",
-        )
+    refusal = _optional_limits_refusal(raw)
+    if refusal:
+        return refusal
     for field, refuse in (("references", _reference_refusal), ("gates", _gate_refusal)):
         if field not in raw:
             continue

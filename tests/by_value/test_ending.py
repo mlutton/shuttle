@@ -129,6 +129,11 @@ TABLE = [
         d("ended_by_itself"),
     ),
     ("step 8: the time limit is reached", facts(wait="time_limit"), d("time_limit", "time_limit")),
+    (
+        "step 8: the memory cap is reached",
+        facts(wait="memory_limit"),
+        d("memory_limit", "memory_limit"),
+    ),
     ("step 8: a stop record", facts(wait="stop_record"), d("stopped_from_outside", "stop_record")),
     (
         "step 8: an interrupt, terminate or hangup signal",
@@ -151,6 +156,11 @@ TABLE = [
         d(EF, "stop_not_confirmed", "stop_not_confirmed"),
     ),
     (
+        "step 9: stop not confirmed beats a memory limit",
+        facts(wait="memory_limit", stop="not_confirmed", closing_freeze=None, delivery=None),
+        d(EF, "stop_not_confirmed", "stop_not_confirmed"),
+    ),
+    (
         "step 9: stop not confirmed beats a cause that cannot be told",
         facts(wait="cannot_tell", stop="not_confirmed", closing_freeze=None, delivery=None),
         d(EF, "stop_not_confirmed", "stop_not_confirmed"),
@@ -169,6 +179,16 @@ TABLE = [
     (
         "step 12: delivery fails after a time limit",
         facts(wait="time_limit", delivery="failed"),
+        d(EF, "delivery_failed", "delivery"),
+    ),
+    (
+        "step 11: closing freeze fails after a memory limit",
+        facts(wait="memory_limit", closing_freeze="failed", delivery=None),
+        d(EF, "closing_freeze_failed", "closing_freeze"),
+    ),
+    (
+        "step 12: delivery fails after a memory limit",
+        facts(wait="memory_limit", delivery="failed"),
         d(EF, "delivery_failed", "delivery"),
     ),
 ]
@@ -244,7 +264,7 @@ class DecideEndingTable(unittest.TestCase):
             "setup": ("ok", "failed", fixed.CANNOT_TELL),
             "opening_freeze": ("ok", "failed", fixed.CANNOT_TELL),
             "launch": ("ok", "failed", "program_not_started", "stopped_before", fixed.CANNOT_TELL),
-            "wait": ("exited", "time_limit", "signal", "error", fixed.CANNOT_TELL),
+            "wait": ("exited", "time_limit", "memory_limit", "signal", "error", fixed.CANNOT_TELL),
             "stop": ("confirmed", "not_confirmed", fixed.CANNOT_TELL),
             "closing_freeze": ("ok", "failed", fixed.CANNOT_TELL),
             "delivery": ("ok", "failed", fixed.CANNOT_TELL),
@@ -275,6 +295,14 @@ class PairingsTheListForbids(unittest.TestCase):
             d(EF, "lost", "delivery"),
             d("time_limit", "time_limit", "launch"),
             d("time_limit", "launch_failed", "launch"),
+            d("memory_limit", "memory_limit", "launch"),
+            d("memory_limit", "time_limit"),
+            d("time_limit", "memory_limit"),
+            d("memory_limit", "execution_error"),
+            d("memory_limit"),
+            d(CNS, "memory_limit", "input_check"),
+            d(CNS, "memory_limit"),
+            d("ended_by_itself", "memory_limit"),
             d("ended_by_itself", fixed.NONE, "launch"),
             d("ended_by_itself", "lost"),
             d("record_failed"),
@@ -295,6 +323,8 @@ class PairingsTheListForbids(unittest.TestCase):
             d(CNS, "missing_setting", "executor_driver_check"),
             d(CNS, "records_location_unusable", "id_claim"),
             d("stopped_from_outside", "signal"),
+            d("memory_limit", "memory_limit"),
+            d(CNS, "memory_cap_unavailable", "input_check"),
             d(CNS, "execution_error", "input_check"),
             d(CNS, "execution_error", "launch"),
             d(EF, "execution_error", fixed.CANNOT_TELL),
@@ -306,8 +336,9 @@ class PairingsTheListForbids(unittest.TestCase):
 
 class ReceiptEndingConflicts(unittest.TestCase):
     def test_a_receipt_that_keeps_the_known_ending_is_accepted(self):
-        known = d("time_limit", "time_limit")
-        self.assertEqual(core.ending_conflicts(known, {"ending": dict(known)}), [])
+        for known in (d("time_limit", "time_limit"), d("memory_limit", "memory_limit")):
+            with self.subTest(known):
+                self.assertEqual(core.ending_conflicts(known, {"ending": dict(known)}), [])
 
     def test_a_receipt_whose_ending_changed_after_a_later_failure_is_rejected(self):
         known = d("ended_by_itself")

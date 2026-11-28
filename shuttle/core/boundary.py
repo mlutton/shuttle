@@ -1,8 +1,9 @@
 """The boundary: decisions about the scope and the box the executor runs in, and about the scopes
 a gate and the closing freeze run in (they have no box), as pure functions.
 
-The scope is a systemd user scope. It owns the time limit (its maximum runtime) and the grace
-between asking and killing (its stop timeout); it ends everything inside when either runs out,
+The scope is a systemd user scope. It owns the time limit (its maximum runtime), the optional memory
+cap and the grace between asking and killing (its stop timeout); it ends everything inside when
+the time limit or the cap is passed or the grace runs out,
 and the reason it ended can be read afterwards from its properties. The box is bubblewrap, started
 inside the scope: it applies the executor's reach, which is hidden unless declared. Only what the
 box binds in is there; the system folders and `/etc` are read-only, the run area is writable, and
@@ -27,6 +28,20 @@ from shuttle.core import refusals
 SHORTEST_LIMIT_SECONDS = 1e-6
 LONGEST_LIMIT_SECONDS = 10**9
 
+# The memory cap's bounds, in bytes. The scope takes a whole number of bytes (the kernel rounds it
+# down to a page, so a cap under one page is a cap nothing can run under). From 2**63 - 1 up the scope reads the
+# number as "no cap at all", which would be a cap in name only, so the longest is far below that.
+SHORTEST_MEMORY_LIMIT_BYTES = 1
+LONGEST_MEMORY_LIMIT_BYTES = 2**62
+
+# What a cap is paired with: no swap at all. With swap the cap only slows a program that goes over
+# it, and the scope ends nothing; with none, going over it ends the run.
+SWAP_WITH_A_CAP_BYTES = 0
+
+# The cap the trial scope is asked to hold (the world's `try_memory_cap`): a number the kernel takes
+# as it is (a whole number of pages), so what the cgroup reads back is exactly this.
+TRIAL_MEMORY_BYTES = 64 * 1024 * 1024
+
 # Seconds between asking everything in the scope to end and killing what is left: the scope's
 # stop timeout, a fixed policy.
 GRACE_SECONDS = 3
@@ -42,13 +57,14 @@ BUS_VARIABLES = ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
 
 # Why the scope ended.
 TIMED_OUT = "timed_out"
+OVER_ITS_MEMORY_CAP = "over_its_memory_cap"
 ENDED = "ended"
 CANNOT_TELL = "cannot_tell"
 
 # A scope that is gone, or failed, has nothing left in it.
 _SETTLED = ("inactive", "failed")
-# What a scope that ended for any cause but its time limit reads as: it ended by itself, or by
-# something other than execution.
+# What a scope that ended for any cause but its time limit, or an `oom-kill` with a cap
+# (`why_ended`), reads as: it ended by itself, or by something other than execution.
 _ENDED_RESULTS = ("success", "signal", "oom-kill", "exit-code", "core-dump")
 
 
@@ -61,6 +77,20 @@ def usable_time_limit(seconds: object) -> bool:
     except OverflowError:
         return False
     return math.isfinite(value) and SHORTEST_LIMIT_SECONDS <= value <= LONGEST_LIMIT_SECONDS
+
+
+def usable_memory_limit(value: object) -> bool:
+    """A whole number of bytes the scope can hold as a cap: at least one, at most the longest. A
+    truth value is not a number, and a float, even a whole one, is not an int."""
+    return type(value) is int and SHORTEST_MEMORY_LIMIT_BYTES <= value <= LONGEST_MEMORY_LIMIT_BYTES
+
+
+def memory_cap_held(trial: tuple[str, str] | None) -> bool:
+    """Whether a machine caps memory and swap for a user scope, from the trial scope's own cgroup
+    (`try_memory_cap`): it reads back exactly the numbers the scope was asked to hold. None (the
+    trial could not be made or read), "max" (no controller holds it) and any other text are not
+    held: a machine that cannot be shown to cap is not taken to."""
+    return trial == (str(TRIAL_MEMORY_BYTES), str(SWAP_WITH_A_CAP_BYTES))
 
 
 def limit_microseconds(seconds: float) -> int:
@@ -352,6 +382,19 @@ def box_arguments(reach: Reach) -> list[str]:
     ]
 
 
+def _memory_cap_properties(memory_limit_bytes: int | None) -> list[str]:
+    """The scope's properties for a memory cap, none when there is no cap. Memory and swap are
+    held together: a cap with swap left open only slows a program that goes over it."""
+    if memory_limit_bytes is None:
+        return []
+    return [
+        "-p",
+        f"MemoryMax={memory_limit_bytes}",
+        "-p",
+        f"MemorySwapMax={SWAP_WITH_A_CAP_BYTES}",
+    ]
+
+
 def launch_argv(
     name: str,
     limit_seconds: float,
@@ -359,10 +402,12 @@ def launch_argv(
     environment_names: Sequence[str],
     reach: Reach,
     report_fd: int,
+    memory_limit_bytes: int | None = None,
 ) -> list[str]:
     """The command that starts `argv` in the boundary.
 
-    A scope with the limit and the grace, around bubblewrap with its own process space that dies
+    A scope with the limit and the grace (and, when the document names one, the memory cap, held
+    with no swap so that going over it ends the run: `why_ended` reads that), around bubblewrap with its own process space that dies
     with its parent and the reach `box_arguments` gives it. The variables the shell needed to
     reach systemd are taken out of the executor's environment unless the caller named them.
     Bubblewrap's status report goes to the descriptor `report_fd`, which says whether the
@@ -380,6 +425,7 @@ def launch_argv(
         f"RuntimeMaxSec={limit_microseconds(limit_seconds)}us",
         "-p",
         f"TimeoutStopSec={GRACE_SECONDS}s",
+        *_memory_cap_properties(memory_limit_bytes),
         "--",
         *for_the_scope_tool(
             [
@@ -399,18 +445,25 @@ def launch_argv(
     ]
 
 
-def why_ended(properties: Mapping[str, str] | None) -> str:
-    """Why the scope ended, from its properties after it was stopped: "timed_out", "ended" or
-    "cannot_tell". None means the properties could not be read.
+def why_ended(properties: Mapping[str, str] | None, capped: bool = False) -> str:
+    """Why the scope ended, from its properties after it was stopped: "timed_out",
+    "over_its_memory_cap", "ended" or "cannot_tell". None means the properties could not be read.
+    `capped` says the scope was started with a memory cap.
 
-    Only the scope's own timer reads as "timed_out". A scope that is still running, or that
-    ended for a reason this does not know, is "cannot_tell": the ending is never a guess.
+    Only the scope's own timer reads as "timed_out", and only the scope's own result "oom-kill"
+    on a scope that was given a cap reads as "over_its_memory_cap": the program's exit, bubblewrap's
+    report and its status are not looked at, so a program that was never reported running reads as
+    it did. A scope with no cap that reads "oom-kill" is the machine itself out of memory, and
+    reads as "ended". A scope that is still running, or that ended for a reason this does not
+    know, is "cannot_tell": the ending is never a guess.
     """
     if properties is None or properties.get("ActiveState") not in _SETTLED:
         return CANNOT_TELL
     result = properties.get("Result")
     if result == "timeout":
         return TIMED_OUT
+    if result == "oom-kill" and capped:
+        return OVER_ITS_MEMORY_CAP
     if result in _ENDED_RESULTS:
         return ENDED
     return CANNOT_TELL
@@ -425,12 +478,14 @@ def cause_of_end(wait: str | None, scope_end: str) -> str:
     """The cause that ended the wait, refined by why the scope ended.
 
     The wait ends when the executor exits, or a signal or a stop record is seen. When it ended
-    by the executor going away, the scope says whether that was the limit.
+    by the executor going away, the scope says whether that was a limit, and which.
     """
     if wait != "exited":
         return wait or CANNOT_TELL
     if scope_end == TIMED_OUT:
         return "time_limit"
+    if scope_end == OVER_ITS_MEMORY_CAP:
+        return "memory_limit"
     if scope_end == ENDED:
         return "exited"
     return CANNOT_TELL
@@ -483,12 +538,18 @@ def launch_failed(cause: str, report: str) -> bool:
     bubblewrap never reported the executor forked.
 
     That reads the same whether a tool was missing, `systemd-run` could not make the scope or
-    `bwrap` could not make the box. A time limit, a signal, or a cause that cannot be told is
+    `bwrap` could not make the box. A time limit, a memory limit, a signal, or a cause that cannot be told is
     not read as a failed launch: the timer may end the scope before it reports, and a failed
     launch is never a guess.
     """
     return cause == "exited" and not executor_started(report)
 
+
+# How many times a capped run's scope is read, one read straight after another, before it is
+# stopped: the manager that is told of the kernel's kill ends the scope as `oom-kill`, and a stop
+# that arrives first ends it as a success. Bounded, so a scope that really is still running (a
+# stray process) is stopped after the reads, never waited on.
+SETTLE_READS = 50
 
 # What bubblewrap itself ends with when it fails: its own error exit, never the program's.
 BUBBLEWRAP_FAILURE_STATUS = 1
@@ -510,6 +571,21 @@ def program_not_started(cause: str, report: str, returncode: int | None) -> bool
         and executor_started(report)
         and not executor_ended(report)
         and returncode == BUBBLEWRAP_FAILURE_STATUS
+    )
+
+
+def memory_limit_line(limit_bytes: int | None) -> str:
+    """The one line for the caller when the scope's result was the kernel ending a process under a
+    memory cap: the cap as the document gave it, in bytes. Exceeding the cap does this, and so
+    does a shortage on the whole machine during a capped run, which the scope's result does not
+    tell apart, so the line says both. A missing number is only a safeguard: the ending exists
+    only for a run that had a cap."""
+    held = "the memory cap" if limit_bytes is None else f"the memory cap of {limit_bytes} bytes"
+    return (
+        f"the run was ended when the kernel ended a process in it under {held} "
+        "(memory_limit_bytes in the document), which exceeding the cap does and a shortage on the "
+        "whole machine during a capped run does too; the cap holds memory and swap together, and "
+        "files written to memory-backed storage count"
     )
 
 

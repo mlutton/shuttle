@@ -1,7 +1,7 @@
 """Step 7, launch the executor: start it in the boundary, with the limit and its reach.
 
 The boundary is a systemd user scope around bubblewrap (shuttle.core.boundary). The scope owns the
-time limit; nothing here times the executor. The reach is built from resolved paths (the shell's
+time limit and the memory cap; nothing here times or measures the executor. The reach is built from resolved paths (the shell's
 `the_reach` finds them), so the box binds what the checks looked at.
 """
 
@@ -75,8 +75,15 @@ def step(state: RunState) -> None:
         "records": resolve(source["records_location"]),
     }
     report = world.processes.open_report()
+    state["memory_limit_bytes"] = raw.get("memory_limit_bytes")
     argv = boundary.launch_argv(
-        name, float(raw["time_limit_seconds"]), spec["argv"], names, reach, report
+        name,
+        float(raw["time_limit_seconds"]),
+        spec["argv"],
+        names,
+        reach,
+        report,
+        state["memory_limit_bytes"],
     )
     state["started_at"] = world.clock.timestamp()
     state["clock_start"] = world.clock.now()

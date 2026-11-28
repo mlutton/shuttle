@@ -72,6 +72,29 @@ class WhyTheBoundaryEnded(unittest.TestCase):
             with self.subTest(properties=properties):
                 self.assertEqual(boundary.why_ended(properties), expected)
 
+    def test_an_oom_kill_result_reads_as_over_its_cap_only_on_a_scope_that_had_a_cap(
+        self,
+    ):
+        killed = {"LoadState": "loaded", "ActiveState": "failed", "Result": "oom-kill"}
+        for label, properties, capped, expected in (
+            ("oom-kill, capped", killed, True, "over_its_memory_cap"),
+            ("oom-kill, no cap: the machine itself was out of memory", killed, False, "ended"),
+            ("timeout, capped", TIMED_OUT, True, "timed_out"),
+            ("success, capped: it ended by itself", GONE, True, "ended"),
+            ("an exit code, capped", dict(killed, Result="exit-code"), True, "ended"),
+            ("a signal, capped", dict(killed, Result="signal"), True, "ended"),
+            (
+                "oom-kill, capped, still running",
+                dict(killed, ActiveState="active"),
+                True,
+                "cannot_tell",
+            ),
+            ("oom-kill, capped, not read", None, True, "cannot_tell"),
+            ("no result, capped", {"ActiveState": "failed"}, True, "cannot_tell"),
+        ):
+            with self.subTest(label):
+                self.assertEqual(boundary.why_ended(properties, capped), expected)
+
     def test_only_a_settled_scope_is_empty(self):
         for properties, expected in (
             (TIMED_OUT, True),
@@ -101,6 +124,14 @@ class FromTheCauseAndTheBoundaryToAnEnding(unittest.TestCase):
     def test_rows(self):
         for wait, why, expected in (
             ("exited", "timed_out", ("time_limit", "time_limit", "none")),
+            ("exited", "over_its_memory_cap", ("memory_limit", "memory_limit", "none")),
+            ("signal", "over_its_memory_cap", ("stopped_from_outside", "signal", "none")),
+            ("stop_record", "over_its_memory_cap", ("stopped_from_outside", "stop_record", "none")),
+            (
+                "error",
+                "over_its_memory_cap",
+                ("execution_failed", "stop_not_confirmed", "stop_not_confirmed"),
+            ),
             ("exited", "ended", ("ended_by_itself", "none", "none")),
             ("exited", "cannot_tell", ("execution_failed", "execution_error", "cannot tell")),
             ("signal", "ended", ("stopped_from_outside", "signal", "none")),
@@ -304,7 +335,7 @@ class TheLimitTheTimerCanTake(unittest.TestCase):
                 self.assertEqual(found, unset)
 
 
-def a_state(world, **program):
+def a_state(world, capped=False, **program):
     world.program("tool", **program)
     processes = world.operations.processes
     process = processes.start(
@@ -319,6 +350,7 @@ def a_state(world, **program):
         "clock_start": 0.0,
         "boundary_name": "shuttle-run-w",
         "boundary_process": process,
+        "memory_limit_bytes": 64 * 1024 * 1024 if capped else None,
     }
 
 
@@ -382,6 +414,90 @@ class TheWaitAndStopStepsGiveTheseFacts(unittest.TestCase):
         # What ended is the scope's process; the executor's own signal is not told.
         self.assertEqual(state["facts"]["child_signal"], fixed.CANNOT_TELL)
         self.assertEqual(len(world.calls("boundary.forget")), 1)  # the failed unit is cleared
+
+    def test_a_scope_with_a_cap_that_the_kernel_ended_gives_memory_limit_and_no_exit_code(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, capped=True, oom_kills=True)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        facts = state["facts"]
+        self.assertEqual((facts["wait"], facts["stop"]), ("memory_limit", "confirmed"))
+        self.assertEqual((facts["exit_code"], facts["child_signal"]), (None, fixed.CANNOT_TELL))
+        self.assertNotIn(facts.get("launch"), ("failed", "program_not_started"))
+        self.assertEqual(len(world.calls("boundary.forget")), 1)  # the failed unit is cleared
+
+    def test_a_kill_the_box_saw_first_and_reported_as_an_exit_is_not_the_programs_own_exit(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, capped=True, oom_kills=True, exit_code=137)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        facts = state["facts"]
+        self.assertEqual(facts["wait"], "memory_limit")
+        self.assertEqual((facts["exit_code"], facts["child_signal"]), (None, fixed.CANNOT_TELL))
+
+    def test_a_capped_scope_is_read_until_it_settles_before_it_is_stopped(self):
+        # The manager is told of the kernel's kill a little after the executor has gone: the third
+        # read finds the scope failed with the kill as its result, and no stop came first.
+        world = simulated.SimulatedWorld()
+        state = a_state(world, capped=True, exit_code=137)
+        unit = "shuttle-run-w.scope"
+        killed = {"LoadState": "loaded", "ActiveState": "failed", "Result": "oom-kill"}
+        world.on_call("boundary.show", lambda: world.units.update({unit: killed}), nth=3)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        order = [operation for operation, _, _ in world.log if operation.startswith("boundary.")]
+        self.assertEqual(order[:4], ["boundary.show"] * 3 + ["boundary.stop"])
+        self.assertEqual(state["facts"]["wait"], "memory_limit")
+
+    def test_a_scope_that_never_settles_is_read_a_bounded_number_of_times_and_then_stopped(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, capped=True)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        shows = [1 for operation, _, _ in world.log if operation == "boundary.show"]
+        self.assertEqual(len(shows), boundary.SETTLE_READS + 1)
+        self.assertEqual(len(world.calls("boundary.stop")), 1)
+        self.assertEqual(state["facts"]["wait"], "exited")
+
+    def test_a_run_with_no_cap_reads_the_scope_once_after_the_stop(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        order = [operation for operation, _, _ in world.log if operation.startswith("boundary.")]
+        self.assertEqual(order, ["boundary.stop", "boundary.show"])
+
+    def test_a_capped_run_that_ended_by_a_signal_is_stopped_without_waiting_for_the_scope(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, capped=True, hangs=True)
+        world.on_call("processes.poll", lambda: state.update(signal="SIGINT"), nth=2)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        order = [operation for operation, _, _ in world.log if operation.startswith("boundary.")]
+        self.assertEqual(order, ["boundary.stop", "boundary.show"])
+
+    def test_a_scope_with_no_cap_that_the_kernel_ended_is_not_a_memory_limit(self):
+        world = simulated.SimulatedWorld()
+        state = a_state(world, oom_kills=True)
+        wait_for_the_end.step(state)
+        stop_and_confirm_empty.step(state)
+        self.assertEqual((state["facts"]["wait"], state["facts"]["stop"]), ("exited", "confirmed"))
+        ran = {**state["facts"], "launch": "ok", "closing_freeze": "ok", "delivery": "ok"}
+        self.assertEqual(decisions.decide_ending(ran)["ending"], "ended_by_itself")
+
+    def test_the_scopes_own_result_tells_a_cap_from_a_program_that_was_never_reported_running(self):
+        # The same report in both: the box was made, the program was never reported running.
+        reports, causes = [], []
+        for program in ({"oom_kills": True}, {"cannot_exec": True}):
+            world = simulated.SimulatedWorld()
+            state = a_state(world, capped=True, **program)
+            wait_for_the_end.step(state)
+            stop_and_confirm_empty.step(state)
+            reports.append(world.operations.processes.read_report(state["boundary_process"]))
+            causes.append((state["facts"]["wait"], state["facts"].get("launch")))
+        self.assertEqual(reports[0], reports[1])
+        self.assertFalse(boundary.executor_ended(reports[0]))
+        self.assertEqual(causes, [("memory_limit", None), ("exited", "program_not_started")])
 
     def test_an_executor_that_never_started_gives_a_failed_launch_and_no_exit_code(self):
         world = simulated.SimulatedWorld()

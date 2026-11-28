@@ -116,7 +116,7 @@ class RecordsFolder(unittest.TestCase):
         self.assertIn("gates", fixed.STEPS_BY_ENDING["could_not_start"])
         self.assertNotIn("record", fixed.STEPS)
         self.assertNotIn("record_failed", fixed.REASONS)
-        self.assertEqual(len(fixed.ENDINGS), 6)
+        self.assertEqual(len(fixed.ENDINGS), 7)
         self.assertIn("records_location_unusable", fixed.REASONS_BY_ENDING["could_not_start"])
 
     def test_the_outcome_record_is_created_only_if_none_exists(self):

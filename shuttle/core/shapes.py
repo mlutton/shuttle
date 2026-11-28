@@ -359,6 +359,7 @@ class RunState(TypedDict, total=False):
     program: str  # the program the executor was asked to run, as the launch names it
     boundary_name: str
     boundary_process: Any
+    memory_limit_bytes: int | None  # the cap the scope was started with, None when it has none
     run_area: str  # the run's own folder, once made
     statement_parent: str  # what the statement location's parent folder resolved to at the start
     setup_variables: dict[str, str]  # what the driver's setup passes to the executor
@@ -491,6 +492,12 @@ class BoundaryOperations(NamedTuple):
     ]  # stop the unit and everything in it; OSError when it cannot be asked
     forget: Callable[[str], None]  # clear a failed unit's record; OSError when it cannot be asked
     resolve: Callable[[str], str]  # a path made absolute with links resolved, as the box binds it
+    try_memory_cap: Callable[
+        [int, int], tuple[str, str]
+    ]  # start a short scope of its own with MemoryMax and MemorySwapMax set to these numbers of
+    # bytes and read back what the scope's cgroup holds as memory.max and memory.swap.max (the
+    # numbers as text, or "max" where nothing caps); OSError when the scope could not be made or
+    # its files not read. The scope is gone afterwards, a failed one forgotten.
 
 
 class ClockOperations(NamedTuple):

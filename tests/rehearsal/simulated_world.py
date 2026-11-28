@@ -55,6 +55,7 @@ class _Child:
 _GONE = {"LoadState": "not-found", "ActiveState": "inactive", "Result": "success"}
 _STILL_THERE = {"LoadState": "loaded", "ActiveState": "active", "Result": "success"}
 _TIMED_OUT = {"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout"}
+_OOM_KILLED = {"LoadState": "loaded", "ActiveState": "failed", "Result": "oom-kill"}
 WAITS_BEFORE_GIVING_UP = 1000  # a wait that would never end is a failure of the test
 
 
@@ -93,6 +94,9 @@ class SimulatedWorld:
         self._ids = 0
         self._temporary = 0
         self.read_only = set()  # names the owner may not write
+        self.memory_cap = (
+            "held"  # what a trial scope's cgroup shows: "held", "ignored" or "unreadable"
+        )
         self.the_freeze = None  # None, "fails" (git ends with an error) or "times_out" (the limit)
         self.refs = {}  # reference -> commit, as the freeze made them
         self.commits = {}  # commit -> {"files": name to bytes, "parent": commit or None}
@@ -124,7 +128,11 @@ class SimulatedWorld:
                 read_report=self._read_report,
             ),
             boundary=BoundaryOperations(
-                show=self._show, stop=self._stop, forget=self._forget, resolve=self._resolve
+                show=self._show,
+                stop=self._stop,
+                forget=self._forget,
+                resolve=self._resolve,
+                try_memory_cap=self._try_memory_cap,
             ),
             clock=ClockOperations(now=self._now, timestamp=self._timestamp),
             signals=SignalOperations(install=self._install, name_of=self._name_of),
@@ -231,6 +239,7 @@ class SimulatedWorld:
         output="",
         writes=None,
         cannot_exec=False,
+        oom_kills=False,
     ):
         """Say what starting `command` in the boundary makes: a child that exits at once with
         `exit_code`; or, with `hangs`, one that runs until the boundary is stopped; or, with
@@ -242,17 +251,23 @@ class SimulatedWorld:
         `cannot_exec` the box is started and reports the executor forked, and the program is never
         reported running: the boundary's tool ends with status 1 and no end line, as the real
         bubblewrap does both when the program cannot be executed and when it fails making the box
-        after the fork. `cannot_exec` refuses a non-zero `exit_code`, `hangs`, `times_out` and
-        `survives_stop`, because such a program never runs. `report` is the text a child writes
+        after the fork. `cannot_exec` refuses a non-zero `exit_code`, `hangs`, `times_out`,
+        `oom_kills` and `survives_stop`, because such a program never runs. With `oom_kills` the
+        kernel ends the program in the scope the first time it is looked at and the scope fails
+        with the result "oom-kill", as it does for a scope with a memory cap that is exceeded and
+        for a machine out of memory alike: the scope's result is all there is, so the simulation
+        does not say which. The box's tool is ended too, and reports no end for the program; with
+        a non-zero `exit_code` it saw the program killed first and ended as that number. `report` is the text a child writes
         to the report it was given.
         `output` is the text it writes to its standard output when that is a file it was given
         (`output_to`); `writes` maps names to the text of files it makes as it starts."""
-        assert not cannot_exec or (exit_code == 0 and not (hangs or times_out or survives_stop)), (
-            "cannot_exec says nothing else: the program never runs, so no exit code and no hang"
-        )
+        assert not cannot_exec or (
+            exit_code == 0 and not (hangs or times_out or oom_kills or survives_stop)
+        ), "cannot_exec says nothing else: the program never runs, so no exit code and no hang"
         self.programs[command] = {
-            "hangs": hangs or times_out or survives_stop,
+            "hangs": hangs or times_out or oom_kills or survives_stop,
             "times_out": times_out,
+            "oom_kills": oom_kills,
             "survives_stop": survives_stop,
             "exit_code": exit_code,
             "creates": tuple(creates),
@@ -581,6 +596,11 @@ class SimulatedWorld:
         if child.returncode is None and child.behaviour["times_out"]:
             child.returncode = -signal.SIGTERM
             self.units[child.unit] = dict(_TIMED_OUT)
+        if child.returncode is None and child.behaviour["oom_kills"]:
+            # The box is ended with the scope, or (with a non-zero `exit_code`) saw the kill first
+            # and ended as the kill's number.
+            child.returncode = child.behaviour["exit_code"] or -signal.SIGTERM
+            self.units[child.unit] = dict(_OOM_KILLED)
         return self._status(child)
 
     def _wait_for_exit(self, child, seconds):
@@ -607,6 +627,17 @@ class SimulatedWorld:
         self._enter("boundary.forget", unit)
         if self.units.get(unit, _GONE)["ActiveState"] == "failed":
             self.units.pop(unit, None)
+
+    def _try_memory_cap(self, memory_max, swap_max):
+        """A machine that holds the cap shows the numbers it was asked for; one whose user scopes
+        cannot be capped shows "max" ("ignored": the files are there and say nothing caps) or
+        raises OSError ("unreadable": a scope that could not be made or whose files are missing)."""
+        self._enter("boundary.try_memory_cap", memory_max, swap_max)
+        if self.memory_cap == "unreadable":
+            raise OSError("the trial scope could not read its limits")
+        if self.memory_cap == "ignored":
+            return "max", "max"
+        return str(memory_max), str(swap_max)
 
     def _resolve(self, path):
         self._enter("boundary.resolve", path)
