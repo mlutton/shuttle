@@ -1,5 +1,5 @@
 #!/bin/sh
-# Refuses a push unless the check script passes on each commit being pushed.
+# Refuses a push unless the check script passes on the tip of each ref being pushed.
 # It runs checks/all.sh and nothing else, on a copy of that commit's files in a
 # temporary folder, so uncommitted changes in the working folder neither pass nor
 # fail a push; the one exception is checks/interpreter.sh, read from the working folder.

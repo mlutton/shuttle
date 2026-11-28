@@ -18,6 +18,11 @@ DOCUMENTS = [
     ".github/pull_request_template.md",
     ".claude/agents/shuttle-builder.md",
     ".claude/agents/shuttle-reviewer.md",
+    *sorted(
+        f"docs/decisions/{name}"
+        for name in os.listdir(os.path.join(ROOT, "docs", "decisions"))
+        if name.endswith(".md")
+    ),
 ]
 
 
