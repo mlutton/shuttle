@@ -47,7 +47,7 @@ class TheInstruction(unittest.TestCase):
         world = scenes.scene(scenes.document(kind="judge", statement_location=LOCATION))
         scenes.run_in(world)
         got = given(world)
-        inner = run_area.statement_path("/tmp/" + run_area.AREA_PREFIX + "000001")
+        inner = run_area.statement_path("/tmp/" + run_area.AREA_PREFIX + f"{1:032x}")
         self.assertTrue(got.startswith("Do the task.\n\nShuttle notice"))
         self.assertIn(f"Write your statement as one JSON file at this exact path: {inner}", got)
         self.assertNotIn(LOCATION, got)
@@ -77,7 +77,7 @@ class TheInstruction(unittest.TestCase):
         ((argv, _),) = world.started[-1:]
         self.assertFalse(any("Do the thing" in part or "Shuttle notice" in part for part in argv))
         ((arguments, _),) = world.calls("processes.start")[-1:]
-        area = world.calls("files.make_temporary_folder")
+        area = world.calls("files.make_private_folder")
         self.assertEqual(len(area), 1)
         self.assertTrue(arguments[2].endswith("/" + run_area.INSTRUCTION_NAME))
         self.assertTrue(arguments[2].startswith("/tmp/" + run_area.AREA_PREFIX))
@@ -115,7 +115,7 @@ class ARunWithNoStatementExpected(unittest.TestCase):
     def test_a_command_run_still_has_its_run_area_with_the_instruction_and_makes_no_statement(self):
         world = scenes.scene()
         scenes.run_in(world)
-        self.assertEqual(len(world.calls("files.make_temporary_folder")), 1)
+        self.assertEqual(len(world.calls("files.make_private_folder")), 1)
         ((arguments, _),) = world.calls("processes.start")[-1:]
         self.assertTrue(arguments[2].endswith("/" + run_area.INSTRUCTION_NAME))
         self.assertNotIn("exact path", given(world))

@@ -26,7 +26,7 @@ flat = importlib.import_module("rehearsal.receipts").flat
 
 SAVED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_output")
 PROGRAM = "co" + "dex"
-AREA = "/tmp/shuttle-run-area-000001"  # the first run area the simulated world makes
+AREA = "/tmp/shuttle-run-area-" + f"{1:032x}"  # the first run's area: named for its run part
 LOGIN = "/h/.codex/auth.json"
 LOCATION = "/out/statement.json"
 INSTRUCTION = "Do the task."

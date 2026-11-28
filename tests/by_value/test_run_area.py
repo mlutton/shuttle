@@ -195,7 +195,13 @@ class ThePlan(unittest.TestCase):
 
 
 def a_state(world):
-    return {"world": world.operations, "problems": {}, "stand_ins": {}, "facts": {}}
+    return {
+        "world": world.operations,
+        "problems": {},
+        "stand_ins": {},
+        "facts": {},
+        "run_part": f"{7:032x}",
+    }
 
 
 class TheSteps(unittest.TestCase):
@@ -229,7 +235,8 @@ class TheSteps(unittest.TestCase):
         self.assertNotIn(f"{area}/tool/history/old", self.world.files)
         self.assertEqual(self.state["setup_variables"], {"HOME_OF_TOOL": f"{area}/tool"})
         outside = {n: d for n, d in self.world.files.items() if not n.startswith(area + "/")}
-        self.assertEqual(outside, before)  # nothing outside the area was made, changed or removed
+        # nothing outside the area was made, changed or removed, but the lock file beside it
+        self.assertEqual(outside, {**before, run_area.lock_path(area): bytearray()})
         self.assertEqual(self.world.calls("files.read"), [])  # nothing was read, the login least
 
     def test_the_run_area_is_new_and_the_tear_down_removes_it_whole_and_leaves_the_original(self):
@@ -238,6 +245,8 @@ class TheSteps(unittest.TestCase):
         self.assertTrue(self.world.operations.files.usable_folder(area))
         self.assertEqual(tear_down.remove(self.state), {"failure": ""})
         self.assertFalse(self.world.operations.files.exists(area))
+        self.assertFalse(self.world.operations.files.exists(run_area.lock_path(area)))
+        self.assertEqual(self.world.locks_held, set())
         self.assertNotIn("run_area", self.state)
         self.assertEqual(self.world.text_of("/src/login"), "LOGIN-STAND-IN")
 
@@ -245,7 +254,7 @@ class TheSteps(unittest.TestCase):
         got = set_up_run_area.set_up(self.state, [copy("../x")])
         self.assertEqual(got, {"ok": False})
         self.assertIn("not a name inside the run area", self.state["problems"]["setup"])
-        self.assertEqual(self.world.calls("files.make_temporary_folder"), [])
+        self.assertEqual(self.world.calls("files.make_private_folder"), [])
         self.assertNotIn("run_area", self.state)
 
     def test_a_name_below_the_kept_instruction_name_ends_a_run_as_a_refused_setup_with_no_area(
@@ -255,7 +264,7 @@ class TheSteps(unittest.TestCase):
         got = set_up_run_area.set_up(self.state, [{"action": "write", "name": name, "text": "t"}])
         self.assertEqual(got, {"ok": False})
         self.assertIn("kept for the instruction", self.state["problems"]["setup"])
-        self.assertEqual(self.world.calls("files.make_temporary_folder"), [])
+        self.assertEqual(self.world.calls("files.make_private_folder"), [])
 
     def test_an_action_that_fails_fails_the_step_naming_its_number_and_the_error_only(self):
         self.world.will_raise("files.copy_path", PermissionError("secret detail"))
@@ -294,7 +303,7 @@ class TheAreaThroughARun(unittest.TestCase):
         world = scenes.scene()
         code, _, err = scenes.run_in(world)
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(len(world.calls("files.make_temporary_folder")), 1)
+        self.assertEqual(len(world.calls("files.make_private_folder")), 1)
         self.assertEqual(self.areas(world), [])
         receipt = self.receipt(world)
         self.assertEqual(receipt["ending"]["ending"], "ended_by_itself")
@@ -317,7 +326,7 @@ class TheAreaThroughARun(unittest.TestCase):
 
     def test_an_area_is_removed_when_the_set_up_failed_part_way(self):
         world = scenes.scene()
-        world.will_raise("files.make_temporary_folder", OSError("injected"))
+        world.will_raise("files.make_private_folder", OSError("injected"))
         scenes.run_in(world)
         ending = self.receipt(world)["ending"]
         self.assertEqual((ending["reason"], ending["failed_step"]), ("setup_failed", "setup"))
@@ -325,7 +334,7 @@ class TheAreaThroughARun(unittest.TestCase):
     def test_a_run_refused_before_the_set_up_makes_no_area(self):
         world = scenes.scene(scenes.document(command="absent"))
         scenes.run_in(world)
-        self.assertEqual(world.calls("files.make_temporary_folder"), [])
+        self.assertEqual(world.calls("files.make_private_folder"), [])
 
     def test_a_tear_down_that_fails_is_in_the_receipt_and_changes_no_ending(self):
         world = scenes.scene()
@@ -340,9 +349,104 @@ class TheAreaThroughARun(unittest.TestCase):
 
     def test_a_signal_before_the_launch_still_removes_the_area(self):
         world = scenes.scene()
-        world.on_call("files.make_temporary_folder", lambda: world.deliver("SIGINT"))
+        world.on_call("files.make_private_folder", lambda: world.deliver("SIGINT"))
         scenes.run_in(world)
         self.assertEqual(self.areas(world), [])
+
+
+class TheAreasLockThroughARun(unittest.TestCase):
+    """The lock beside the area says the run's Shuttle is alive: made and held before the area is
+    there, held to the end, and let go after the area is gone."""
+
+    @staticmethod
+    def names(world):
+        part = scenes.run_part(world)
+        area = "/tmp/" + run_area.area_name(part)
+        return area, run_area.lock_path(area)
+
+    def test_the_area_is_named_for_the_runs_part_and_has_a_lock_file_beside_it_while_it_lives(self):
+        world = scenes.scene()
+        seen = []
+        world.on_call(
+            "files.remove_tree",
+            lambda: seen.append(
+                (set(world.locks_held), sorted(world.folders), sorted(world.files))
+            ),
+        )
+        code, _, err = scenes.run_in(world)
+        self.assertEqual((code, err), (0, ""))
+        area, lock = self.names(world)
+        ((held, folders, files),) = seen
+        self.assertEqual(held, {lock})
+        self.assertIn(area, folders)
+        self.assertIn(lock, files)
+
+    def test_the_lock_is_made_and_held_before_the_area_is_there(self):
+        world = scenes.scene()
+        seen = []
+        world.on_call(
+            "files.make_private_folder", lambda: seen.append((set(world.locks_held), world.folders))
+        )
+        scenes.run_in(world)
+        area, lock = self.names(world)
+        ((held, folders),) = seen
+        self.assertEqual(held, {lock})
+        self.assertNotIn(area, folders)
+
+    def test_the_lock_is_let_go_and_removed_after_the_area_is_removed(self):
+        world = scenes.scene()
+        scenes.run_in(world)
+        area, lock = self.names(world)
+        self.assertEqual(world.locks_held, set())
+        self.assertNotIn(lock, world.files)
+        self.assertNotIn(area, world.folders)
+        removing, letting_go = (
+            [i for i, (op, _, _) in enumerate(world.log) if op == name]
+            for name in ("files.remove_tree", "files.release_lock")
+        )
+        self.assertLess(removing[0], letting_go[0])
+
+    def test_an_area_that_could_not_be_made_leaves_no_lock_and_ends_as_a_failed_set_up(self):
+        world = scenes.scene()
+        world.will_raise("files.make_private_folder", OSError("injected"))
+        scenes.run_in(world)
+        receipt = flat(scenes.outcome(world)["receipt"])
+        self.assertEqual(
+            (receipt["ending"]["reason"], receipt["ending"]["failed_step"]),
+            ("setup_failed", "setup"),
+        )
+        self.assertEqual(world.locks_held, set())
+        self.assertEqual([n for n in world.files if n.endswith(run_area.LOCK_SUFFIX)], [])
+
+    def test_a_lock_that_could_not_be_made_fails_the_set_up_and_makes_no_area(self):
+        world = scenes.scene()
+        world.will_raise("files.create_lock", OSError("injected"))
+        scenes.run_in(world)
+        receipt = flat(scenes.outcome(world)["receipt"])
+        self.assertEqual(
+            (receipt["ending"]["reason"], receipt["ending"]["failed_step"]),
+            ("setup_failed", "setup"),
+        )
+        self.assertEqual(world.calls("files.make_private_folder"), [])
+
+    def test_an_area_that_could_not_be_removed_keeps_its_lock_held_to_the_end_of_the_process(self):
+        world = scenes.scene()
+        world.will_raise("files.remove_tree", OSError("injected"))
+        scenes.run_in(world)
+        area, lock = self.names(world)
+        self.assertEqual(world.locks_held, {lock})
+        self.assertIn(lock, world.files)
+        self.assertIn(area, world.folders)
+        self.assertEqual(world.calls("files.release_lock"), [])
+
+    def test_a_lock_that_could_not_be_removed_is_no_failure_and_changes_no_ending(self):
+        world = scenes.scene()
+        world.will_raise("files.release_lock", OSError("injected"))
+        code, _, err = scenes.run_in(world)
+        self.assertEqual((code, err), (0, ""))
+        receipt = flat(scenes.outcome(world)["receipt"])
+        self.assertEqual(receipt["ending"]["ending"], "ended_by_itself")
+        self.assertEqual(receipt["execution"]["teardown_failure"], "none")
 
 
 if __name__ == "__main__":

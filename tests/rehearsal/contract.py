@@ -363,17 +363,144 @@ class ContractCases:
 
     # ------------------------------------------------------------ the run area's operations
 
-    def test_a_temporary_folder_is_new_empty_absolute_usable_and_never_the_same_twice(self):
-        first = self.world.files.make_temporary_folder("contract-area-")
-        second = self.world.files.make_temporary_folder("contract-area-")
-        self.addCleanup(self.world.files.remove_tree, first)
-        self.addCleanup(self.world.files.remove_tree, second)
-        self.assertNotEqual(first, second)
-        for path in (first, second):
-            self.assertTrue(path.startswith("/"))
-            self.assertTrue(path.rpartition("/")[2].startswith("contract-area-"))
-            self.assertTrue(self.world.files.usable_folder(path))
-            self.assertEqual(self.harness.everything_below(path), [])
+    def test_the_temporary_folder_is_absolute_usable_and_the_same_each_time(self):
+        first = self.world.files.temporary_folder()
+        self.assertTrue(first.startswith("/"))
+        self.assertTrue(self.world.files.usable_folder(first))
+        self.assertEqual(self.world.files.temporary_folder(), first)
+
+    def test_a_private_folder_is_new_and_empty_and_a_taken_name_or_a_missing_folder_above_raises(
+        self,
+    ):
+        folder = self.harness.folder()
+        made = f"{folder}/area"
+        self.world.files.make_private_folder(made)
+        self.assertTrue(self.world.files.usable_folder(made))
+        self.assertEqual(self.harness.everything_below(made), [])
+        self.assertRaisesExactly(FileExistsError, self.world.files.make_private_folder, made)
+        self.world.files.write_new(f"{folder}/a-file", "x")
+        self.assertRaisesExactly(
+            FileExistsError, self.world.files.make_private_folder, f"{folder}/a-file"
+        )
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.make_private_folder, f"{folder}/none/area"
+        )
+        self.assertEqual(self.harness.everything_below(folder), ["a-file", "area/"])
+
+    # ------------------------------------------------------------ locks and looking
+
+    def test_a_lock_is_a_new_empty_file_that_is_held_and_a_taken_name_raises_and_changes_nothing(
+        self,
+    ):
+        folder = self.harness.folder()
+        lock = f"{folder}/area.lock"
+        self.world.files.create_lock(lock)
+        self.assertEqual(self.world.files.read(lock), b"")
+        self.assertEqual(self.world.files.look_at(lock), ("file", True))
+        self.assertIs(self.world.files.try_lock(lock), False)  # held, by the call that made it
+        self.assertRaisesExactly(FileExistsError, self.world.files.create_lock, lock)
+        self.assertIs(self.world.files.try_lock(lock), False)  # still held by the first
+        self.harness.make_a_name_that_leads_nowhere(f"{folder}/dangling.lock")
+        self.assertRaisesExactly(
+            FileExistsError, self.world.files.create_lock, f"{folder}/dangling.lock"
+        )
+        self.assertRaisesExactly(
+            FileNotFoundError, self.world.files.create_lock, f"{folder}/x/y.lock"
+        )
+        self.assertEqual(self.world.files.list_names(folder, ""), ["area.lock", "dangling.lock"])
+        self.world.files.release_lock(lock, True)
+
+    def test_a_lock_that_is_free_is_taken_once_and_free_again_when_let_go(self):
+        folder = self.harness.folder()
+        lock = f"{folder}/area.lock"
+        self.world.files.write_new(lock, "")
+        self.assertIs(self.world.files.try_lock(lock), True)
+        self.assertIs(self.world.files.try_lock(lock), False)
+        self.world.files.release_lock(lock, False)
+        self.assertTrue(self.world.files.exists(lock))  # let go, not removed
+        self.assertIs(self.world.files.try_lock(lock), True)
+        self.world.files.release_lock(lock, False)
+
+    def test_a_lock_another_process_holds_is_not_taken_and_the_file_is_left_as_it_was(self):
+        folder = self.harness.folder()
+        lock = f"{folder}/area.lock"
+        self.world.files.write_new(lock, "")
+        self.harness.hold_the_lock_elsewhere(lock)
+        self.assertIs(self.world.files.try_lock(lock), False)
+        self.assertEqual(self.world.files.read(lock), b"")
+
+    def test_taking_a_lock_on_what_is_not_a_regular_file_raises_and_changes_nothing(self):
+        folder = self.harness.folder()
+        self.assertRaisesExactly(FileNotFoundError, self.world.files.try_lock, f"{folder}/none")
+        self.assertRaisesExactly(IsADirectoryError, self.world.files.try_lock, folder)
+        self.world.files.write_new(f"{folder}/file", "x")
+        link = self.harness.make_a_link(f"{folder}/link", f"{folder}/file")
+        self.assertRaisesExactly(NotARegularFile, self.world.files.try_lock, link)
+        pipe = self.harness.make_a_pipe(f"{folder}/pipe")
+        self.assertRaisesExactly(NotARegularFile, self.world.files.try_lock, pipe)
+        self.harness.make_a_name_that_leads_nowhere(f"{folder}/dangling")
+        self.assertRaisesExactly(NotARegularFile, self.world.files.try_lock, f"{folder}/dangling")
+        self.assertEqual(
+            self.world.files.list_names(folder, ""), ["dangling", "file", "link", "pipe"]
+        )
+        self.assertEqual(self.world.files.read(f"{folder}/file"), b"x")
+
+    def test_letting_go_with_remove_removes_the_file_and_without_it_leaves_it(self):
+        folder = self.harness.folder()
+        lock = f"{folder}/area.lock"
+        self.world.files.create_lock(lock)
+        self.world.files.release_lock(lock, True)
+        self.assertFalse(self.world.files.exists(lock))
+        self.assertRaisesExactly(FileNotFoundError, self.world.files.release_lock, lock, True)
+        self.world.files.release_lock(lock, False)  # nothing held, nothing asked: no error
+
+    def test_a_name_looked_at_is_missing_a_file_a_folder_a_link_or_other_and_owned_or_not(self):
+        folder = self.harness.folder()
+        files = self.world.files
+        self.assertEqual(files.look_at(f"{folder}/none"), ("missing", False))
+        files.write_new(f"{folder}/file", "x")
+        self.assertEqual(files.look_at(f"{folder}/file"), ("file", True))
+        self.assertEqual(files.look_at(folder), ("folder", True))
+        to_file = self.harness.make_a_link(f"{folder}/to-file", f"{folder}/file")
+        to_folder = self.harness.make_a_link(f"{folder}/to-folder", folder)
+        self.harness.make_a_name_that_leads_nowhere(f"{folder}/dangling")
+        for name in (to_file, to_folder, f"{folder}/dangling"):
+            self.assertEqual(files.look_at(name), ("link", True))
+        self.assertEqual(files.look_at(self.harness.make_a_pipe(f"{folder}/pipe")), ("other", True))
+        self.assertEqual(files.read(f"{folder}/file"), b"x")
+
+    def test_a_name_another_user_owns_is_not_owned(self):
+        other = self.harness.a_name_owned_by_another_user()
+        if other is None:
+            self.skipTest("this user owns every name that can be made here")
+        self.assertEqual(self.world.files.look_at(other), ("folder", False))
+
+    def test_the_names_in_a_folder_that_start_with_the_prefix_come_back_sorted_of_every_kind(self):
+        folder = self.harness.folder()
+        files = self.world.files
+        files.write_new(f"{folder}/pre-b", "")
+        files.make_folders(f"{folder}/pre-a")
+        files.write_new(f"{folder}/other", "")
+        files.write_new(f"{folder}/pre-a/pre-inside", "")
+        self.harness.make_a_name_that_leads_nowhere(f"{folder}/pre-c")
+        self.assertEqual(files.list_names(folder, "pre-"), ["pre-a", "pre-b", "pre-c"])
+        self.assertEqual(files.list_names(folder, "none"), [])
+        self.assertEqual(files.list_names(folder, ""), ["other", "pre-a", "pre-b", "pre-c"])
+
+    def test_every_name_the_filesystem_holds_is_listed_whole(self):
+        folder = self.harness.folder()
+        for row in HOLDABLE_NAMES:
+            self.world.files.write_new(f"{folder}/pre-{row['name']}", "")
+        listed = self.world.files.list_names(folder, "pre-")
+        self.assertEqual(listed, sorted(f"pre-{row['name']}" for row in HOLDABLE_NAMES))
+
+    def test_listing_a_folder_that_is_not_there_or_a_file_raises(self):
+        folder = self.harness.folder()
+        self.assertRaisesExactly(FileNotFoundError, self.world.files.list_names, f"{folder}/n", "")
+        self.world.files.write_new(f"{folder}/file", "")
+        self.assertRaisesExactly(
+            NotADirectoryError, self.world.files.list_names, f"{folder}/file", ""
+        )
 
     def test_making_folders_makes_each_missing_one_and_is_no_change_where_they_are(self):
         folder = self.harness.folder()
@@ -874,6 +1001,15 @@ class ContractCases:
 
     def test_a_memory_cap_trial_answers_the_same_each_time(self):
         self.assertEqual(self.memory_cap_trial(), self.memory_cap_trial())
+
+    def test_a_pattern_that_fits_no_unit_gives_none_or_os_error_where_the_manager_cannot_answer(
+        self,
+    ):
+        try:
+            found = self.world.boundary.list_units("shuttle-contract-nothing-*")
+        except OSError:
+            return
+        self.assertEqual(dict(found), {})
 
     # ------------------------------------------------------------------ clock
 

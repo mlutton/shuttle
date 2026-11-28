@@ -420,9 +420,13 @@ class FileOperations(NamedTuple):
     ]  # a folder a new name can be made in; looks, writes nothing
     # The run area (shuttle.core.run_area). None of these reads a file's content except
     # `copy_path`, which copies the bytes without looking at them, and none follows a link.
-    make_temporary_folder: Callable[
-        [str], str
-    ]  # (name prefix): a new, empty folder only its owner can enter, in the system's temporary place; the path, absolute. OSError
+    # The temporary folder run areas are made in: `TMPDIR` when it is set, else the system's;
+    # absolute, links resolved. Nothing is made or looked at
+    temporary_folder: Callable[[], str]
+    make_private_folder: Callable[
+        [str], None
+    ]  # a new, empty folder only its owner can enter; FileExistsError if the name is taken,
+    # FileNotFoundError if the folder above is not there; OSError
     make_folders: Callable[
         [str], None
     ]  # the folder and any missing folder above it; nothing if it is there; OSError (FileExistsError if the name is a file)
@@ -443,6 +447,40 @@ class FileOperations(NamedTuple):
         [str], None
     ]  # a folder and everything in it, read-only parts too; a link inside is removed, never
     # followed; FileNotFoundError when nothing is there, NotADirectoryError for a name that is not a folder
+    # The lock that says a run's Shuttle is alive (shuttle.core.run_area.lock_path). A lock is
+    # held by this process, on the file's own open description, until it is released or the
+    # process ends however it ends; the kernel gives it back with no help from the process.
+    # A held lock is not shared with a child that is started.
+    create_lock: Callable[
+        [str], None
+    ]  # a new regular file, owner-only, made and locked; FileExistsError if the name is taken (a
+    # link too), FileNotFoundError if the folder above is not there. In the moment between the
+    # file being made and locked another may lock it (and remove it, when it is no area's): the
+    # call then waits for that and makes the file again, so it returns holding the lock on the
+    # file that is at the name
+    try_lock: Callable[
+        [str], bool
+    ]  # take the lock on an existing file without waiting: True and now held, False when
+    # another holds it (this process's own hold included). FileNotFoundError when nothing is
+    # there or the name no longer leads to the file opened, NotARegularFile for a link, a pipe,
+    # a device or a socket, IsADirectoryError for a folder. A file that is not opened is not
+    # changed
+    release_lock: Callable[
+        [str, bool], None
+    ]  # (name, remove): let go of a lock held by this process (no error if none is held), and
+    # with `remove` first remove the file, still holding it so no other can take it between;
+    # FileNotFoundError when `remove` and nothing is there
+    # Looking at a folder's contents and at one name; neither opens a file or follows a link.
+    list_names: Callable[
+        [str, str], list[str]
+    ]  # (folder, prefix): the names directly in the folder that start with the prefix, of any
+    # kind, sorted; FileNotFoundError if the folder is not there, NotADirectoryError if it is not
+    # a folder
+    look_at: Callable[
+        [str], tuple[str, bool]
+    ]  # (kind, owned): kind is "missing", "file", "folder", "link" (to anything, a link that
+    # leads nowhere too) or "other" (a pipe, a device, a socket); owned is whether the user the
+    # command runs as owns the name itself, never what a link leads to; False for "missing"
 
 
 class Starter(Protocol):
@@ -491,6 +529,10 @@ class BoundaryOperations(NamedTuple):
         [str], None
     ]  # stop the unit and everything in it; OSError when it cannot be asked
     forget: Callable[[str], None]  # clear a failed unit's record; OSError when it cannot be asked
+    list_units: Callable[
+        [str], Mapping[str, str]
+    ]  # (pattern, with * for any text): each loaded unit, failed and inactive ones too, whose name
+    # fits, to its active state; none when nothing fits; OSError when the manager cannot be asked
     resolve: Callable[[str], str]  # a path made absolute with links resolved, as the box binds it
     try_memory_cap: Callable[
         [int, int], tuple[str, str]

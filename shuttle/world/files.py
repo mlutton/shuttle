@@ -2,6 +2,7 @@
 
 import contextlib
 import errno
+import fcntl
 import hashlib
 import os
 import shutil
@@ -131,8 +132,12 @@ def usable_folder(path: str) -> bool:
     return os.path.isdir(path) and os.access(path, os.W_OK | os.X_OK)
 
 
-def make_temporary_folder(prefix: str) -> str:
-    return os.path.realpath(tempfile.mkdtemp(prefix=prefix, dir=os.environ.get("TMPDIR") or None))
+def temporary_folder() -> str:
+    return os.path.realpath(os.environ.get("TMPDIR") or tempfile.gettempdir())
+
+
+def make_private_folder(path: str) -> None:
+    os.mkdir(path, 0o700)
 
 
 def make_folders(path: str) -> None:
@@ -196,6 +201,102 @@ def remove_tree(path: str) -> None:
     shutil.rmtree(path)
 
 
+def list_names(folder: str, prefix: str) -> list[str]:
+    return sorted(name for name in os.listdir(folder) if name.startswith(prefix))
+
+
+def look_at(path: str) -> tuple[str, bool]:
+    try:
+        seen = os.lstat(path)
+    except FileNotFoundError:
+        return "missing", False
+    mode = seen.st_mode
+    kind = (
+        "file"
+        if stat.S_ISREG(mode)
+        else "folder"
+        if stat.S_ISDIR(mode)
+        else "link"
+        if stat.S_ISLNK(mode)
+        else "other"
+    )
+    return kind, seen.st_uid == os.geteuid()
+
+
+# The descriptor of every lock this process holds, by the name of its file. A descriptor made by
+# `open` is not inherited by a child that is started, so a child never keeps a lock alive.
+_held: dict[str, int] = {}
+_LOCK_TRIES = 5
+
+
+def _is_the_file_at(descriptor: int, path: str) -> bool:
+    """Whether the name still leads to the very file the descriptor holds (a lock taken on a file
+    that was removed meanwhile protects nothing)."""
+    try:
+        named = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    seen = os.fstat(descriptor)
+    return stat.S_ISREG(named.st_mode) and (named.st_dev, named.st_ino) == (
+        seen.st_dev,
+        seen.st_ino,
+    )
+
+
+def create_lock(path: str) -> None:
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    for _ in range(_LOCK_TRIES):
+        descriptor = os.open(path, flags, 0o600)
+        try:
+            # This waits only while a sweep holds the file for a look; the sweep then removes it
+            # (no area is beside it yet), so the name is checked again and the file made again.
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            if _is_the_file_at(descriptor, path):
+                _held[path] = descriptor
+                return
+        except BaseException:
+            os.close(descriptor)
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+            raise
+        os.close(descriptor)
+    raise OSError(errno.EAGAIN, "the lock file was removed each time it was made", path)
+
+
+def try_lock(path: str) -> bool:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as error:
+        if error.errno in (errno.ELOOP, errno.ENXIO):  # a link met, a pipe nobody holds
+            raise NotARegularFile(error.errno, "not a regular file", path) from error
+        raise
+    try:
+        _must_be_regular(os.fstat(descriptor).st_mode, path)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(descriptor)
+            return False
+        if not _is_the_file_at(descriptor, path):
+            raise FileNotFoundError(errno.ENOENT, "the name no longer leads to this file", path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+        raise
+    _held[path] = descriptor
+    return True
+
+
+def release_lock(path: str, remove: bool) -> None:
+    descriptor = _held.pop(path, None)
+    try:
+        if remove:
+            os.unlink(path)  # while the lock is still held
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 FILES = FileOperations(
     read=read,
     read_lines=read_lines,
@@ -207,9 +308,15 @@ FILES = FileOperations(
     hash=hash_of,
     remove=remove,
     usable_folder=usable_folder,
-    make_temporary_folder=make_temporary_folder,
+    temporary_folder=temporary_folder,
+    make_private_folder=make_private_folder,
     make_folders=make_folders,
     copy_path=copy_path,
     make_writable=make_writable,
     remove_tree=remove_tree,
+    create_lock=create_lock,
+    try_lock=try_lock,
+    release_lock=release_lock,
+    list_names=list_names,
+    look_at=look_at,
 )

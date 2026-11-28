@@ -18,6 +18,7 @@ It is held to the real operations by the contract cases in contract.py.
 """
 
 import datetime
+import fnmatch
 import hashlib
 import os
 import signal
@@ -92,7 +93,9 @@ class SimulatedWorld:
         self._reports = 0
         self._handlers = []
         self._ids = 0
-        self._temporary = 0
+        self.locks_held = set()  # lock files this process holds
+        self.locked_elsewhere = set()  # lock files another process holds
+        self.foreign = set()  # names another user owns
         self.read_only = set()  # names the owner may not write
         self.memory_cap = (
             "held"  # what a trial scope's cgroup shows: "held", "ignored" or "unreadable"
@@ -113,11 +116,17 @@ class SimulatedWorld:
                 remove=self._remove,
                 usable_folder=self._usable_folder,
                 is_folder=self._is_folder,
-                make_temporary_folder=self._make_temporary_folder,
+                temporary_folder=self._temporary_folder,
+                make_private_folder=self._make_private_folder,
                 make_folders=self._make_folders,
                 copy_path=self._copy_path,
                 make_writable=self._make_writable,
                 remove_tree=self._remove_tree,
+                create_lock=self._create_lock,
+                try_lock=self._try_lock,
+                release_lock=self._release_lock,
+                list_names=self._list_names,
+                look_at=self._look_at,
             ),
             processes=ProcessOperations(
                 find_program=self._find_program,
@@ -131,6 +140,7 @@ class SimulatedWorld:
                 show=self._show,
                 stop=self._stop,
                 forget=self._forget,
+                list_units=self._list_units,
                 resolve=self._resolve,
                 try_memory_cap=self._try_memory_cap,
             ),
@@ -218,6 +228,19 @@ class SimulatedWorld:
 
     def put_device(self, path):
         self.special.add(path)
+
+    def put_lock_held_elsewhere(self, path):
+        """A lock file another process holds, as a Shuttle that is alive does. The file is made."""
+        self.put_file(path, "")
+        self.locked_elsewhere.add(path)
+
+    def put_foreign(self, path):
+        """The name is owned by another user."""
+        self.foreign.add(path)
+
+    def put_unit(self, name, state):
+        """A scope unit, loaded, in this active state ("active", "inactive", "failed", ...)."""
+        self.units[name] = {"LoadState": "loaded", "ActiveState": state, "Result": "success"}
 
     def text_of(self, path):
         return bytes(self.files[path]).decode("utf-8")
@@ -452,10 +475,65 @@ class SimulatedWorld:
             raise FileNotFoundError(path)
         del self.files[path]
 
-    def _make_temporary_folder(self, prefix):
-        self._enter("files.make_temporary_folder", prefix)
-        self._temporary += 1
-        return self.make_folder(f"/tmp/{prefix}{self._temporary:06d}")
+    def _temporary_folder(self):
+        self._enter("files.temporary_folder")
+        return self.make_folder("/tmp")
+
+    def _make_private_folder(self, path):
+        self._enter("files.make_private_folder", path)
+        if not self._parent_exists(path):
+            raise FileNotFoundError(path)
+        if self._taken(path):
+            raise FileExistsError(path)
+        self.folders.add(path)
+
+    def _create_lock(self, path):
+        self._enter("files.create_lock", path)
+        if not self._parent_exists(path):
+            raise FileNotFoundError(path)
+        if self._taken(path):
+            raise FileExistsError(path)
+        self.files[path] = bytearray()
+        self.locks_held.add(path)
+
+    def _try_lock(self, path):
+        self._enter("files.try_lock", path)
+        self._regular(path, False)
+        if path in self.locks_held or path in self.locked_elsewhere:
+            return False
+        self.locks_held.add(path)
+        return True
+
+    def _release_lock(self, path, remove):
+        self._enter("files.release_lock", path, remove)
+        if remove:
+            self._regular(path, False)
+            del self.files[path]
+        self.locks_held.discard(path)
+
+    def _list_names(self, folder, prefix):
+        self._enter("files.list_names", folder, prefix)
+        if folder not in self.folders:
+            if self._taken(folder):
+                raise NotADirectoryError(folder)
+            raise FileNotFoundError(folder)
+        held = [*self.files, *self.folders, *self.links, *self.dangling, *self.special]
+        below = folder + "/"
+        return sorted(
+            {
+                name[len(below) :]
+                for name in held
+                if name.startswith(below + prefix) and "/" not in name[len(below) :]
+            }
+        )
+
+    def _look_at(self, path):
+        self._enter("files.look_at", path)
+        try:
+            kind, _ = self._look(path, False)
+        except FileNotFoundError:
+            return "missing", False
+        return {"special": "other"}.get(kind, kind), path not in self.foreign
 
     def _make_folders(self, path):
         self._enter("files.make_folders", path)
@@ -622,6 +700,14 @@ class SimulatedWorld:
                     child.returncode = -signal.SIGTERM
                 if self.units.get(unit, _GONE)["ActiveState"] == "active":
                     self.units.pop(unit, None)
+
+    def _list_units(self, pattern):
+        self._enter("boundary.list_units", pattern)
+        return {
+            unit: held["ActiveState"]
+            for unit, held in sorted(self.units.items())
+            if fnmatch.fnmatchcase(unit, pattern)
+        }
 
     def _forget(self, unit):
         self._enter("boundary.forget", unit)
